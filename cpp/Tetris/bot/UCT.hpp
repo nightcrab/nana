@@ -136,11 +136,21 @@ public:
 // one of these shared by all threads
 class UCT {
    public:
+
+    struct padded_map {
+        using T = std::unordered_map<int, UCTNode>;
+        char padding[64];
+        T obj_;
+
+        T* operator->() { return &obj_; }
+        const T* operator->() const { return &obj_; }
+    };
+
     UCT() = default;
     UCT(int workers) {
         this->workers = workers;
-        this->nodes_left = std::vector<std::unordered_map<int, UCTNode>>(workers);
-        this->nodes_right = std::vector<std::unordered_map<int, UCTNode>>(workers);
+        this->nodes_left = std::vector<padded_map>(workers);
+        this->nodes_right = std::vector<padded_map>(workers);
         this->mutexes = std::vector<std::shared_mutex>(workers);
         this->rng = std::vector<RNG>(workers);
         this->stats = std::vector<WorkerStatistics>(workers);
@@ -164,8 +174,8 @@ class UCT {
     int workers = 0;
     int size = 0;
 
-    std::vector<std::unordered_map<int, UCTNode>> nodes_left;
-    std::vector<std::unordered_map<int, UCTNode>> nodes_right;
+    std::vector<padded_map> nodes_left;
+    std::vector<padded_map> nodes_right;
     std::vector<std::shared_mutex> mutexes;
 
     std::vector<RNG> rng;

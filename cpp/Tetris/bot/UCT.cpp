@@ -211,8 +211,8 @@ bool UCT::nodeExists(uint32_t nodeID) {
 	// read lock
 	std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
 
-	bool exists = nodes_left[nodeID % workers].find(nodeID) != nodes_left[nodeID % workers].end();
-	exists = exists || (nodes_right[nodeID % workers].find(nodeID) != nodes_right[nodeID % workers].end());
+	bool exists = nodes_left[nodeID % workers]->find(nodeID) != nodes_left[nodeID % workers]->end();
+	exists = exists || (nodes_right[nodeID % workers]->find(nodeID) != nodes_right[nodeID % workers]->end());
 	return exists;
 }
 
@@ -221,7 +221,7 @@ UCTNode& UCT::getNode(uint32_t nodeID, int threadIdx) {
 	// if we're here, the node exists somewhere
 
 	mutexes[nodeID % workers].lock();
-	bool on_left_side = !nodes_right[nodeID % workers].count(nodeID);
+	bool on_left_side = !nodes_right[nodeID % workers]->count(nodeID);
 	mutexes[nodeID % workers].unlock();
 
 	if (on_left_side) {
@@ -231,29 +231,29 @@ UCTNode& UCT::getNode(uint32_t nodeID, int threadIdx) {
 			// not the owner, so we're not allowed to write
 
 			mutexes[nodeID % workers].lock();
-			UCTNode& node = nodes_left[nodeID % workers].at(nodeID);
+			UCTNode& node = nodes_left[nodeID % workers]->at(nodeID);
 			mutexes[nodeID % workers].unlock();
 			return node;
 		}
 		else {
 			// copy from left side to right side
-			insertNode(nodes_left[nodeID % workers].at(nodeID));
+			insertNode(nodes_left[nodeID % workers]->at(nodeID));
 		}
 	}
 
 	std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
-	return nodes_right[nodeID % workers].at(nodeID);
+	return nodes_right[nodeID % workers]->at(nodeID);
 };
 
 // singlethreaded version
 UCTNode& UCT::getNode(uint32_t nodeID) {
 
-	if (nodes_right[nodeID % workers].find(nodeID) == nodes_right[nodeID % workers].end()) {
+	if (nodes_right[nodeID % workers]->find(nodeID) == nodes_right[nodeID % workers]->end()) {
 		// copy from left side to right side
-		insertNode(nodes_left[nodeID % workers].at(nodeID));
+		insertNode(nodes_left[nodeID % workers]->at(nodeID));
 	}
 
-	return nodes_right[nodeID % workers].at(nodeID);
+	return nodes_right[nodeID % workers]->at(nodeID);
 };
 
 
@@ -264,7 +264,7 @@ void UCT::insertNode(const UCTNode &node) {
 	// write lock
 	std::unique_lock<std::shared_mutex> lock(mutexes[node.id % workers]);
 
-	nodes_right[node.id % workers].insert({ node.id, node });
+	nodes_right[node.id % workers]->insert({ node.id, node });
 };
 
 uint32_t UCT::getOwner(uint32_t hash) {
@@ -273,7 +273,7 @@ uint32_t UCT::getOwner(uint32_t hash) {
 
 void UCT::collect() {
 	// clear out left side
-	nodes_left = std::vector<std::unordered_map<int, UCTNode>>(workers);
+	nodes_left = std::vector<padded_map>(workers);
 	// exchange sides
 	std::swap(nodes_left, nodes_right);
 }
@@ -281,10 +281,10 @@ void UCT::collect() {
 int UCT::map_size() {
 	int ret = 0;
 	for (auto& map : nodes_left) {
-		ret += map.size();
+		ret += map->size();
 	}
 	for (auto& map : nodes_right) {
-		ret += map.size();
+		ret += map->size();
 	}
 	return ret;
 }
