@@ -202,6 +202,7 @@ void Search::printStatistics() {
         depth = std::max(stat.deepest_node, depth);
     }
 
+	std::cout << "nodes: " << nodes << std::endl;
     std::cout << "nodes / second: " << nodes / (ms/ 1000000) << std::endl;
     std::cout << "backprops / second: " << backprops / (ms / 1000000) << std::endl;
     std::cout << "tree depth: " << depth << std::endl;
