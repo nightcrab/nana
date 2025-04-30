@@ -159,6 +159,7 @@ int main(int argc, const char** args) {
 
 	// check and print the stats
 	print_strength();
+	Search::printStatistics();
 
 	return 0;
 }

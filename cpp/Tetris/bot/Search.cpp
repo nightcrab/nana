@@ -192,11 +192,11 @@ void Search::printStatistics() {
 
     std::chrono::steady_clock::time_point search_end_time = std::chrono::steady_clock::now();
 
-    float ms = std::chrono::duration_cast<std::chrono::microseconds>(search_end_time - search_start_time).count();
+    double ms = std::chrono::duration_cast<std::chrono::microseconds>(search_end_time - search_start_time).count();
 
-    int nodes = 0;
-    int depth = 0;
-    int backprops = 0;
+    uint64_t nodes = 0;
+    uint64_t depth = 0;
+    uint64_t backprops = 0;
 
     for (WorkerStatistics stat : uct.stats) {
         nodes += stat.nodes;
@@ -310,7 +310,7 @@ void Search::processJob(const int threadIdx, Job job) {
 
             select_job.path.push_back(HashActionPair(hash, action->id));
 
-            uct.stats[threadIdx].deepest_node = std::max(uct.stats[threadIdx].deepest_node, (int)select_job.path.size());
+            uct.stats[threadIdx].deepest_node = std::max(uct.stats[threadIdx].deepest_node, (uint64_t)select_job.path.size());
 
             maybeSteal(threadIdx, ownerIdx, select_job);
         }

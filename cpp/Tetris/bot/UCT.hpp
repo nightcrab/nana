@@ -128,9 +128,9 @@ class Job {
 
 class WorkerStatistics {
 public:
-    int nodes = 0;
-    int deepest_node = 0;
-    int backprop_messages = 0;
+    uint64_t nodes = 0;
+    uint64_t deepest_node = 0;
+    uint64_t backprop_messages = 0;
 };
 
 // one of these shared by all threads
