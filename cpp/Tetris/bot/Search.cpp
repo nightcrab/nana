@@ -9,6 +9,9 @@
 #include <iostream>
 #include <thread>
 
+#include <mutex>
+#include <condition_variable>
+
 // used to be an atomic for stopping the threads
 bool Search::searching = false;
 

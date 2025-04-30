@@ -39,6 +39,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
 
 # Add source to this project's executable.
 add_executable (cfr_tetris "cfr_tetris.cpp" "cfr_tetris.h" ${TETRIS_SOURCES})
+add_executable(nana_bench "bench.cpp" ${TETRIS_SOURCES})
 add_executable (tbp_tetris "tbp.cpp" ${TETRIS_SOURCES})
 
 target_compile_definitions(tbp_tetris PRIVATE TBP TBP2)
@@ -50,11 +51,13 @@ if(UNIX AND NOT APPLE)
 endif()
 
 target_link_libraries(cfr_tetris ShakTris)
+target_link_libraries(nana_bench ShakTris)
 target_link_libraries(tbp_tetris ShakTris)
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET cfr_tetris PROPERTY CXX_STANDARD 20)
-  set_property(TARGET tbp_tetris PROPERTY CXX_STANDARD 20)
+if (CMAKE_VERSION VERSION_GREATER 3.22)
+  set_property(TARGET cfr_tetris PROPERTY CXX_STANDARD 23)
+  set_property(TARGET nana_bench PROPERTY CXX_STANDARD 23)
+  set_property(TARGET tbp_tetris PROPERTY CXX_STANDARD 23)
 endif()
 
 # TODO: Add tests and install targets if needed.

@@ -5,7 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
-
+#include <mutex>
+#include <condition_variable>
 using namespace Distribution;
 
 static float ln(float x) {
