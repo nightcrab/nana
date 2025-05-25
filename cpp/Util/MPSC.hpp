@@ -1,7 +1,19 @@
 ﻿#pragma once
 
+#include <memory>
+#include <vector>
+
 #include "SPSC.hpp"
-#include <thread>
+
+template <typename T>
+struct BufferHolder {
+    char buffer1[64];
+    T val;
+    char buffer2[64];
+    BufferHolder(auto... param) : val(std::forward<decltype(param)>(param)...) {}
+
+    T* operator->() { return &val; }
+};
 
 template<class T>
 class mpsc {
@@ -9,7 +21,7 @@ public:
     explicit mpsc(size_t num_threads) {
         size = num_threads;
         for (int i = 0; i < num_threads; i++) {
-            queues.push_back(std::make_unique<rigtorp::SPSCQueue<T>>(1024));
+            queues.push_back(std::make_unique<BufferHolder<rigtorp::SPSCQueue<T>>>(1024));
         }
     }
     ~mpsc() = default;
@@ -19,55 +31,36 @@ public:
 
     // producer function
     inline void enqueue(const T& data, size_t id) noexcept {
-        queues[id]->push(data);
+        (*queues[id])->push(data);
     }
-
     // consumer function
-    inline T* single_peek(size_t id) noexcept {
-        T* front = queues[id]->front();
-        return front;
-    }
-
-    inline T* peek() noexcept {
-        T* front = nullptr;
-
-        for (int i = 0; i < size; i++) {
-            front = queues[i]->front();
-            if (front) {
-                break;
-            }
-        }
-
-        return front;
-    }
-
     inline bool isempty() noexcept {
-        return peek() == nullptr;
+        if(flushed_queue.empty())
+            flush();
+        return flushed_queue.empty();
     }
 
     // consumer function
-    inline void pop(size_t id) noexcept {
-        T* front = queues[id]->front();
-        if (front != nullptr) {
-            queues[id]->pop();
+    inline void flush() {
+        for (auto& queue : queues) {
+            while (T* item = (*queue)->front()) {
+                flushed_queue.emplace_back(*item);
+                (*queue)->pop();
+            }
         }
     }
 
     // consumer function
     inline T dequeue() noexcept {
-        T* front = nullptr;
-        size_t i = 0;
+        while(flushed_queue.size() == 0uz)
+            flush();
 
-        while(!(front = single_peek(i))) {
-			++i;
-            i %= size;
-		}
-
-        T ret = std::move(*front);
-        pop(i);
+        T ret = std::move(flushed_queue.back());
+        flushed_queue.pop_back();
         return std::move(ret);
     }
+    std::vector<T> flushed_queue;
     size_t size;
 private:
-    std::vector<std::unique_ptr<rigtorp::SPSCQueue<T>>> queues;
+    std::vector<std::unique_ptr<BufferHolder<rigtorp::SPSCQueue<T>>>> queues;
 };

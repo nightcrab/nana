@@ -287,7 +287,7 @@ private:
                 Search::endSearch();
             }
             else {
-                Search::startSearch(game, 3);
+                Search::startSearch(game, 1);
             }
             
         }

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 #include <shared_mutex>
+#include <variant>
 
 #include "EmulationGame.hpp"
 #include "Util/MPSC.hpp"
@@ -53,7 +54,7 @@ class Action {
 // state
 class UCTNode {
    public:
-    UCTNode() {};
+    UCTNode() = default;
     UCTNode(const EmulationGame &state);
     UCTNode(const std::vector<Action>& p_actions, int id, int N) {
         this->actions = p_actions;
@@ -115,16 +116,37 @@ class Job {
     Job(UCTNode& node, JobType type)
         : R(0.0), type(type), node(node){};
 
-    float R;
-    int depth;
     EmulationGame state;
-    JobType type;
     UCTNode node;
 
     // for going backwards
 
     std::vector<HashActionPair> path;
+    float R;
+    int depth;
+    JobType type;
 };
+
+struct StopJob {};
+
+struct SelectJob { 
+    EmulationGame state;
+    std::vector<HashActionPair> path;
+    float R; 
+};
+
+struct BackPropJob {
+    EmulationGame state;
+    std::vector<HashActionPair> path;
+    float R;
+    int depth;
+};
+
+struct PutJob {
+    UCTNode node;
+};
+
+using JobVariant = std::variant<StopJob, SelectJob, BackPropJob, PutJob>;
 
 class WorkerStatistics {
 public:

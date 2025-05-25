@@ -92,7 +92,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	this->id = state.hash();
 
 	this->N = 1;
-};
+}
 
 Action& UCTNode::select_r_max() {
 	Action* best_action = &actions[0];
@@ -244,7 +244,7 @@ UCTNode& UCT::getNode(uint32_t nodeID, int threadIdx) {
 
 	std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
 	return nodes_right[nodeID % workers]->at(nodeID);
-};
+}
 
 // singlethreaded version
 UCTNode& UCT::getNode(uint32_t nodeID) {
@@ -255,7 +255,7 @@ UCTNode& UCT::getNode(uint32_t nodeID) {
 	}
 
 	return nodes_right[nodeID % workers]->at(nodeID);
-};
+}
 
 
 void UCT::insertNode(const UCTNode &node) {
@@ -266,7 +266,7 @@ void UCT::insertNode(const UCTNode &node) {
 	std::unique_lock<std::shared_mutex> lock(mutexes[node.id % workers]);
 
 	nodes_right[node.id % workers]->insert({ node.id, node });
-};
+}
 
 uint32_t UCT::getOwner(uint32_t hash) {
 	return hash % workers;

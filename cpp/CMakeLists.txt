@@ -25,7 +25,7 @@ set(TETRIS_SOURCES
 	"Util/fasthash.cpp"
 
 	"icon.rc"
-)
+ "Tetris/bot/Nana.cpp")
  
 
 if(UNIX AND NOT APPLE)

@@ -119,6 +119,11 @@ public:
     Opponent& operator=(const Opponent& other) noexcept = default;
 
     RNG rng;
+    bool hasI = true;
+    bool hasSpinPiece = true;
+    bool dead = false;
+    TacticState state;
+
 
     // Abstraction of the board.
     std::vector<StackLayer> stack = { { CLEAN, 4 } };
@@ -126,10 +131,6 @@ public:
     // Represents the incoming garbage meter.
     std::vector<StackLayer> garbage;
 
-    bool hasI = true;
-    bool hasSpinPiece = true;
-
-    bool dead = false;
     double deaths = 0;
 
     float pieces = 0;
@@ -139,7 +140,6 @@ public:
     double nextSpinPiece = rng.getRand(7);
 
     double combo = 0;
-    TacticState state;
 
     // these are in here because otherwise the linker has a fit
     std::string toString(LayerType layer) {

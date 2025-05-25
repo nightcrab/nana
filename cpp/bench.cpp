@@ -117,8 +117,8 @@ void print_strength() {
 
 int main(int argc, const char** args) {
 	// for debugging in vs22
-	if (false) {
-		const char* argss[] = {"executable", "2","500","0"};
+	if (true) {
+		const char* argss[] = {"executable", "4","5000","0"};
 		args = argss;
 		argc = sizeof(argss) / sizeof(*argss);
 	}

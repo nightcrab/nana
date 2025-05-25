@@ -1,15 +1,12 @@
 #include "Search.hpp"
 
-#include <execution>
-#include <numeric>
 #include <ranges>
 
-#include "Util/Distribution.hpp"
-#include "Eval.hpp"
-#include <iostream>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <iostream>
+#include <mutex>
+#include <stop_token>
+#include <thread>
 
 // used to be an atomic for stopping the threads
 bool Search::searching = false;
@@ -32,7 +29,6 @@ std::condition_variable min_work_cv;
 std::atomic_bool min_work_bool;
 
 std::vector<std::unique_ptr<mpsc<Job>>> Search::queues;
-std::vector<int> core_indices;
 std::vector<std::jthread> worker_threads;
 
 std::chrono::steady_clock::time_point search_start_time;
@@ -75,10 +71,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     }
 
     // Thread indices
-    core_indices = std::vector<int>(core_count);
     worker_threads = std::vector<std::jthread>(core_count);
-
-    std::iota(core_indices.begin(), core_indices.end(), 0);
 
     int rootOwnerIdx = uct.getOwner(state.hash());
 
@@ -90,7 +83,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     }
 
     // Spawn worker threads
-    for (auto& idx : core_indices) {
+    for (const auto& idx : std::views::iota(0, core_count)) {
         worker_threads[idx] = std::jthread(search, thread_stopper.get_token(), idx);
     }
 
@@ -137,9 +130,6 @@ void Search::continueSearch(EmulationGame state) {
         queues.emplace_back(std::make_unique<mpsc<Job>>(core_count + 1));
     }
 
-    core_indices = std::vector<int>(core_count);
-
-    std::iota(core_indices.begin(), core_indices.end(), 0);
 
     int rootOwnerIdx = uct.getOwner(state.hash());
     for (int j = 0; j < core_count; j++) {
@@ -150,7 +140,7 @@ void Search::continueSearch(EmulationGame state) {
         }
 
     }
-    for (auto& idx : core_indices) {
+    for (const auto& idx : std::views::iota(0, core_count)) {
         worker_threads[idx] = std::jthread(search, thread_stopper.get_token(), idx);
     }
 }
@@ -212,8 +202,8 @@ void Search::printStatistics() {
 
 void Search::maybeSteal(int threadIdx, int targetThread, Job job) {
     bool is_empty = true;
-    for (int i = 0; i < queues[threadIdx]->size; i++) {
-        Job* job = queues[threadIdx]->peek();
+    for (int i = 0; i < queues[threadIdx]->flushed_queue.size(); i++) {
+        Job* job = &queues[threadIdx]->flushed_queue[i];
         if (job != nullptr) {
             if ((*job).type != STOP) {
                 is_empty = false;
