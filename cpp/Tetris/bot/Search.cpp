@@ -84,7 +84,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
 
     // Spawn worker threads
     for (const auto& idx : std::views::iota(0, core_count)) {
-        worker_threads[idx] = std::jthread(search, thread_stopper.get_token(), idx);
+        worker_threads[idx] = std::jthread(Search::search, thread_stopper.get_token(), idx);
     }
 
     initialised = true;
@@ -141,7 +141,7 @@ void Search::continueSearch(EmulationGame state) {
 
     }
     for (const auto& idx : std::views::iota(0, core_count)) {
-        worker_threads[idx] = std::jthread(search, thread_stopper.get_token(), idx);
+        worker_threads[idx] = std::jthread(Search::search, thread_stopper.get_token(), idx);
     }
 }
 

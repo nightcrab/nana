@@ -161,8 +161,7 @@ class UCT {
 
     struct padded_map {
         using T = std::unordered_map<int, UCTNode>;
-        char padding[64];
-        T obj_;
+        alignas(std::hardware_destructive_interference_size) T obj_;
 
         T* operator->() { return &obj_; }
         const T* operator->() const { return &obj_; }

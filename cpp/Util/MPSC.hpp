@@ -7,9 +7,7 @@
 
 template <typename T>
 struct BufferHolder {
-    char buffer1[64];
-    T val;
-    char buffer2[64];
+    alignas(std::hardware_destructive_interference_size) T val;
     BufferHolder(auto... param) : val(std::forward<decltype(param)>(param)...) {}
 
     T* operator->() { return &val; }
@@ -21,7 +19,7 @@ public:
     explicit mpsc(size_t num_threads) {
         size = num_threads;
         for (int i = 0; i < num_threads; i++) {
-            queues.push_back(std::make_unique<BufferHolder<rigtorp::SPSCQueue<T>>>(1024));
+            queues.push_back(std::make_unique<BufferHolder<rigtorp::SPSCQueue<T>>>(2048));
         }
     }
     ~mpsc() = default;
@@ -48,6 +46,15 @@ public:
                 (*queue)->pop();
             }
         }
+    }
+
+    inline void clear() {
+        for (auto& queue : queues) {
+            while (T* item = (*queue)->front()) {
+                (*queue)->pop();
+            }
+        }
+        flushed_queue.clear();
     }
 
     // consumer function

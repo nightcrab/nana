@@ -5,6 +5,8 @@
 #include <chrono>
 #include <memory>
 #include <unordered_map>
+#include <stop_token>
+#include <thread>
 #include <vector>
 
 #include "EmulationGame.hpp"
@@ -15,12 +17,13 @@
 
 // replacement of the search namespace
 
-enum SearchType {
+enum class NanaSearchType {
       CC,NANA
 };
-constexpr SearchType search_style = NANA;
+constexpr inline NanaSearchType search_style = NanaSearchType::NANA;
 
 class Nana {
+public:
 
     UCT uct;
     EmulationGame root_state;
@@ -32,7 +35,6 @@ class Nana {
     int core_count = 0;
     int time = 0;
 
-public:
     bool searching = false;
 
     void startSearch(const EmulationGame& state, int core_count);

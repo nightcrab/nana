@@ -18,41 +18,74 @@
 #include <util/rng.hpp>
 #include <variant>
 #include <vector>
+#include <fstream>
+#include <mutex>
+
+constexpr int LOAD_FACTOR = 6;
 
 namespace Nana_Worker {
 	struct WorkerParams {
 		std::vector<std::unique_ptr<mpsc<JobVariant>>>& mpscs;
 		// UCT stuff
-		std::unordered_map<int, UCTNode>& nodes_left;
-		std::unordered_map<int, UCTNode>& nodes_right;
+		std::vector<UCT::padded_map>& nodes_left;
+		std::vector<UCT::padded_map>& nodes_right;
+    	std::vector<std::shared_mutex>& mutexes;
 		RNG& rng;
-		WorkerStatistics& stats;
+		std::vector<WorkerStatistics>& stats;
 		EmulationGame& root_state;
 		int workers;
 		int threadIdx;
 		int time;
 
+		uint32_t getOwner(uint32_t hash) {
+			return hash % workers;
+		}
+
 		inline bool nodeExists(uint32_t nodeID) {
-			bool exists = nodes_left.find(nodeID) != nodes_left.end();
-			exists = exists || (nodes_right.find(nodeID) != nodes_right.end());
+			// read lock
+			std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
+
+			bool exists = nodes_left[nodeID % workers]->find(nodeID) != nodes_left[nodeID % workers]->end();
+			exists = exists || (nodes_right[nodeID % workers]->find(nodeID) != nodes_right[nodeID % workers]->end());
 			return exists;
 		}
 
 		inline UCTNode& getNode(uint32_t nodeID) {
+			// if we're here, the node exists somewhere
 
-			if (nodes_right.find(nodeID) == nodes_right.end()) {
-				// copy from left side to right side
-				insertNode(nodes_left.at(nodeID));
+			mutexes[nodeID % workers].lock();
+			bool on_left_side = !nodes_right[nodeID % workers]->count(nodeID);
+			mutexes[nodeID % workers].unlock();
+
+			if (on_left_side) {
+				// node is on the left side
+
+				if ((nodeID % workers) != threadIdx) {
+					// not the owner, so we're not allowed to write
+
+					mutexes[nodeID % workers].lock();
+					UCTNode& node = nodes_left[nodeID % workers]->at(nodeID);
+					mutexes[nodeID % workers].unlock();
+					return node;
+				}
+				else {
+					// copy from left side to right side
+					insertNode(nodes_left[nodeID % workers]->at(nodeID));
+				}
 			}
 
-			return nodes_right.at(nodeID);
+			std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
+			return nodes_right[nodeID % workers]->at(nodeID);
 		}
 
 		inline void insertNode(const UCTNode& node) {
 			// insertions always done on right side
-			stats.nodes++;
+			stats[node.id % workers].nodes++;
 
-			nodes_right.insert({ node.id, node });
+			// write lock
+			std::unique_lock<std::shared_mutex> lock(mutexes[node.id % workers]);
+
+			nodes_right[node.id % workers]->insert({ node.id, node });
 		};
 	};
 
@@ -71,7 +104,7 @@ namespace Nana_Worker {
 
 		float reward = 0;
 
-		params.stats.nodes++;
+		params.stats[params.threadIdx].nodes++;
 
 		if (state.game_over) {
 			return -0.0;
@@ -89,11 +122,11 @@ namespace Nana_Worker {
 
 		maybeInsertNode(params, node);
 
-		if constexpr (search_style == NANA) {
+		if constexpr (search_style == NanaSearchType::NANA) {
 			float r = state.true_app() / 3 + max_eval / 2;
 			reward = std::max(reward, r);
 		}
-		if constexpr (search_style == CC) {
+		if constexpr (search_style == NanaSearchType::CC) {
 			float r = state.true_app() / 3 + max_eval / 2;
 			reward = std::max(reward, r);
 		}
@@ -112,17 +145,11 @@ namespace Nana_Worker {
 	}
 
 	static void maybeSteal(WorkerParams& params, int targetThread, JobVariant job) {
-		bool is_empty = true;
-		for (int i = 0; i < params.mpscs[params.threadIdx]->flushed_queue.size(); i++) {
-			JobVariant* job = &params.mpscs[params.threadIdx]->flushed_queue[i];
-			if (job != nullptr) {
-				if (!std::holds_alternative<StopJob>(*job)) {
-					is_empty = false;
-					break;
-				}
-			}
-		}
-		if (is_empty) {
+		if(std::holds_alternative<StopJob>(job))
+			// do nothing
+			return;
+		
+		if (params.mpscs[params.threadIdx]->isempty()) {
 			// steal
 			params.mpscs[params.threadIdx]->enqueue(job, params.threadIdx);
 		} else {
@@ -134,16 +161,13 @@ namespace Nana_Worker {
 	static void processJob(JobVariant job, WorkerParams &params) {
 
 		if (std::holds_alternative<PutJob>(job)) {
-			params.nodes_right.insert({
-				std::get<PutJob>(job).node.id,
-				std::get<PutJob>(job).node 
-			});
+			params.insertNode(std::get<PutJob>(job).node);
 			return;
 		}
 
 		if (std::holds_alternative<SelectJob>(job)) {
 			SelectJob& select_job = std::get<SelectJob>(job);
-			params.stats.nodes++;
+			params.stats[params.threadIdx].nodes++;
 
 			EmulationGame& state = select_job.state;
 
@@ -182,7 +206,7 @@ namespace Nana_Worker {
 				UCTNode& node = params.getNode(hash);
 				Action* action = &node.actions[0];
 
-				if constexpr (search_style == NANA) {
+				if constexpr (search_style == NanaSearchType::NANA) {
 					if (hash == params.root_state.hash()) {
 
 						action = &node.select(depth);
@@ -191,7 +215,7 @@ namespace Nana_Worker {
 						action = &node.select(depth);
 					}
 				}
-				if constexpr (search_style == CC) {
+				if constexpr (search_style == NanaSearchType::CC) {
 
 					action = &node.select_SOR(params.rng);
 				}
@@ -217,7 +241,7 @@ namespace Nana_Worker {
 				SelectJob new_job{ state, select_job.path };
 				new_job.path.push_back(HashActionPair(hash, action->id));
 
-				params.stats.deepest_node = std::max(params.stats.deepest_node, (uint64_t)select_job.path.size());
+				params.stats[params.threadIdx].deepest_node = std::max(params.stats[params.threadIdx].deepest_node, (uint64_t)select_job.path.size());
 
 				maybeSteal(params, ownerIdx, new_job);
 			} else {
@@ -241,18 +265,18 @@ namespace Nana_Worker {
 			}
 		} else if (std::holds_alternative<BackPropJob>(job)) {
 			BackPropJob& backprop_job = std::get<BackPropJob>(job);
-			params.stats.backprop_messages++;
+			params.stats[params.threadIdx].backprop_messages++;
 			UCTNode& node = params.getNode(backprop_job.path.back().hash);
 
 			float reward = backprop_job.R;
 
 			// Undo Virtual Loss by adding R
-			if constexpr (search_style == NANA) {
+			if constexpr (search_style == NanaSearchType::NANA) {
 
 				node.actions[backprop_job.path.back().actionID].addReward(reward);
 
 			}
-			if constexpr (search_style == CC) {
+			if constexpr (search_style == NanaSearchType::CC) {
 				if (reward > node.actions[backprop_job.path.back().actionID].R) {
 					node.actions[backprop_job.path.back().actionID].R = reward;
 				}
@@ -333,14 +357,29 @@ namespace Nana_Worker {
 		std::vector<u64> times;
 #endif
 		while (true) {
+			
+			JobVariant job{StopJob{}};
+			// params.mpscs[params.threadIdx]->flush();
+			while(params.mpscs[params.threadIdx]->isempty()) {
+				if (stop.stop_requested()) {
+					params.mpscs[params.threadIdx]->clear();
+					return;
+				}
+			}
 			if (stop.stop_requested()) {
+				params.mpscs[params.threadIdx]->clear();
 				return;
 			}
 
-			// Thread waits here until something is in the queue
-			JobVariant job = params.mpscs[params.threadIdx]->dequeue();
 
-#if BENCH
+			// check for stop job
+			bool need_to_stop = std::ranges::any_of(params.mpscs[params.threadIdx]->flushed_queue, [](auto&& arg){return std::holds_alternative<StopJob>(arg);});
+			if(need_to_stop) [[unlikely]] {
+				return;
+			}
+			job = params.mpscs[params.threadIdx]->dequeue();
+			
+#ifdef BENCH
 			struct bench {
 				std::vector<u64>& times;
 
@@ -354,7 +393,7 @@ namespace Nana_Worker {
 
 			} b(times);
 #endif
-			if (std::holds_alternative<StopJob>(job)) {
+			if (std::holds_alternative<StopJob>(job)) [[unlikely]] {
 				return;
 			}
 
@@ -363,7 +402,7 @@ namespace Nana_Worker {
 
 		// write times to file with thread index in the name
 #ifdef BENCH
-		std::ofstream file("bench_" + std::to_string(threadIdx) + ".txt");
+		std::ofstream file("bench_" + std::to_string(params.threadIdx) + ".txt");
 		for (int i = 0; i < times.size(); i += 2) {
 			file << times[i] << " " << times[i + 1] << std::endl;
 		}
@@ -373,7 +412,6 @@ namespace Nana_Worker {
 };
 
 
-constexpr int LOAD_FACTOR = 6;
 
 void Nana::startSearch(const EmulationGame&state, int core_count) {
 
@@ -382,6 +420,8 @@ void Nana::startSearch(const EmulationGame&state, int core_count) {
 	searching = true;
 
 	root_state = state;
+
+	this->core_count = core_count;
 
 	uct = UCT(core_count);
 
@@ -409,10 +449,11 @@ void Nana::startSearch(const EmulationGame&state, int core_count) {
 			worker_stopper.get_token(),
 			Nana_Worker::WorkerParams {
 				.mpscs = queues,
-				.nodes_left = uct.nodes_left[idx].obj_,
-				.nodes_right = uct.nodes_right[idx].obj_,
+				.nodes_left = uct.nodes_left,
+				.nodes_right = uct.nodes_right,
+				.mutexes = uct.mutexes,
 				.rng = uct.rng[idx],
-				.stats = uct.stats[idx],
+				.stats = uct.stats,
 				.root_state = root_state,
 				.workers = core_count,
 				.threadIdx = idx,
@@ -428,7 +469,7 @@ void Nana::continueSearch(const EmulationGame& state) {
 	if (state.game_over)
 		return;
 
-	start_search_time = std::chrono::steady_clock::now();
+	start_search_time = std::chrono::high_resolution_clock::now();
 
 	searching = true;
 
@@ -470,10 +511,11 @@ void Nana::continueSearch(const EmulationGame& state) {
 			worker_stopper.get_token(),
 			Nana_Worker::WorkerParams{
 				.mpscs = queues,
-				.nodes_left = uct.nodes_left[idx].obj_,
-				.nodes_right = uct.nodes_right[idx].obj_,
+				.nodes_left = uct.nodes_left,
+				.nodes_right = uct.nodes_right,
+				.mutexes = uct.mutexes,
 				.rng = uct.rng[idx],
-				.stats = uct.stats[idx],
+				.stats = uct.stats,
 				.root_state = root_state,
 				.workers = core_count,
 				.threadIdx = idx,
@@ -514,7 +556,7 @@ void Nana::endSearch() {
 
 void Nana::printStatistics() {
 
-	std::chrono::steady_clock::time_point search_end_time = std::chrono::steady_clock::now();
+	auto search_end_time = std::chrono::high_resolution_clock::now();
 
 	double ms = std::chrono::duration_cast<std::chrono::microseconds>(search_end_time - start_search_time).count();
 
@@ -530,11 +572,12 @@ void Nana::printStatistics() {
 
 	std::cout << "nodes: " << nodes << std::endl;
 	std::cout << "nodes / second: " << nodes / (ms / 1000000) << std::endl;
+	std::cout << "nodes / second per worker: " << (nodes / (ms / 1000000.0)) / core_count << std::endl;
 	std::cout << "backprops / second: " << backprops / (ms / 1000000) << std::endl;
 	std::cout << "tree depth: " << depth << std::endl;
 }
 
 
 Move Nana::bestMove() {
-
+	return Move{};
 }

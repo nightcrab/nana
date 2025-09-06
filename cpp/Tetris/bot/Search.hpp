@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
+#include <stop_token>
 
 #include "EmulationGame.hpp"
 #include "Util/MPSC.hpp"
