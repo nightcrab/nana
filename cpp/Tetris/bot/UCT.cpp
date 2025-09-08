@@ -6,6 +6,8 @@
 #include <cmath>
 #include <iostream>
 #include <mutex>
+#include <ranges>
+#include "Util/custom_order_max.hpp"
 
 using namespace Distribution;
 
@@ -92,6 +94,8 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	this->id = state.hash();
 
 	this->N = 1;
+
+	this->state = state;
 }
 
 Action& UCTNode::select_r_max() {
@@ -119,17 +123,14 @@ Action& UCTNode::select_uct(int depth) {
 		UCT formula, ignores policy.
 	*/
 
-	float C = 1.507;
+	constexpr float C = 1.507;
 
 	for (Action& edge : actions) {
 		if (edge.N == 0) {
 			best_action = &edge;
 			break;
 		}
-		float Q = edge.Q();
-		if (edge.N == 0) {
-			Q = 0.0;
-		}
+		float Q = edge.N == 0 ? 0.0 : edge.Q();
 		float U = 2 * C * quick_sqrt(ln(N) / edge.N);
 		float priority = Q + U;
 
@@ -165,10 +166,7 @@ Action& UCTNode::select(int depth) {
 
 
 	for (Action& edge : actions) {
-		float Q = edge.Q();
-		if (edge.N == 0) {
-			Q = 0.0;
-		}
+		float Q = edge.N == 0 ? 0.0 : edge.Q();
 		float U = c_puct * edge.prior * quick_sqrt(N) / (1 + edge.N);
 		float priority = Q + U;
 
@@ -288,4 +286,45 @@ int UCT::map_size() {
 		ret += map->size();
 	}
 	return ret;
+}
+
+void UCTNode::update_wvt_table(const std::unordered_map<uint32_t, std::vector<WVT>>& other) {
+	for(auto&[key,value] : other) {
+		hash_to_ucb_path.insert_or_assign(key, value);
+	}
+}
+
+void UCTNode::update_wvt_path(const std::vector<HashActionPair>& job_path, float reward) {
+	for(auto &[hash,actionID] : std::views::reverse(job_path)) {
+		hash_to_ucb_path.at(hash).at(actionID).R += reward;
+	}
+}
+
+bool UCTNode::ucb_is_current_best(const std::vector<HashActionPair>& job_path) {
+	int sum_of_N = 0;
+	for(auto&job : job_path) {
+		sum_of_N += hash_to_ucb_path.at(job.hash).at(job.actionID).N;
+	}
+
+	auto view = std::views::transform(std::views::reverse(job_path | std::views::enumerate),
+		[this, sum_of_N](const auto& i_el) {
+			auto&[index, el] = i_el;
+			const auto&[hash, actionID] = el;
+			auto&guh = hash_to_ucb_path.at(hash).at(actionID);
+
+			constexpr float C = 1.507;
+			float Q = guh.N == 0 ? 0.0 : guh.R / guh.N;
+			float U = 2 * C * quick_sqrt(ln(sum_of_N) / guh.N);
+			float priority = Q + U;
+
+			return std::make_pair(index, priority);
+		});
+
+	// sorts based off of N and then R, and gets the max
+	auto best_job = job_path[(*std::ranges::max_element(view, [](const auto& l, const auto&r) {return l.second < r.second;})).first];
+	auto best = hash_to_ucb_path.at(best_job.hash).at(best_job.actionID);
+
+	auto last_job = hash_to_ucb_path.at(job_path.back().hash).at(job_path.back().actionID);
+
+	return best.N == last_job.N && best.R == last_job.R;
 }

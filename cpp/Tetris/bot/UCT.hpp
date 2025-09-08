@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <stack>
 #include <unordered_map>
+#include <map>
 #include <vector>
 #include <shared_mutex>
 #include <variant>
@@ -51,6 +52,23 @@ class Action {
     uint32_t id;
 };
 
+
+struct WVT {
+    float R;
+    int N;
+};
+
+
+class HashActionPair {
+   public:
+    HashActionPair(uint32_t hash, int actionID) {
+        this->hash = hash;
+        this->actionID = actionID;
+    }
+    uint32_t hash;
+    int actionID;
+};
+
 // state
 class UCTNode {
    public:
@@ -71,21 +89,21 @@ class UCTNode {
 
     std::vector<Action> actions;
 
+    std::unordered_map<uint32_t, std::vector<WVT>> hash_to_ucb_path;
+
+    EmulationGame state;
+
     Action& select_uct(int depth);
     Action& select(int depth);
     Action& select_r_max();
     Action& select_SOR(RNG& rng);
+
+    void update_wvt_table(const std::unordered_map<uint32_t, std::vector<WVT>>&other);
+    void update_wvt_path(const std::vector<HashActionPair>& job_path, float reward);
+
+    bool ucb_is_current_best(const std::vector<HashActionPair>& job_path);
 };
 
-class HashActionPair {
-   public:
-    HashActionPair(uint32_t hash, int actionID) {
-        this->hash = hash;
-        this->actionID = actionID;
-    }
-    uint32_t hash;
-    int actionID;
-};
 
 enum JobType {
     SELECT,
@@ -132,12 +150,14 @@ struct StopJob {};
 struct SelectJob { 
     EmulationGame state;
     std::vector<HashActionPair> path;
-    float R; 
+    std::unordered_map<uint32_t, std::vector<WVT>> hash_to_ucb_path;
+    float R;
 };
 
 struct BackPropJob {
     EmulationGame state;
     std::vector<HashActionPair> path;
+    std::unordered_map<uint32_t, std::vector<WVT>> hash_to_ucb_path;
     float R;
     int depth;
 };

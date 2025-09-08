@@ -1,9 +1,13 @@
 ﻿#pragma once
 
 #include <memory>
-#include <vector>
+#include <deque>
 
 #include "SPSC.hpp"
+
+template<typename T, typename Target>
+concept forwardable_to = std::same_as<std::remove_cvref_t<T>, Target> && std::convertible_to<T, Target>;
+
 
 template <typename T>
 struct BufferHolder {
@@ -18,6 +22,7 @@ class mpsc {
 public:
     explicit mpsc(size_t num_threads) {
         size = num_threads;
+        queues.reserve(num_threads);
         for (int i = 0; i < num_threads; i++) {
             queues.push_back(std::make_unique<BufferHolder<rigtorp::SPSCQueue<T>>>(2048));
         }
@@ -28,9 +33,11 @@ public:
     mpsc& operator=(const mpsc&) = delete;
 
     // producer function
-    inline void enqueue(const T& data, size_t id) noexcept {
-        (*queues[id])->push(data);
+    template<std::convertible_to<T> Data>
+    void enqueue(Data &&data, size_t id) noexcept {
+        (*queues[id])->emplace(std::forward<Data>(data));
     }
+
     // consumer function
     inline bool isempty() noexcept {
         if(flushed_queue.empty())
@@ -42,7 +49,7 @@ public:
     inline void flush() {
         for (auto& queue : queues) {
             while (T* item = (*queue)->front()) {
-                flushed_queue.emplace_back(*item);
+                flushed_queue.emplace_back(std::move(*item));
                 (*queue)->pop();
             }
         }
@@ -62,11 +69,12 @@ public:
         while(flushed_queue.size() == 0uz)
             flush();
 
-        T ret = std::move(flushed_queue.back());
-        flushed_queue.pop_back();
+        T ret = std::move(flushed_queue.front());
+        flushed_queue.pop_front();
         return std::move(ret);
     }
-    std::vector<T> flushed_queue;
+    
+    std::deque<T> flushed_queue;
     size_t size;
 private:
     std::vector<std::unique_ptr<BufferHolder<rigtorp::SPSCQueue<T>>>> queues;

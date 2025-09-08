@@ -13,6 +13,7 @@
 #include "Util/Distribution.hpp"
 #include "util/rng.hpp"
 #include "VersusGame.hpp"
+#include "Nana.hpp"
 
 #define OLC_PGE_APPLICATION
 #include "OLC/olcPixelGameEngine.h"
@@ -170,7 +171,7 @@ class Tetris : public olc::PixelGameEngine {
             game.p1_move = {game.p1_game.current_piece, false};
             game.p2_move = {game.p2_game.current_piece, false};
 
-            // game.p2_move = Search::monte_carlo_best_move(game, 12, 120, 7, 1);
+            // game.p2_move = nana.monte_carlo_best_move(game, 12, 120, 7, 1);
             game.play_moves();
         }
 
@@ -213,6 +214,7 @@ public:
         sAppName = "Nana";
     }
 private:
+    Nana nana;
     EmulationGame game;
     int time = 0;
 
@@ -283,11 +285,11 @@ private:
         }
 
         if (GetKey(olc::Key::P).bPressed) {
-            if (Search::searching) {
-                Search::endSearch();
+            if (nana.searching) {
+                nana.endSearch();
             }
             else {
-                Search::startSearch(game, 1);
+                nana.startSearch(game, 10);
             }
             
         }
@@ -335,17 +337,17 @@ private:
             std::cout << "row transitions: " << Eval::get_row_transitions(game.game.board) << std::endl;
         }
 
-        if ((GetKey(olc::Key::Q).bPressed || time % 20 == 21) && Search::searching) {
-            Search::endSearch();
+        if ((GetKey(olc::Key::Q).bPressed || time % 20 == 21) && nana.searching) {
+            nana.endSearch();
 
-            game.set_move(game.specific_move(Search::bestMove()));
+            game.set_move(game.specific_move(nana.bestMove()));
 
             game.play_moves();
             game.chance_move();
 
-            Search::printStatistics();
+            nana.printStatistics();
 
-            Search::continueSearch(game);
+            nana.continueSearch(game);
 
             std::cout << "APP:" << game.app() << std::endl;
             std::cout << "True APP:" << game.true_app() << std::endl;
@@ -379,8 +381,8 @@ private:
         return true;
     }
     bool OnUserDestroy() override {
-        if (Search::searching) {
-            Search::endSearch();
+        if (nana.searching) {
+            nana.endSearch();
         }
         return true;
     }

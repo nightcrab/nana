@@ -118,7 +118,7 @@ void print_strength(Nana &nana) {
 int main(int argc, const char** args) {
 	// for debugging in vs22
 	if (false) {
-		const char* argss[] = {"executable", "14","1000","0"};
+		const char* argss[] = {"executable", "10","10000","1"};
 		args = argss;
 		argc = sizeof(argss) / sizeof(*argss);
 	}

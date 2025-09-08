@@ -1,6 +1,8 @@
 #include "Nana.hpp"
 
 #include "UCT.hpp"
+#include "Util/custom_order_max.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -22,16 +24,17 @@
 #include <mutex>
 
 constexpr int LOAD_FACTOR = 6;
+#define BENCH
+
 
 namespace Nana_Worker {
 	struct WorkerParams {
 		std::vector<std::unique_ptr<mpsc<JobVariant>>>& mpscs;
 		// UCT stuff
-		std::vector<UCT::padded_map>& nodes_left;
-		std::vector<UCT::padded_map>& nodes_right;
-    	std::vector<std::shared_mutex>& mutexes;
+		std::unordered_map<int, UCTNode>& nodes_left;
+		std::unordered_map<int, UCTNode>& nodes_right;
 		RNG& rng;
-		std::vector<WorkerStatistics>& stats;
+		WorkerStatistics& stats;
 		EmulationGame& root_state;
 		int workers;
 		int threadIdx;
@@ -43,59 +46,31 @@ namespace Nana_Worker {
 
 		inline bool nodeExists(uint32_t nodeID) {
 			// read lock
-			std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
-
-			bool exists = nodes_left[nodeID % workers]->find(nodeID) != nodes_left[nodeID % workers]->end();
-			exists = exists || (nodes_right[nodeID % workers]->find(nodeID) != nodes_right[nodeID % workers]->end());
+			bool exists = nodes_left.find(nodeID) != nodes_left.end();
+			exists = exists || (nodes_right.find(nodeID) != nodes_right.end());
 			return exists;
 		}
 
 		inline UCTNode& getNode(uint32_t nodeID) {
-			// if we're here, the node exists somewhere
-
-			mutexes[nodeID % workers].lock();
-			bool on_left_side = !nodes_right[nodeID % workers]->count(nodeID);
-			mutexes[nodeID % workers].unlock();
-
-			if (on_left_side) {
-				// node is on the left side
-
-				if ((nodeID % workers) != threadIdx) {
-					// not the owner, so we're not allowed to write
-
-					mutexes[nodeID % workers].lock();
-					UCTNode& node = nodes_left[nodeID % workers]->at(nodeID);
-					mutexes[nodeID % workers].unlock();
-					return node;
-				}
-				else {
-					// copy from left side to right side
-					insertNode(nodes_left[nodeID % workers]->at(nodeID));
-				}
+			if (nodes_right.find(nodeID) == nodes_right.end()) {
+				// copy from left side to right side
+				insertNode(nodes_left.at(nodeID));
 			}
-
-			std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
-			return nodes_right[nodeID % workers]->at(nodeID);
+			return nodes_right.at(nodeID);
 		}
 
 		inline void insertNode(const UCTNode& node) {
-			// insertions always done on right side
-			stats[node.id % workers].nodes++;
-
-			// write lock
-			std::unique_lock<std::shared_mutex> lock(mutexes[node.id % workers]);
-
-			nodes_right[node.id % workers]->insert({ node.id, node });
+			stats.nodes++;
+			nodes_right.insert({ node.id, node });
 		};
 	};
 
-	static void maybeInsertNode(WorkerParams& params, UCTNode node) {
+	static void maybeInsertNode(WorkerParams& params, const UCTNode& node) {
 		int owner = node.id % params.workers;
 		if (params.threadIdx == owner) {
 			params.insertNode(node);
 		} else {
-			PutJob put_job(node);
-			params.mpscs[owner]->enqueue(put_job, params.threadIdx);
+			params.mpscs[owner]->enqueue(JobVariant{PutJob{node}}, params.threadIdx);
 		}
 	}
 
@@ -104,7 +79,7 @@ namespace Nana_Worker {
 
 		float reward = 0;
 
-		params.stats[params.threadIdx].nodes++;
+		params.stats.nodes++;
 
 		if (state.game_over) {
 			return -0.0;
@@ -114,11 +89,7 @@ namespace Nana_Worker {
 
 		maybeInsertNode(params, node);
 
-		float max_eval = 0.0;
-
-		for (auto& action : node.actions) {
-			max_eval = std::max(max_eval, action.eval);
-		}
+		float max_eval = (*std::ranges::max_element(node.actions, std::ranges::less{}, &Action::eval)).eval;
 
 		maybeInsertNode(params, node);
 
@@ -149,12 +120,12 @@ namespace Nana_Worker {
 			// do nothing
 			return;
 		
-		if (params.mpscs[params.threadIdx]->isempty()) {
+		if (false && params.mpscs[params.threadIdx]->isempty() && !std::holds_alternative<BackPropJob>(job)) {
 			// steal
-			params.mpscs[params.threadIdx]->enqueue(job, params.threadIdx);
+			params.mpscs[params.threadIdx]->enqueue(std::move(job), params.threadIdx);
 		} else {
 			// don't steal
-			params.mpscs[targetThread]->enqueue(job, params.threadIdx);
+			params.mpscs[targetThread]->enqueue(std::move(job), params.threadIdx);
 		}
 	}
 
@@ -167,7 +138,7 @@ namespace Nana_Worker {
 
 		if (std::holds_alternative<SelectJob>(job)) {
 			SelectJob& select_job = std::get<SelectJob>(job);
-			params.stats[params.threadIdx].nodes++;
+			params.stats.nodes++;
 
 			EmulationGame& state = select_job.state;
 
@@ -183,6 +154,7 @@ namespace Nana_Worker {
 				BackPropJob backprop_job{
 					.state = state,
 					.path = select_job.path,
+					.hash_to_ucb_path = std::move(select_job.hash_to_ucb_path),
 					.R = reward,
 					.depth = state.pieces
 				};
@@ -196,7 +168,7 @@ namespace Nana_Worker {
 
 				// send this one back to our parent
 
-				maybeSteal(params, parentIdx, backprop_job);
+				maybeSteal(params, parentIdx, std::move(backprop_job));
 
 				return;
 			}
@@ -222,15 +194,28 @@ namespace Nana_Worker {
 
 				// Virtual Loss by setting N := N+1
 				node.N += 1;
-
+				
+				// update ucb history
+				node.update_wvt_table(select_job.hash_to_ucb_path);
+				
 				action->addN();
-
+				
 				action->updateTime(params.time);
-
+				
 				state.set_move(state.specific_move(action->move));
-
+				
 				state.play_moves();
 				state.chance_move();
+
+				
+				select_job.hash_to_ucb_path.try_emplace(hash, std::vector<WVT>(node.actions.size()));
+				node.hash_to_ucb_path.try_emplace(hash, std::vector<WVT>(node.actions.size()));
+					
+				// append to ucb
+				for(auto&action : node.actions) {
+					select_job.hash_to_ucb_path.at(hash).at(action.id).N = action.N;
+					select_job.hash_to_ucb_path.at(hash).at(action.id).R = action.R;
+				}
 
 				uint32_t new_hash = state.hash();
 
@@ -238,12 +223,18 @@ namespace Nana_Worker {
 				uint32_t ownerIdx = new_hash % params.workers;
 
 				//Job select_job(state, SELECT, job.path);
-				SelectJob new_job{ state, select_job.path };
+				SelectJob new_job{ 
+					state, 
+					select_job.path, 
+					std::move(select_job.hash_to_ucb_path), 
+					0.0 
+				};
+
 				new_job.path.push_back(HashActionPair(hash, action->id));
 
-				params.stats[params.threadIdx].deepest_node = std::max(params.stats[params.threadIdx].deepest_node, (uint64_t)select_job.path.size());
+				params.stats.deepest_node = std::max(params.stats.deepest_node, (uint64_t)select_job.path.size());
 
-				maybeSteal(params, ownerIdx, new_job);
+				maybeSteal(params, ownerIdx, std::move(new_job));
 			} else {
 
 				float reward = rollout(params, state);
@@ -252,29 +243,25 @@ namespace Nana_Worker {
 
 				uint32_t parentIdx = parent_hash % params.workers;
 
-				//Job backprop_job(reward, state.pieces, state, BACKPROP, select_job.path);
-				BackPropJob backprop_job{
+				maybeSteal(params, parentIdx, BackPropJob {
 					.state = state,
 					.path = select_job.path,
+					.hash_to_ucb_path = std::move(select_job.hash_to_ucb_path),
 					.R = reward,
 					.depth = state.pieces
-				};
-				// send rollout reward to parent, who also owns the arm that got here
-
-				maybeSteal(params, parentIdx, backprop_job);
+				});
 			}
 		} else if (std::holds_alternative<BackPropJob>(job)) {
 			BackPropJob& backprop_job = std::get<BackPropJob>(job);
-			params.stats[params.threadIdx].backprop_messages++;
-			UCTNode& node = params.getNode(backprop_job.path.back().hash);
+			params.stats.backprop_messages++;
+			uint32_t node_hash = backprop_job.path.back().hash;
+			UCTNode& node = params.getNode(node_hash);
 
 			float reward = backprop_job.R;
 
 			// Undo Virtual Loss by adding R
 			if constexpr (search_style == NanaSearchType::NANA) {
-
 				node.actions[backprop_job.path.back().actionID].addReward(reward);
-
 			}
 			if constexpr (search_style == NanaSearchType::CC) {
 				if (reward > node.actions[backprop_job.path.back().actionID].R) {
@@ -282,39 +269,48 @@ namespace Nana_Worker {
 				}
 			}
 
+			// update ucb history
+			node.update_wvt_path(backprop_job.path, reward);
+
+			// get current best action from ucb history
+
 			backprop_job.path.pop_back();
 
+			// root node check
 			if (backprop_job.path.empty()) {
 				// only one thread acutally does this so its fine
 				params.root_state.opponent.reset_rng();
 				params.root_state.rng.new_seed();
+			}
+			// root or were best
+			if (backprop_job.path.empty() 
+				|| node.ucb_is_current_best(backprop_job.path)
+			) {
+				auto& node_children = node.hash_to_ucb_path.at(node_hash);
+				auto& backprop_children = backprop_job.hash_to_ucb_path.at(node_hash);
+				// usb history append
+				for(auto&action : node.actions) {
+					node_children.at(action.id).N = action.N;
+					node_children.at(action.id).R = action.R;
+
+					backprop_children.at(action.id).N = action.N;
+					backprop_children.at(action.id).R = action.R;
+				}
 
 				//Job select_job(params.root_state, SELECT);
-				SelectJob sj = SelectJob{ params.root_state };
-
-				// i think this was added for minimum work stuff
-				/*
-				if (threadIdx == params.getOwner(params.root_state.hash())) {
-					// extra scope to prevent notifying the main thread while holding the lock
-					// this is to prevent the main thread from waiting on the condition variable while we're holding the lock
-					{
-						std::scoped_lock lock(min_work_mutex);
-						min_work_bool = true;
-					}
-					min_work_cv.notify_one();
-					// notify the main thread that we're done
-				}
-				*/
 
 				// give ourself this job
-				params.mpscs[params.threadIdx]->enqueue(sj, params.threadIdx);
+				params.mpscs[params.threadIdx]->enqueue(
+					JobVariant{
+						SelectJob{ 
+							.state = node.state,
+							.path = backprop_job.path, 
+							.hash_to_ucb_path = std::move(backprop_job.hash_to_ucb_path) }
+						}, 
+					params.threadIdx
+				);
 
-				return;
-			}
-
-			bool should_backprop = true;
-
-			if (should_backprop) {
+			} else {
 
 				uint32_t parent_hash = backprop_job.path.back().hash;
 
@@ -326,35 +322,38 @@ namespace Nana_Worker {
 				node.R_buffer = 0;
 
 				// Job backprop_job(reward, backprop_job.depth, backprop_job.state, BACKPROP, backprop_job.path);
-				BackPropJob bpj{
+				
+				maybeSteal(params, parentIdx, BackPropJob {
 					backprop_job.state, 
 					backprop_job.path,
+					std::move(backprop_job.hash_to_ucb_path),
 					reward, 
 					backprop_job.depth,
-				};
-				maybeSteal(params, parentIdx, bpj);
-			} else {
-
-				// stash reward and start a new rollout
-
-				node.R_buffer += reward;
-
-				//Job select_job(params.root_state, SELECT);
-				SelectJob select_job = {
-					.state = params.root_state,
-					.path = {},
-					.R = 0
-				};
-
-				// give ourself this job
-				params.mpscs[params.threadIdx]->enqueue(select_job, params.threadIdx);
+				});
 			}
 		}
 	}
 
 	static void search(std::stop_token stop, WorkerParams params, int thread_idx) {
 #ifdef BENCH
-		std::vector<u64> times;
+		struct guh {
+			std::vector<u64> times;
+			const WorkerParams &params;
+			guh(const WorkerParams &params) : params(params) {}
+
+			~guh() {
+				// write times to file with thread index in the name
+				std::ofstream file("./bench_" + std::to_string(params.threadIdx) + ".txt");
+				for (int i = 0; i < times.size(); i += 2) {
+					file << times[i] << " " << times[i + 1] << '\n';
+				}
+				std::ofstream file2("./backprops_" + std::to_string(params.threadIdx) + ".txt");
+				file2 << params.stats.backprop_messages;
+			}
+			void push_back(u64 time) {
+				times.push_back(time);
+			}
+		}times(params);
 #endif
 		while (true) {
 			
@@ -381,9 +380,9 @@ namespace Nana_Worker {
 			
 #ifdef BENCH
 			struct bench {
-				std::vector<u64>& times;
+				guh& times;
 
-				bench(std::vector<u64>& times) : times(times) {
+				bench(guh& times) : times(times) {
 					times.push_back(std::chrono::steady_clock::now().time_since_epoch().count());
 				}
 				~bench() {
@@ -397,16 +396,9 @@ namespace Nana_Worker {
 				return;
 			}
 
-			processJob(job, params);
+			processJob(std::move(job), params);
 		}
 
-		// write times to file with thread index in the name
-#ifdef BENCH
-		std::ofstream file("bench_" + std::to_string(params.threadIdx) + ".txt");
-		for (int i = 0; i < times.size(); i += 2) {
-			file << times[i] << " " << times[i + 1] << std::endl;
-		}
-#endif
 	}
 
 };
@@ -440,7 +432,7 @@ void Nana::startSearch(const EmulationGame&state, int core_count) {
 	for (int i = 0; i < LOAD_FACTOR * core_count; i++) {
 		root_state.rng.new_seed();
 		root_state.opponent.reset_rng();
-		queues[rootOwnerIdx]->enqueue(SelectJob{ root_state }, core_count);
+		queues[rootOwnerIdx]->enqueue(JobVariant{SelectJob{ root_state }}, core_count);
 	}
 
 	for (const auto& idx : std::views::iota(0, core_count)) {
@@ -449,11 +441,10 @@ void Nana::startSearch(const EmulationGame&state, int core_count) {
 			worker_stopper.get_token(),
 			Nana_Worker::WorkerParams {
 				.mpscs = queues,
-				.nodes_left = uct.nodes_left,
-				.nodes_right = uct.nodes_right,
-				.mutexes = uct.mutexes,
+				.nodes_left = uct.nodes_left[idx].obj_,
+				.nodes_right = uct.nodes_right[idx].obj_,
 				.rng = uct.rng[idx],
-				.stats = uct.stats,
+				.stats = uct.stats[idx],
 				.root_state = root_state,
 				.workers = core_count,
 				.threadIdx = idx,
@@ -511,11 +502,10 @@ void Nana::continueSearch(const EmulationGame& state) {
 			worker_stopper.get_token(),
 			Nana_Worker::WorkerParams{
 				.mpscs = queues,
-				.nodes_left = uct.nodes_left,
-				.nodes_right = uct.nodes_right,
-				.mutexes = uct.mutexes,
+				.nodes_left = uct.nodes_left[idx].obj_,
+				.nodes_right = uct.nodes_right[idx].obj_,
 				.rng = uct.rng[idx],
-				.stats = uct.stats,
+				.stats = uct.stats[idx],
 				.root_state = root_state,
 				.workers = core_count,
 				.threadIdx = idx,
@@ -551,6 +541,8 @@ void Nana::endSearch() {
 	}
 
 	queues.clear();
+
+	time++;
 }
 
 
@@ -579,5 +571,21 @@ void Nana::printStatistics() {
 
 
 Move Nana::bestMove() {
-	return Move{};
+    Move best_move;
+
+	if constexpr (search_style == NanaSearchType::NANA) {
+		best_move = custom_order_max(
+			uct.getNode(root_state.hash()).actions, 
+			&Action::N, &Action::R
+		).value_or(Action{{},0}).move;
+	}
+
+	if constexpr (search_style == NanaSearchType::CC) {
+		best_move = custom_order_max(
+			uct.getNode(root_state.hash()).actions, 
+			&Action::R
+		).value_or(Action{{},0}).move;
+	}
+
+    return best_move;
 }
