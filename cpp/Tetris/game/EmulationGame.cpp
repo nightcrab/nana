@@ -169,12 +169,12 @@ uint32_t EmulationGame::hash() const {
     return hash;
 }
 
-float EmulationGame::app() {
+float EmulationGame::app() const {
     return (float) attack / (float) pieces;
 }
 
 
-float EmulationGame::true_app() {
+float EmulationGame::true_app() const {
     return (float)true_attack / (float)pieces;
 }
 

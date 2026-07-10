@@ -1,7 +1,7 @@
 #include "EmulationGame.hpp"
 #include "engine/Board.hpp"
 #include "engine/ShaktrisConstants.hpp"
-#include "Search.hpp"
+#include "Tetris/bot/Nana.hpp"
 
 #include <array>
 #include <chrono>
@@ -81,13 +81,13 @@ constexpr std::array<shim_game, 2> test_games = []() {
 
 // print biggest N and R
 // code stolen from the print statistics function
-void print_strength() {
+void print_strength(Nana &nana) {
 	int biggest_N = 0;
 	float biggest_R = 0;
 	Move best_move;
 
-	for (Action& action : Search::uct.getNode(Search::root_state.hash()).actions) {
-		if constexpr (Search::search_style == NANA) {
+	for (Action& action : nana.uct.getNode(nana.root_state.hash()).actions) {
+		if constexpr (search_style == NanaSearchType::NANA) {
 			if (action.N == biggest_N) {
 				if (action.R > biggest_R) {
 					biggest_R = action.R;
@@ -101,7 +101,7 @@ void print_strength() {
 				best_move = action.move;
 			}
 		}
-		if constexpr (Search::search_style == CC) {
+		if constexpr (search_style == NanaSearchType::CC) {
 			if (action.R > biggest_R) {
 				biggest_R = action.R;
 				biggest_N = action.N;
@@ -118,7 +118,7 @@ void print_strength() {
 int main(int argc, const char** args) {
 	// for debugging in vs22
 	if (false) {
-		const char* argss[] = {"executable", "2","500","0"};
+		const char* argss[] = {"executable", "10","10000","1"};
 		args = argss;
 		argc = sizeof(argss) / sizeof(*argss);
 	}
@@ -141,7 +141,7 @@ int main(int argc, const char** args) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return 1;
 	}
-
+	Nana nana;
 	EmulationGame game;
 
 	game.game.board = test_games.at(test_number).board;
@@ -149,17 +149,16 @@ int main(int argc, const char** args) {
 	game.game.hold = test_games.at(test_number).hold;
 	game.game.current_piece = test_games.at(test_number).current_piece;
 
-	Search::startSearch(game, core_count);
+	nana.startSearch(game, core_count);
 
 	// run the search for the specified time
 	std::this_thread::sleep_for(std::chrono::milliseconds(time));
-
 	// end the search
-	Search::endSearch();
+	nana.endSearch();
 
 	// check and print the stats
-	print_strength();
-	Search::printStatistics();
+	print_strength(nana);
+	nana.printStatistics();
 
 	return 0;
 }

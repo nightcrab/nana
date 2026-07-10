@@ -35,8 +35,8 @@ class EmulationGame {
 
     bool game_over = false;
 
-    float app();
-    float true_app();
+    float app() const;
+    float true_app() const;
     float apl();
 
     float b2b();
