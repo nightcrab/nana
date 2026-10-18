@@ -5,6 +5,7 @@
 #include <numeric>
 #include <ranges>
 
+#include "Util/Affinity.hpp"
 #include "Util/Distribution.hpp"
 #include "Eval.hpp"
 #include <iostream>
@@ -158,7 +159,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
 
     // Spawn jobs
     for (int i = 0; i < LOAD_FACTOR * core_count; i++) {
-        root_state.rng.new_seed();
+        root_state.rng.PPTRNG = fast_seed();
         root_state.opponent.reset_rng();
         queues[rootOwnerIdx]->enqueue(Job(root_state, SELECT), core_count);
     }
@@ -221,7 +222,7 @@ void Search::continueSearch(EmulationGame state) {
     for (int j = 0; j < core_count; j++) {
         for (int i = 0; i < LOAD_FACTOR; i++) {
             root_state.opponent.reset_rng();
-            root_state.rng.new_seed();
+            root_state.rng.PPTRNG = fast_seed();
             queues[rootOwnerIdx]->enqueue(Job(root_state, SELECT), core_count);
         }
 
@@ -658,7 +659,7 @@ void Search::processJob(const int threadIdx, Job&& job) {
             uct.stats[threadIdx].root_backprops++;
 
             root_state.opponent.reset_rng();
-            root_state.rng.new_seed();
+            root_state.rng.PPTRNG = fast_seed();
 
             // reuse this job for a fresh select from the root;
             // copy-assigning keeps the existing vector capacity
@@ -736,7 +737,7 @@ void Search::processJob(const int threadIdx, Job&& job) {
                 node.history = rows;
             }
 
-            here.rng.new_seed();
+            here.rng.PPTRNG = fast_seed();
             here.opponent.reset_rng();
 
             job.state = std::move(here);
@@ -777,6 +778,9 @@ void Search::maybeInsertNode(UCTNode node, const int threadIdx) {
 }
 
 void Search::search(std::stop_token stop, const int threadIdx) {
+    // one worker per physical core before any core gets two
+    pinThreadToCore(threadIdx);
+
 #ifdef NANA_BENCH
     // accumulate locally and publish on exit, so profiling doesn't add shared writes
     struct Profile {

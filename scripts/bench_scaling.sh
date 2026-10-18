@@ -59,9 +59,8 @@ for test in 0 1; do
     done
 done
 
-# plain-work slowdown per thread as cores are added (no search): stride 1 suits
-# Linux numbering, where cpus 0..cores-1 are distinct physical cores
-build-bench-mp1/cpp/nana_msgbench scale "$max_threads" 1 | tee "$out/scale.txt"
+# plain-work slowdown per thread as cores are added (no search), pinned like the workers
+build-bench-mp1/cpp/nana_msgbench scale "$max_threads" | tee "$out/scale.txt"
 
 python3 - "$out/runs.csv" <<'EOF' | tee "$out/summary.txt"
 import csv, statistics as st, sys, collections

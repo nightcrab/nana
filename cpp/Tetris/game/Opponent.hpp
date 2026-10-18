@@ -2,6 +2,7 @@
 #include "engine/Board.hpp"
 #include "engine/Game.hpp"
 #include "util/rng.hpp"
+#include "Util/FastSeed.hpp"
 
 #include <iostream>
 #include <vector>
@@ -195,7 +196,8 @@ public:
     }
 
     void reset_rng() {
-        rng.new_seed();
+        // not rng.new_seed(): that builds a std::random_device per call, see FastSeed.hpp
+        rng.PPTRNG = fast_seed();
     }
 
     void nextBuild() {

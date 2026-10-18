@@ -21,6 +21,7 @@ set(TETRIS_SOURCES
 	"Tetris/bot/Search.cpp"
 	"Tetris/bot/Search.hpp"
 
+	"Util/Affinity.cpp"
 	"Util/Distribution.cpp"
 	"Util/fasthash.cpp"
 

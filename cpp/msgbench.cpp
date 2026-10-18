@@ -1,7 +1,7 @@
 // Microbenchmark for the parts of sending a message between two workers.
 //
 // usage: nana_msgbench [messages]
-//        nana_msgbench scale      per-thread slowdown of plain work as cores are added
+//        nana_msgbench scale [max_threads]   per-thread slowdown of plain work as cores are added
 //
 // Each payload is sent through each transport. Times are ns per message.
 //   same thread   : producer and consumer are the same thread (no core-to-core transfer)
@@ -20,6 +20,7 @@
 #endif
 
 #include "EmulationGame.hpp"
+#include "Util/Affinity.hpp"
 #include "UCT.hpp"
 #include "Util/MPSC.hpp"
 #include "Util/SPSC.hpp"
@@ -399,14 +400,14 @@ static uint64_t op_node() {
 	return node.actions.size();
 }
 
-static double scale_run(const ScaleWorkload& w, int threads, int cpu_stride, double seconds) {
+static double scale_run(const ScaleWorkload& w, int threads, double seconds) {
 	std::atomic<bool> go = false, stop = false;
 	std::vector<uint64_t> ops(threads, 0);
 	std::vector<std::thread> pool;
 	for (int t = 0; t < threads; t++) {
 		pool.emplace_back([&, t] {
-			// stride 2 skips SMT siblings where they're numbered next to each other (Windows)
-			pin(cpu_stride * t);
+			// same placement as the search's workers: physical cores first
+			pinThreadToCore(t);
 			while (!go.load()) {}
 			uint64_t count = 0, sink = 0;
 			while (!stop.load(std::memory_order_relaxed)) {
@@ -428,7 +429,7 @@ static double scale_run(const ScaleWorkload& w, int threads, int cpu_stride, dou
 	return seconds * 1e9 * threads / total;
 }
 
-static void scale(int max_threads, int cpu_stride) {
+static void scale(int max_threads) {
 	const ScaleWorkload workloads[] = {
 		{ "alu loop", op_alu },
 		{ "heap alloc/free (rollout mix)", op_alloc },
@@ -439,7 +440,7 @@ static void scale(int max_threads, int cpu_stride) {
 	for (int n = 1; n < max_threads; n *= 2) thread_counts.push_back(n);
 	thread_counts.push_back(max_threads);
 
-	std::printf("ns per op per thread, threads pinned to cpus 0, %d, %d, ... (slowdown vs 1 thread)\n", cpu_stride, 2 * cpu_stride);
+	std::printf("ns per op per thread, threads pinned physical cores first, %d cores (slowdown vs 1 thread)\n", physicalCoreCount());
 	std::printf("%-32s", "workload");
 	for (int n : thread_counts) std::printf(" %16d", n);
 	std::printf("\n");
@@ -447,7 +448,7 @@ static void scale(int max_threads, int cpu_stride) {
 		std::printf("%-32s", w.name);
 		double base = 0;
 		for (int n : thread_counts) {
-			double ns = median_of(3, [&] { return scale_run(w, n, cpu_stride, 1.0); });
+			double ns = median_of(3, [&] { return scale_run(w, n, 1.0); });
 			if (n == 1) base = ns;
 			std::printf(" %9.0f (%.2fx)", ns, ns / base);
 		}
@@ -476,10 +477,8 @@ int main(int argc, const char** argv) {
 	for (int i = 0; i < 16; i++) proto_path.emplace_back(0x1234567u * (i + 1), i);
 
 	if (scale_mode) {
-		// defaults suit this repo's 8 core / 16 thread dev laptop
-		int max_threads = argc > 2 ? std::stoi(argv[2]) : 8;
-		int cpu_stride = argc > 3 ? std::stoi(argv[3]) : 2;
-		scale(max_threads, cpu_stride);
+		int max_threads = argc > 2 ? std::stoi(argv[2]) : std::max(1, physicalCoreCount());
+		scale(max_threads);
 		return g_sink == 42 ? 1 : 0;
 	}
 
