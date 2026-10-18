@@ -1,6 +1,7 @@
 #include "Search.hpp"
 
 #include <bit>
+#include <cmath>
 #include <execution>
 #include <numeric>
 #include <ranges>
@@ -90,7 +91,17 @@ struct RequestTuning {
     int give_margin = 3;
     // after a REQUEST comes back unanswered, go round the loop this many times before asking again
     int backoff_iterations = 64;
+
+    // who to ask: score each thread by the load it last reported, minus this penalty if it
+    // shares a different L3 cache (chiplet) than the requester, since the rollout's data
+    // would then cross chiplets; keep the best steal_topk and sample one with Gumbel-max
+    // at steal_temperature (0 = always the best)
+    int steal_chiplet_penalty = 30;
+    int steal_topk = 4;
+    int steal_temperature = 10;
 };
+
+constexpr int MAX_STEAL_TOPK = 8;
 
 static RequestTuning tuning;
 
@@ -106,6 +117,10 @@ static void loadTuning() {
     read("NANA_LOW_WATER", tuning.low_water);
     read("NANA_GIVE_MARGIN", tuning.give_margin);
     read("NANA_BACKOFF_ITERATIONS", tuning.backoff_iterations);
+    read("NANA_STEAL_CHIPLET_PENALTY", tuning.steal_chiplet_penalty);
+    read("NANA_STEAL_TOPK", tuning.steal_topk);
+    read("NANA_STEAL_TEMPERATURE", tuning.steal_temperature);
+    tuning.steal_topk = std::clamp(tuning.steal_topk, 1, MAX_STEAL_TOPK);
 }
 
 // state private to one worker
@@ -123,10 +138,17 @@ struct alignas(64) WorkerLocal {
 
 static std::vector<WorkerLocal> worker_local;
 
+// which L3 cache (chiplet) each worker's core shares; workers are pinned by index
+static std::vector<int> worker_l3_group;
+
 static void resetWorkerLocal(int core_count) {
     worker_local = std::vector<WorkerLocal>(core_count);
     for (auto& local : worker_local) {
         local.load_view.assign(core_count, 0);
+    }
+    worker_l3_group.resize(core_count);
+    for (int i = 0; i < core_count; i++) {
+        worker_l3_group[i] = cacheGroupOfCore(i);
     }
 }
 
@@ -310,7 +332,14 @@ void Search::printStatistics() {
 
 #ifdef NANA_BENCH
     std::cout << "tuning: rollout_weight " << tuning.rollout_weight << " low_water " << tuning.low_water
-        << " give_margin " << tuning.give_margin << " backoff_iterations " << tuning.backoff_iterations << std::endl;
+        << " give_margin " << tuning.give_margin << " backoff_iterations " << tuning.backoff_iterations
+        << " steal_chiplet_penalty " << tuning.steal_chiplet_penalty << " steal_topk " << tuning.steal_topk
+        << " steal_temperature " << tuning.steal_temperature << std::endl;
+    {
+        int groups = 0;
+        for (int g : worker_l3_group) groups = std::max(groups, g + 1);
+        std::cout << "L3 cache groups across workers: " << groups << std::endl;
+    }
     std::cout << "duplicate expansions: " << duplicate_puts << std::endl;
 
     WorkerStatistics sum;
@@ -319,6 +348,7 @@ void Search::printStatistics() {
         sum.forwards += s.forwards;
         sum.gave += s.gave;
         sum.gave_hops += s.gave_hops;
+        sum.gave_cross_l3 += s.gave_cross_l3;
         sum.nones += s.nones;
         sum.received += s.received;
         sum.late += s.late;
@@ -359,6 +389,8 @@ void Search::printStatistics() {
     std::cout << "unanswered: " << sum.nones << std::endl;
     std::cout << "forwards: " << sum.forwards << std::endl;
     std::cout << "mean threads asked when answered: " << (sum.gave ? (double)sum.gave_hops / sum.gave : 0.0) << std::endl;
+    std::cout << "stolen rollouts: " << (sum.deferred ? 100.0 * sum.gave / sum.deferred : 0.0) << "% of all, "
+        << (sum.gave ? 100.0 * sum.gave_cross_l3 / sum.gave : 0.0) << "% of those across L3 caches" << std::endl;
     std::cout << "late answers: " << sum.late << std::endl;
 #endif
 
@@ -408,17 +440,71 @@ static uint64_t allThreadsMask() {
     return Search::core_count >= 64 ? ~0ull : (1ull << Search::core_count) - 1;
 }
 
-// a uniformly random thread from the mask; repeating this with the visited
-// threads removed walks the threads in a random order (a random simple cycle)
-static int randomThreadIn(uint64_t mask, int threadIdx) {
-    int count = std::popcount(mask);
-    int nth = Search::uct.rng[threadIdx].getRand(count);
-    for (int i = 0; i < 64; i++) {
-        if (mask & (1ull << i)) {
-            if (nth-- == 0) return i;
+// pick which thread to ask for a rollout on the requester's behalf, from the candidates mask,
+// using the chooser's picture of everyone's load. score = reported load, minus a penalty for
+// a different L3 cache than the requester; keep the top k; then Gumbel-max sample among them,
+// i.e. pick with probability proportional to exp(score / temperature).
+// asking only unvisited threads each hop still visits every thread at most once
+static int chooseVictim(int chooser, int requester, uint64_t candidates) {
+    const WorkerLocal& local = worker_local[chooser];
+    const int n = Search::core_count;
+
+    struct Candidate {
+        float score;
+        int thread;
+    };
+    Candidate top[MAX_STEAL_TOPK];
+    int count = 0;
+
+    // start from a random thread so equal scores (e.g. all 0 at startup) aren't always
+    // resolved towards the lowest indices
+    int start = (int)(fast_seed() % (uint32_t)n);
+    for (int step = 0; step < n; step++) {
+        int j = (start + step) % n;
+        if (!(candidates & (1ull << j))) continue;
+
+        float score = (float)local.load_view[j];
+        if (worker_l3_group[j] != worker_l3_group[requester]) {
+            score -= (float)tuning.steal_chiplet_penalty;
+        }
+
+        // insert into the small top-k list, kept sorted best first
+        int i;
+        if (count < tuning.steal_topk) {
+            i = count++;
+        }
+        else if (score > top[count - 1].score) {
+            // replaces the worst one kept
+            i = count - 1;
+        }
+        else {
+            continue;
+        }
+        while (i > 0 && top[i - 1].score < score) {
+            top[i] = top[i - 1];
+            i--;
+        }
+        top[i] = { score, j };
+    }
+    if (count == 0) {
+        return -1;
+    }
+    if (tuning.steal_temperature <= 0) {
+        return top[0].thread;
+    }
+
+    int chosen = top[0].thread;
+    float best = -INFINITY;
+    for (int i = 0; i < count; i++) {
+        // standard Gumbel noise from a uniform in (0, 1)
+        float u = ((float)(fast_seed() >> 8) + 0.5f) * (1.0f / 16777216.0f);
+        float value = top[i].score / (float)tuning.steal_temperature - std::log(-std::log(u));
+        if (value > best) {
+            best = value;
+            chosen = top[i].thread;
         }
     }
-    return -1;
+    return chosen;
 }
 
 // ask for a rollout before we run out, so the answer lands while we're still busy
@@ -436,18 +522,7 @@ static void maybeRequest(int threadIdx) {
         return;
     }
 
-    // first hop: whoever looks richest; if nobody clearly is, a random thread
-    int target = -1;
-    int best = load + tuning.rollout_weight;
-    for (int i = 0; i < Search::core_count; i++) {
-        if (i != threadIdx && local.load_view[i] > best) {
-            best = local.load_view[i];
-            target = i;
-        }
-    }
-    if (target < 0) {
-        target = randomThreadIn(allThreadsMask() & ~(1ull << threadIdx), threadIdx);
-    }
+    int target = chooseVictim(threadIdx, threadIdx, allThreadsMask() & ~(1ull << threadIdx));
 
     Job request(REQUEST);
     request.requester = threadIdx;
@@ -477,6 +552,9 @@ static void handleRequest(int threadIdx, Job&& request) {
         auto& stats = Search::uct.stats[threadIdx];
         stats.gave++;
         stats.gave_hops += std::popcount(request.visited) - 1;
+        if (worker_l3_group[threadIdx] != worker_l3_group[requester]) {
+            stats.gave_cross_l3++;
+        }
         send(threadIdx, requester, std::move(rollout));
         return;
     }
@@ -489,7 +567,8 @@ static void handleRequest(int threadIdx, Job&& request) {
         return;
     }
 
-    int next = randomThreadIn(unvisited, threadIdx);
+    // same choice as the first hop, from our own picture of the load, scored for the requester
+    int next = chooseVictim(threadIdx, requester, unvisited);
     request.visited |= 1ull << next;
     Search::uct.stats[threadIdx].forwards++;
     send(threadIdx, next, std::move(request));

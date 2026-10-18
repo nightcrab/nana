@@ -227,6 +227,7 @@ public:
     uint64_t forwards = 0;        // REQUESTs this thread passed on
     uint64_t gave = 0;            // REQUESTs this thread answered with a rollout
     uint64_t gave_hops = 0;       // threads asked before an answer, summed over gave
+    uint64_t gave_cross_l3 = 0;   // ...of which went to a thread on another L3 cache (chiplet)
     uint64_t nones = 0;           // REQUESTs that came back unanswered
     uint64_t received = 0;        // rollouts this thread got from a REQUEST
     uint64_t late = 0;            // ...of which arrived after we'd already run dry

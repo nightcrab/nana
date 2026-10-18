@@ -12,3 +12,8 @@ void pinThreadToCore(int index);
 
 // number of physical cores this process may run on (0 if unknown)
 int physicalCoreCount();
+
+// which last-level (L3) cache the cpu that pinThreadToCore(index) uses shares, e.g. its
+// chiplet on AMD parts. moving data between L3 groups is much slower than within one.
+// 0 for every index if the topology can't be read.
+int cacheGroupOfCore(int index);

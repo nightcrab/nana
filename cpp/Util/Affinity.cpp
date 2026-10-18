@@ -27,6 +27,8 @@ struct LogicalCpu {
 struct Topology {
     // logical cpus in physical-core-first order
     std::vector<LogicalCpu> order;
+    // parallel to order: which last-level (L3) cache each cpu shares, e.g. its chiplet
+    std::vector<int> l3_group;
     int cores = 0;
 };
 
@@ -84,6 +86,33 @@ Topology readTopology() {
     return interleave(cores);
 }
 
+// id of the L3 cache each logical cpu shares, keyed by (group, number)
+std::vector<int> readL3Groups(const std::vector<LogicalCpu>& cpus) {
+    std::vector<int> ids(cpus.size(), 0);
+    DWORD length = 0;
+    GetLogicalProcessorInformationEx(RelationCache, nullptr, &length);
+    std::vector<char> buffer(length);
+    auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
+    if (length == 0 || !GetLogicalProcessorInformationEx(RelationCache, info, &length)) {
+        return ids;
+    }
+    int next_id = 0;
+    for (DWORD offset = 0; offset < length;) {
+        auto* entry = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
+        if (entry->Cache.Level == 3) {
+            const GROUP_AFFINITY& affinity = entry->Cache.GroupMask;
+            for (size_t i = 0; i < cpus.size(); i++) {
+                if (cpus[i].group == affinity.Group && (affinity.Mask & (KAFFINITY(1) << cpus[i].number))) {
+                    ids[i] = next_id;
+                }
+            }
+            next_id++;
+        }
+        offset += entry->Size;
+    }
+    return ids;
+}
+
 void pin(const LogicalCpu& cpu) {
     GROUP_AFFINITY affinity = {};
     affinity.Group = (WORD)cpu.group;
@@ -135,6 +164,29 @@ Topology readTopology() {
     return interleave(cores);
 }
 
+// id of the L3 cache each logical cpu shares, from the cache index whose level is 3
+std::vector<int> readL3Groups(const std::vector<LogicalCpu>& cpus) {
+    std::vector<int> ids(cpus.size(), 0);
+    std::map<std::string, int> by_shared_list;
+    for (size_t i = 0; i < cpus.size(); i++) {
+        std::string base = "/sys/devices/system/cpu/cpu" + std::to_string(cpus[i].number) + "/cache/index";
+        for (int index = 0; index < 10; index++) {
+            std::ifstream level_file(base + std::to_string(index) + "/level");
+            int level = 0;
+            if (!(level_file >> level)) break;
+            if (level != 3) continue;
+            std::ifstream shared_file(base + std::to_string(index) + "/shared_cpu_list");
+            std::string shared;
+            if (shared_file >> shared) {
+                auto [it, inserted] = by_shared_list.try_emplace(shared, (int)by_shared_list.size());
+                ids[i] = it->second;
+            }
+            break;
+        }
+    }
+    return ids;
+}
+
 void pin(const LogicalCpu& cpu) {
     cpu_set_t set;
     CPU_ZERO(&set);
@@ -145,7 +197,11 @@ void pin(const LogicalCpu& cpu) {
 #endif
 
 const Topology& topology() {
-    static const Topology topology = readTopology();
+    static const Topology topology = [] {
+        Topology t = readTopology();
+        t.l3_group = readL3Groups(t.order);
+        return t;
+    }();
     return topology;
 }
 
@@ -161,4 +217,12 @@ void pinThreadToCore(int index) {
 
 int physicalCoreCount() {
     return topology().cores;
+}
+
+int cacheGroupOfCore(int index) {
+    const Topology& t = topology();
+    if (t.order.empty()) {
+        return 0;
+    }
+    return t.l3_group[index % t.order.size()];
 }
