@@ -209,6 +209,9 @@ class Job {
     uint64_t visited = 0;
     // EXPAND sent in answer to a REQUEST
     bool is_reply = false;
+
+    // NANA_BENCH: TSC when last sent, to measure how long messages sit in queues (0 = not timed)
+    uint64_t sent_at = 0;
 };
 
 class WorkerStatistics {
@@ -242,6 +245,12 @@ public:
     uint64_t job_count[JOB_TYPE_COUNT] = {};
     uint64_t rollout_cycles = 0;
     uint64_t rollout_count = 0;
+    // time messages spent queued before this thread picked them up
+    uint64_t queue_cycles = 0;
+    uint64_t queue_count = 0;
+    // selects at the root and depth 1, where every simulation (TDS) or many (MP) pass through
+    uint64_t top_cycles = 0;
+    uint64_t top_count = 0;
 };
 
 // one of these shared by all threads

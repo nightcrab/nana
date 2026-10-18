@@ -57,9 +57,10 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	std::vector<Piece> raw_actions = state.game.get_possible_piece_placements();
 
 	std::vector<Action> actions;
-	actions.reserve(raw_actions.size() * 2);
+	actions.reserve(raw_actions.size());
 
 	std::vector<Stochastic<int>> prior;
+	prior.reserve(raw_actions.size());
 
 	int idx = 0;
 
@@ -87,7 +88,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		actions[P.value].prior = P.probability;
 	}
 
-	this->actions = actions;
+	this->actions = std::move(actions);
 
 	this->id = state.hash();
 

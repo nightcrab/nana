@@ -348,7 +348,9 @@ void Search::printStatistics() {
 #ifdef NANA_BENCH
     // per-thread time split; wait includes polling and flushing the queues
     // rollout (expansion + eval) runs inside select and expand jobs, so it overlaps those columns
-    std::printf("thread    wait  select  backprop  expand   put | rollout |   jobs/s | ns/job: select backprop expand    put rollout\n");
+    // queue us: how long messages waited in this thread's queue; top: share of this thread's
+    // time spent selecting at the root or depth 1
+    std::printf("thread    wait  select  backprop  expand   put | rollout |   jobs/s | ns/job: select backprop expand    put rollout | queue us   top\n");
     for (int i = 0; i < (int)uct.stats.size(); i++) {
         const WorkerStatistics& s = uct.stats[i];
         uint64_t total = s.wait_cycles;
@@ -360,10 +362,11 @@ void Search::printStatistics() {
         // the thread was alive for the whole search, so total cycles ~ ms
         auto ns = [&](int t) { return s.job_count[t] ? (double)s.job_cycles[t] / total * ms * 1000.0 / s.job_count[t] : 0.0; };
         double rollout_ns = s.rollout_count ? (double)s.rollout_cycles / total * ms * 1000.0 / s.rollout_count : 0.0;
-        std::printf("%6d  %5.1f%%  %5.1f%%    %5.1f%%  %5.1f%% %5.1f%% |  %5.1f%% | %8.0f |      %6.0f   %6.0f %6.0f %6.0f %7.0f\n",
+        double queue_us = s.queue_count ? (double)s.queue_cycles / total * ms / s.queue_count : 0.0;
+        std::printf("%6d  %5.1f%%  %5.1f%%    %5.1f%%  %5.1f%% %5.1f%% |  %5.1f%% | %8.0f |      %6.0f   %6.0f %6.0f %6.0f %7.0f | %8.1f %4.1f%%\n",
             i, pct(s.wait_cycles), pct(s.job_cycles[SELECT]), pct(s.job_cycles[BACKPROP]),
             pct(s.job_cycles[EXPAND]), pct(s.job_cycles[PUT]), pct(s.rollout_cycles), jobs / (ms / 1e6),
-            ns(SELECT), ns(BACKPROP), ns(EXPAND), ns(PUT), rollout_ns);
+            ns(SELECT), ns(BACKPROP), ns(EXPAND), ns(PUT), rollout_ns, queue_us, pct(s.top_cycles));
     }
 #endif
 }
@@ -378,6 +381,9 @@ static int myLoad(int threadIdx) {
 static void send(int from, int to, Job&& job) {
     job.sender = (uint16_t)from;
     job.sender_load = myLoad(from);
+#ifdef NANA_BENCH
+    job.sent_at = __rdtsc();
+#endif
     Search::queues[to]->enqueue(std::move(job), from);
 }
 
@@ -670,7 +676,9 @@ void Search::processJob(const int threadIdx, Job&& job) {
             job.snapshots.clear();
             job.type = SELECT;
 
-            if (threadIdx == uct.getOwner(root_state.hash())) {
+            // tell the main thread a simulation has completed; it only needs telling once per
+            // search, so later root backprops skip the mutex (and the root hash) entirely
+            if (!min_work_bool.load(std::memory_order_relaxed)) {
                 // extra scope to prevent notifying the main thread while holding the lock
                 // this is to prevent the main thread from waiting on the condition variable while we're holding the lock
                 {
@@ -678,7 +686,6 @@ void Search::processJob(const int threadIdx, Job&& job) {
                     min_work_bool = true;
                 }
                 min_work_cv.notify_one();
-                // notify the main thread that we're done
             }
 
             // give ourself this job
@@ -791,6 +798,10 @@ void Search::search(std::stop_token stop, const int threadIdx) {
             out.rollout_count = tl_rollout_count;
             tl_rollout_cycles = tl_rollout_count = 0;
             out.wait_cycles = local.wait_cycles;
+            out.queue_cycles = local.queue_cycles;
+            out.queue_count = local.queue_count;
+            out.top_cycles = local.top_cycles;
+            out.top_count = local.top_count;
             for (int i = 0; i < JOB_TYPE_COUNT; i++) {
                 out.job_cycles[i] = local.job_cycles[i];
                 out.job_count[i] = local.job_count[i];
@@ -804,11 +815,17 @@ void Search::search(std::stop_token stop, const int threadIdx) {
     auto run = [&](Job&& job, [[maybe_unused]] uint64_t start) {
 #ifdef NANA_BENCH
         const JobType type = job.type;
+        const bool top = type == SELECT && job.path.size() <= 1;
 #endif
         processJob(threadIdx, std::move(job));
 #ifdef NANA_BENCH
-        profile.local.job_cycles[type] += __rdtsc() - start;
+        uint64_t cycles = __rdtsc() - start;
+        profile.local.job_cycles[type] += cycles;
         profile.local.job_count[type]++;
+        if (top) {
+            profile.local.top_cycles += cycles;
+            profile.local.top_count++;
+        }
 #endif
     };
 
@@ -831,6 +848,16 @@ void Search::search(std::stop_token stop, const int threadIdx) {
             if (job.sender < core_count) {
                 local.load_view[job.sender] = job.sender_load;
             }
+#ifdef NANA_BENCH
+            if (job.sent_at) {
+                // TSCs are synchronised across cores on current x86; clamp in case they aren't quite
+                int64_t queued = (int64_t)(__rdtsc() - job.sent_at);
+                profile.local.queue_cycles += queued > 0 ? queued : 0;
+                profile.local.queue_count++;
+                // jobs are reused; only time them again if they go through send()
+                job.sent_at = 0;
+            }
+#endif
             if (job.type == STOP) {
                 return;
             }
