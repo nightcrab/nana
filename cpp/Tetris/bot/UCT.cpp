@@ -3,9 +3,9 @@
 #include "Util/Distribution.hpp"
 #include "Eval.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <iostream>
-#include <mutex>
 
 using namespace Distribution;
 
@@ -143,42 +143,96 @@ Action& UCTNode::select_uct(int depth) {
 }
 
 
-Action& UCTNode::select(int depth) {
-	Action* best_action = &actions[0];
-	float highest_priority = -2.0;
+/*
+	D. Silver's PUCT formula.
 
-	/*
-		D. Silver's PUCT formula.
+	Dynamically selects actions based on both policy prior and pull statistics.
 
-		Dynamically selects actions based on both policy prior and pull statistics.
-
-		We modify the formula to explore more at shallow depths and exploit more
-		at deeper parts of the tree.
-	*/
-
+	We modify the formula to explore more at shallow depths and exploit more
+	at deeper parts of the tree.
+*/
+float UCTNode::c_puct(float node_N, int depth) {
 	constexpr float c_init = 1.25;
 	constexpr float c_base = 19652;
 
 	float D = 1 + depth/3;
 
-	float c_puct = ln((N + c_base + 1.0) / c_base) + c_init * D;
+	return ln((node_N + c_base + 1.0) / c_base) + c_init * D;
+}
 
+float UCTNode::priority(float c, float node_N, float R, float N, float prior) {
+	float Q = N == 0 ? 0.0 : R / N;
+	float U = c * prior * quick_sqrt(node_N) / (1 + N);
+	return Q + U;
+}
+
+Action& UCTNode::select(int depth) {
+	Action* best_action = &actions[0];
+	float highest_priority = -2.0;
+
+	float c = c_puct(N, depth);
 
 	for (Action& edge : actions) {
-		float Q = edge.Q();
-		if (edge.N == 0) {
-			Q = 0.0;
-		}
-		float U = c_puct * edge.prior * quick_sqrt(N) / (1 + edge.N);
-		float priority = Q + U;
+		float p = priority(c, N, edge.R, edge.N, edge.prior);
 
-		if (priority > highest_priority) {
+		if (p > highest_priority) {
 			best_action = &edge;
-			highest_priority = priority;
+			highest_priority = p;
 		}
 	}
 
 	return *best_action;
+}
+
+HistoryRow UCTNode::historyRow(uint32_t hash, const Action& chosen, int depth) const {
+	HistoryRow row;
+	row.hash = hash;
+	row.chosen = chosen.id;
+	row.node_N = N;
+	row.depth = depth;
+	row.edges[0] = { chosen.R, chosen.N, chosen.prior };
+	row.count = 1;
+
+	// keep the strongest siblings; the rest are unlikely to overtake before we're back
+	float c = c_puct(N, depth);
+	float best[HISTORY_COMPETITORS];
+	for (const Action& edge : actions) {
+		if (edge.id == chosen.id) {
+			continue;
+		}
+		float p = priority(c, N, edge.R, edge.N, edge.prior);
+
+		// insertion into the small sorted list of competitors
+		uint32_t i = row.count - 1;
+		if (i == HISTORY_COMPETITORS && p <= best[i - 1]) {
+			continue;
+		}
+		if (i == HISTORY_COMPETITORS) {
+			i--;
+		}
+		else {
+			row.count++;
+		}
+		while (i > 0 && best[i - 1] < p) {
+			best[i] = best[i - 1];
+			row.edges[i + 1] = row.edges[i];
+			i--;
+		}
+		best[i] = p;
+		row.edges[i + 1] = { edge.R, edge.N, edge.prior };
+	}
+	return row;
+}
+
+bool HistoryRow::stillChosen() const {
+	float c = UCTNode::c_puct(node_N, depth);
+	float chosen_p = UCTNode::priority(c, node_N, edges[0].R, edges[0].N, edges[0].prior);
+	for (uint32_t i = 1; i < count; i++) {
+		if (UCTNode::priority(c, node_N, edges[i].R, edges[i].N, edges[i].prior) > chosen_p) {
+			return false;
+		}
+	}
+	return true;
 }
 
 Action& UCTNode::select_SOR(RNG &rng) {
@@ -208,10 +262,6 @@ Action& UCTNode::select_SOR(RNG &rng) {
 
 bool UCT::nodeExists(uint32_t nodeID) {
 	// node could be on left or right side
-
-	// read lock
-	std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
-
 	bool exists = nodes_left[nodeID % workers]->find(nodeID) != nodes_left[nodeID % workers]->end();
 	exists = exists || (nodes_right[nodeID % workers]->find(nodeID) != nodes_right[nodeID % workers]->end());
 	return exists;
@@ -219,53 +269,38 @@ bool UCT::nodeExists(uint32_t nodeID) {
 
 
 UCTNode& UCT::getNode(uint32_t nodeID, int threadIdx) {
-	// if we're here, the node exists somewhere
+	// shards are owner-only, which is what makes the lock-free access safe
+	assert(getOwner(nodeID) == (uint32_t)threadIdx);
 
-	mutexes[nodeID % workers].lock();
-	bool on_left_side = !nodes_right[nodeID % workers]->count(nodeID);
-	mutexes[nodeID % workers].unlock();
-
-	if (on_left_side) {
-		// node is on the left side
-
-		if ((nodeID % workers) != threadIdx) {
-			// not the owner, so we're not allowed to write
-
-			mutexes[nodeID % workers].lock();
-			UCTNode& node = nodes_left[nodeID % workers]->at(nodeID);
-			mutexes[nodeID % workers].unlock();
-			return node;
-		}
-		else {
-			// copy from left side to right side
-			insertNode(nodes_left[nodeID % workers]->at(nodeID));
-		}
-	}
-
-	std::shared_lock<std::shared_mutex> lock(mutexes[nodeID % workers]);
-	return nodes_right[nodeID % workers]->at(nodeID);
+	return getNode(nodeID);
 };
 
-// singlethreaded version
+// owner or singlethreaded version
 UCTNode& UCT::getNode(uint32_t nodeID) {
+	auto& right = nodes_right[nodeID % workers].obj_;
 
-	if (nodes_right[nodeID % workers]->find(nodeID) == nodes_right[nodeID % workers]->end()) {
-		// copy from left side to right side
-		insertNode(nodes_left[nodeID % workers]->at(nodeID));
+	auto it = right.find(nodeID);
+	if (it != right.end()) {
+		return it->second;
 	}
 
-	return nodes_right[nodeID % workers]->at(nodeID);
+	// move from left side to right side
+	auto& left = nodes_left[nodeID % workers].obj_;
+	auto left_it = left.find(nodeID);
+	insertNode(std::move(left_it->second));
+	left.erase(left_it);
+
+	return right.at(nodeID);
 };
 
 
-void UCT::insertNode(const UCTNode &node) {
+bool UCT::insertNode(UCTNode node) {
+	const uint32_t id = node.id;
+
 	// insertions always done on right side
-	stats[node.id % workers].nodes++;
+	stats[id % workers].nodes++;
 
-	// write lock
-	std::unique_lock<std::shared_mutex> lock(mutexes[node.id % workers]);
-
-	nodes_right[node.id % workers]->insert({ node.id, node });
+	return nodes_right[id % workers]->try_emplace(id, std::move(node)).second;
 };
 
 uint32_t UCT::getOwner(uint32_t hash) {

@@ -7,3 +7,6 @@
 /cpp/.vs
 /build/
 /.vscode/
+/build-bench-*/
+/results/
+/ec2-results/

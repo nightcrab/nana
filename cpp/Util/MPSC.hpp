@@ -1,7 +1,9 @@
 ﻿#pragma once
 
 #include "SPSC.hpp"
+#include <memory>
 #include <thread>
+#include <vector>
 
 template<class T>
 class mpsc {
@@ -18,55 +20,52 @@ public:
     mpsc& operator=(const mpsc&) = delete;
 
     // producer function
-    inline void enqueue(const T& data, size_t id) noexcept {
-        queues[id]->push(data);
+    inline void enqueue(T&& data, size_t id) noexcept {
+        queues[id]->push(std::move(data));
     }
 
     // consumer function
-    inline T* single_peek(size_t id) noexcept {
-        T* front = queues[id]->front();
-        return front;
-    }
-
-    inline T* peek() noexcept {
-        T* front = nullptr;
-
-        for (int i = 0; i < size; i++) {
-            front = queues[i]->front();
-            if (front) {
-                break;
-            }
-        }
-
-        return front;
-    }
-
+    // only touches the producer queues when the local buffer has run dry
     inline bool isempty() noexcept {
-        return peek() == nullptr;
+        if (flushed_head == flushed_queue.size())
+            flush();
+        return flushed_head == flushed_queue.size();
     }
 
     // consumer function
-    inline void pop(size_t id) noexcept {
-        T* front = queues[id]->front();
-        if (front != nullptr) {
-            queues[id]->pop();
+    // jobs already pulled into the local buffer and not yet dequeued (no flush)
+    inline size_t buffered() const noexcept {
+        return flushed_queue.size() - flushed_head;
+    }
+
+    // consumer function
+    // drain every producer queue into the local buffer in one pass.
+    // the buffer is reset once it's used up; the vector keeps its capacity,
+    // so this doesn't allocate once warmed up
+    // (std::deque allocated a block per element for large T on MSVC)
+    inline void flush() {
+        if (flushed_head == flushed_queue.size()) {
+            flushed_queue.clear();
+            flushed_head = 0;
+        }
+        for (auto& queue : queues) {
+            while (T* item = queue->front()) {
+                flushed_queue.emplace_back(std::move(*item));
+                queue->pop();
+            }
         }
     }
 
     // consumer function
     inline T dequeue() noexcept {
-        T* front = nullptr;
-        size_t i = 0;
+        while (flushed_head == flushed_queue.size())
+            flush();
 
-        while(!(front = single_peek(i))) {
-			++i;
-            i %= size;
-		}
-
-        T ret = std::move(*front);
-        pop(i);
-        return std::move(ret);
+        return std::move(flushed_queue[flushed_head++]);
     }
+
+    std::vector<T> flushed_queue;
+    size_t flushed_head = 0;
     size_t size;
 private:
     std::vector<std::unique_ptr<rigtorp::SPSCQueue<T>>> queues;

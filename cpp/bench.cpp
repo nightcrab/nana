@@ -113,6 +113,8 @@ void print_strength() {
 		}
 	
 	std::cout << biggest_R << std::endl;
+	std::cout << "best N: " << biggest_N << std::endl;
+	std::cout << "best Q: " << (biggest_N > 0 ? biggest_R / biggest_N : 0.0f) << std::endl;
 }
 
 int main(int argc, const char** args) {
