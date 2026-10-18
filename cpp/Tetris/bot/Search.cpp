@@ -13,6 +13,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #ifdef _MSC_VER
 #include <intrin.h>
 #else
@@ -73,27 +74,39 @@ constexpr size_t MAX_PATH_DEPTH = 64;
 // owners queue rollouts for new leaves, and threads running low ask others for one.
 
 // work requesting: queued work is scored in work units, a queued message being 1.
-// a rollout (expansion + eval) is about 30 messages' worth on the bench profile;
-// the thresholds below are in the same units, so they can be tuned together
-constexpr int MESSAGE_WEIGHT = 1;
-#ifndef NANA_ROLLOUT_WEIGHT
-#define NANA_ROLLOUT_WEIGHT 30
-#endif
-constexpr int ROLLOUT_WEIGHT = NANA_ROLLOUT_WEIGHT;
-// ask for work once our queued work drops below this; we ask before running dry,
-// so the answer arrives while we're still busy
-#ifndef NANA_LOW_WATER
-#define NANA_LOW_WATER 30
-#endif
-constexpr int LOW_WATER = NANA_LOW_WATER;
-// give a rollout away if, without it, we'd still have this much more work than the requester.
-// 0 = strict: we must keep a whole rollout's worth more, so we need two pending to give one
-#ifndef NANA_GIVE_MARGIN
-#define NANA_GIVE_MARGIN 3
-#endif
-constexpr int GIVE_MARGIN = NANA_GIVE_MARGIN == 0 ? ROLLOUT_WEIGHT : NANA_GIVE_MARGIN;
-// after a REQUEST comes back unanswered, go round the loop this many times before asking again
-constexpr int REQUEST_BACKOFF_ITERATIONS = 64;
+// the thresholds are in the same units, so they can be tuned together.
+// they only decide which thread runs a rollout and when, not what the search computes,
+// so they're safe to tune for throughput. each can be overridden by an environment
+// variable (NANA_LOW_WATER=60 etc., see loadTuning), read when a search starts.
+struct RequestTuning {
+    // a queued message
+    int message_weight = 1;
+    // a rollout (expansion + eval): about 30 messages' worth on the bench profile
+    int rollout_weight = 30;
+    // ask for work once our queued work drops below this; we ask before running dry,
+    // so the answer arrives while we're still busy
+    int low_water = 30;
+    // give a rollout away if, without it, we'd still have this much more work than the requester
+    int give_margin = 3;
+    // after a REQUEST comes back unanswered, go round the loop this many times before asking again
+    int backoff_iterations = 64;
+};
+
+static RequestTuning tuning;
+
+static void loadTuning() {
+    auto read = [](const char* name, int& value) {
+        if (const char* text = std::getenv(name)) {
+            value = std::atoi(text);
+        }
+    };
+    tuning = RequestTuning();
+    read("NANA_MESSAGE_WEIGHT", tuning.message_weight);
+    read("NANA_ROLLOUT_WEIGHT", tuning.rollout_weight);
+    read("NANA_LOW_WATER", tuning.low_water);
+    read("NANA_GIVE_MARGIN", tuning.give_margin);
+    read("NANA_BACKOFF_ITERATIONS", tuning.backoff_iterations);
+}
 
 // state private to one worker
 struct alignas(64) WorkerLocal {
@@ -164,6 +177,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
         queues[rootOwnerIdx]->enqueue(Job(root_state, SELECT), core_count);
     }
 
+    loadTuning();
     resetWorkerLocal(core_count);
 
     // Spawn worker threads
@@ -228,6 +242,7 @@ void Search::continueSearch(EmulationGame state) {
 
     }
 
+    loadTuning();
     resetWorkerLocal(core_count);
 
     for (auto& idx : core_indices) {
@@ -294,6 +309,8 @@ void Search::printStatistics() {
     std::cout << "tree depth: " << depth << std::endl;
 
 #ifdef NANA_BENCH
+    std::cout << "tuning: rollout_weight " << tuning.rollout_weight << " low_water " << tuning.low_water
+        << " give_margin " << tuning.give_margin << " backoff_iterations " << tuning.backoff_iterations << std::endl;
     std::cout << "duplicate expansions: " << duplicate_puts << std::endl;
 
     WorkerStatistics sum;
@@ -373,8 +390,8 @@ void Search::printStatistics() {
 
 // how much work this thread already has queued, in work units
 static int myLoad(int threadIdx) {
-    return (int)worker_local[threadIdx].pending.size() * ROLLOUT_WEIGHT
-        + (int)Search::queues[threadIdx]->buffered() * MESSAGE_WEIGHT;
+    return (int)worker_local[threadIdx].pending.size() * tuning.rollout_weight
+        + (int)Search::queues[threadIdx]->buffered() * tuning.message_weight;
 }
 
 // every message carries the sender's load, so receivers learn everyone's load for free
@@ -415,13 +432,13 @@ static void maybeRequest(int threadIdx) {
         return;
     }
     int load = myLoad(threadIdx);
-    if (load >= LOW_WATER) {
+    if (load >= tuning.low_water) {
         return;
     }
 
     // first hop: whoever looks richest; if nobody clearly is, a random thread
     int target = -1;
-    int best = load + ROLLOUT_WEIGHT;
+    int best = load + tuning.rollout_weight;
     for (int i = 0; i < Search::core_count; i++) {
         if (i != threadIdx && local.load_view[i] > best) {
             best = local.load_view[i];
@@ -448,10 +465,10 @@ static void handleRequest(int threadIdx, Job&& request) {
     WorkerLocal& local = worker_local[threadIdx];
     int requester = request.requester;
 
-    // without the rollout we give, we must still have GIVE_MARGIN more work than the requester,
+    // without the rollout we give, we must still have give_margin more work than the requester,
     // so work only flows downhill and can't bounce back and forth
     int requester_load = request.requester_load;
-    if (!local.pending.empty() && myLoad(threadIdx) - ROLLOUT_WEIGHT >= requester_load + GIVE_MARGIN) {
+    if (!local.pending.empty() && myLoad(threadIdx) - tuning.rollout_weight >= requester_load + tuning.give_margin) {
         // give away the oldest one
         Job rollout = std::move(local.pending.front());
         local.pending.erase(local.pending.begin());
@@ -496,7 +513,7 @@ void Search::processJob(const int threadIdx, Job&& job) {
         // nobody had a rollout to spare
         WorkerLocal& local = worker_local[threadIdx];
         local.request_outstanding = false;
-        local.request_backoff = REQUEST_BACKOFF_ITERATIONS;
+        local.request_backoff = tuning.backoff_iterations;
         uct.stats[threadIdx].nones++;
         return;
     }
