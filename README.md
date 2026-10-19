@@ -29,13 +29,9 @@ Transposition Driven Scheduling is a load balancing technique that allows a prog
 
 ### Work Requesting
 
-One of the challenges specifically of searching Tetris using TDS-MCTS is that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3)[[4]](#4) encounter significant load balancing and workload congestion issues when applied without dynamic load balancing.
+One of the challenges specifically of searching Tetris using TDS-MCTS is that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3)[[4]](#4) encounter significant congestion issues when applied to this domain without dynamic load balancing.
 
-To address this, Nana uses a type of work stealing called Work Requesting that prevents the need for a global job structure or system-wide mutexes. In particular it preserves the message-passing paradigm that avoids significant read-write contention at high worker counts.
-
-Nana workers try to predict when they are at risk of running out of work, and request to borrow work from individual workers using a tuned heuristic taking into account load statistics and memory topology. The request may or may not be fulfilled based on the victim's available work which is determined at the time of request arrival.
-
-WR replaces the previous load balancing strategy of Work Witholding used in older versions of Nana. Unlike WR, WW eliminates wait times, but introduces increasing mutex pressure as more work stealing takes place.
+To address this, Nana workers try to predict when they are at risk of running out of work, and pre-emptively request to borrow work from individual workers using a tuned heuristic taking into account load statistics and memory topology.
 
 ## Scaling Experiments
 
