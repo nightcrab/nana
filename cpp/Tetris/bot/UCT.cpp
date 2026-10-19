@@ -4,6 +4,7 @@
 #include "Eval.hpp"
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <cmath>
 #include <iostream>
 
@@ -33,31 +34,42 @@ static float quick_sqrt(const float x)
 	return x * u.x * (1.5f - xhalf * u.x * u.x);// Newton step, repeating increases accuracy 
 }
 
-void Action::addN() {
+void EdgeStats::addN() {
 	N = N * 0.9999 + 1;
 }
-void Action::addReward(float reward) {
+void EdgeStats::addReward(float reward) {
 	R = R * 0.9999 + reward;
 }
 
-void Action::updateTime(int newtime) {
-	if (time != newtime) {
-		N = N / 5;
-		R = R / 5;
-		time = newtime;
+// Q, the average return
+float EdgeStats::Q() const {
+	return R / N;
+}
+
+void UCTNode::updateTime(size_t i, int newtime) {
+	if (time(i) != newtime) {
+		EdgeStats& edge = stats(i);
+		edge.N = edge.N / 5;
+		edge.R = edge.R / 5;
+		time(i) = newtime;
 	}
 }
 
-// Q, the average return
-float Action::Q() {
-	return R / N;
+PackedMove PackedMove::pack(const Move& move) {
+	const Piece& piece = move.piece;
+	return { piece.position, piece.rotation, piece.type, piece.spin, move.null_move };
+}
+
+Move PackedMove::unpack() const {
+	return Move(Piece(type, rotation, position, spin), null_move);
 }
 
 UCTNode::UCTNode(const EmulationGame &state) {
 	std::vector<Piece> raw_actions = state.game.get_possible_piece_placements();
 
-	std::vector<Action> actions;
-	actions.reserve(raw_actions.size());
+	std::vector<EdgeStats> edge_stats(raw_actions.size());
+	std::vector<ColdAction> cold;
+	cold.reserve(raw_actions.size());
 
 	std::vector<Stochastic<int>> prior;
 	prior.reserve(raw_actions.size());
@@ -70,7 +82,15 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		float eval = Eval::eval_CC(state.game, Move(raw_action, false));
 		// Surface abstraction step
 		raw_action.position.y -= gheight;
-		actions.emplace_back(Move(raw_action, false), idx, eval);
+		ColdAction c;
+		c.move = PackedMove::pack(Move(raw_action, false));
+		c.eval = eval;
+		// the minos must follow from type and rotation for packing to be lossless
+#ifndef NDEBUG
+		const Move unpacked = c.move.unpack();
+		assert(std::memcmp(&unpacked.piece.minos, &raw_action.minos, sizeof(raw_action.minos)) == 0);
+#endif
+		cold.push_back(c);
 		prior.push_back(Stochastic<int>(idx, eval));
 		idx++;
 	}
@@ -85,35 +105,36 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	prior = normalise(prior);
 
 	for (Stochastic<int>& P : prior) {
-		actions[P.value].prior = P.probability;
+		edge_stats[P.value].prior = P.probability;
 	}
 
-	this->actions = std::move(actions);
+	this->edge_stats = std::move(edge_stats);
+	this->cold = std::move(cold);
 
 	this->id = state.hash();
 
 	this->N = 1;
 };
 
-Action& UCTNode::select_r_max() {
-	Action* best_action = &actions[0];
+size_t UCTNode::select_r_max() {
+	size_t best_action = 0;
 	float highest_priority = -1.0;
 
-	for (Action& edge : actions) {
-		float priority = std::max(edge.eval, edge.R);
+	for (size_t i = 0; i < actionCount(); i++) {
+		float priority = std::max(eval(i), stats(i).R);
 		if (priority > highest_priority) {
-			best_action = &edge;
+			best_action = i;
 			highest_priority = priority;
 		}
 	}
 
-	return *best_action;
+	return best_action;
 }
 
 
 
-Action& UCTNode::select_uct(int depth) {
-	Action* best_action = &actions[0];
+size_t UCTNode::select_uct(int depth) {
+	size_t best_action = 0;
 	float highest_priority = -2.0;
 
 	/*
@@ -122,9 +143,10 @@ Action& UCTNode::select_uct(int depth) {
 
 	float C = 1.507;
 
-	for (Action& edge : actions) {
+	for (size_t i = 0; i < actionCount(); i++) {
+		const EdgeStats& edge = stats(i);
 		if (edge.N == 0) {
-			best_action = &edge;
+			best_action = i;
 			break;
 		}
 		float Q = edge.Q();
@@ -135,12 +157,12 @@ Action& UCTNode::select_uct(int depth) {
 		float priority = Q + U;
 
 		if (priority > highest_priority) {
-			best_action = &edge;
+			best_action = i;
 			highest_priority = priority;
 		}
 	}
 
-	return *best_action;
+	return best_action;
 }
 
 
@@ -167,28 +189,109 @@ float UCTNode::priority(float c, float node_N, float R, float N, float prior) {
 	return Q + U;
 }
 
-Action& UCTNode::select(int depth) {
-	Action* best_action = &actions[0];
+size_t UCTNode::select(int depth) {
+	size_t best_action = 0;
 	float highest_priority = -2.0;
 
 	float c = c_puct(N, depth);
 
-	for (Action& edge : actions) {
+	for (size_t i = 0; i < actionCount(); i++) {
+		const EdgeStats& edge = stats(i);
 		float p = priority(c, N, edge.R, edge.N, edge.prior);
 
 		if (p > highest_priority) {
-			best_action = &edge;
+			best_action = i;
 			highest_priority = p;
 		}
 	}
 
-	return *best_action;
+	return best_action;
 }
 
-HistoryRow UCTNode::historyRow(uint32_t hash, const Action& chosen, int depth) const {
+// keeps row.edges[1..] the strongest edges seen so far, by p, strongest first.
+// best[] holds their priorities; ties keep the earlier edge
+static void offerCompetitor(HistoryRow& row, float* best, uint32_t capacity, float p, const EdgeStats& edge) {
+	uint32_t i = row.count - 1;
+	if (i == capacity && p <= best[i - 1]) {
+		return;
+	}
+	if (i == capacity) {
+		i--;
+	}
+	else {
+		row.count++;
+	}
+	while (i > 0 && best[i - 1] < p) {
+		best[i] = best[i - 1];
+		row.edges[i + 1] = row.edges[i];
+		i--;
+	}
+	best[i] = p;
+	row.edges[i + 1] = { edge.R, edge.N, edge.prior };
+}
+
+size_t UCTNode::selectWithCompetitors(int depth, HistoryRow& row) const {
+	size_t best_action = 0;
+	float highest_priority = -2.0;
+	float c = c_puct(N, depth);
+
+	// historyRow runs after the virtual loss, so it ranks with the node's N + 1. keep one
+	// more than it records, since the edge we pick (which it skips) may be among them
+	const float hist_N = N + 1;
+	const float hist_c = c_puct(hist_N, depth);
+	constexpr uint32_t capacity = HISTORY_COMPETITORS + 1;
+	HistoryEdge ranked[capacity];
+	size_t ranked_ids[capacity];
+	float best[capacity];
+	uint32_t ranked_count = 0;
+
+	for (size_t i = 0; i < actionCount(); i++) {
+		const EdgeStats& edge = stats(i);
+		float p = priority(c, N, edge.R, edge.N, edge.prior);
+		if (p > highest_priority) {
+			best_action = i;
+			highest_priority = p;
+		}
+
+		// same insertion as offerCompetitor, tracking which edge each slot holds
+		float h = priority(hist_c, hist_N, edge.R, edge.N, edge.prior);
+		uint32_t k = ranked_count;
+		if (k == capacity && h <= best[k - 1]) {
+			continue;
+		}
+		if (k == capacity) {
+			k--;
+		}
+		else {
+			ranked_count++;
+		}
+		while (k > 0 && best[k - 1] < h) {
+			best[k] = best[k - 1];
+			ranked[k] = ranked[k - 1];
+			ranked_ids[k] = ranked_ids[k - 1];
+			k--;
+		}
+		best[k] = h;
+		ranked[k] = { edge.R, edge.N, edge.prior };
+		ranked_ids[k] = i;
+	}
+
+	// drop the chosen edge, keep the top HISTORY_COMPETITORS of the rest
+	row.count = 1;
+	for (uint32_t k = 0; k < ranked_count && row.count < 1 + HISTORY_COMPETITORS; k++) {
+		if (ranked_ids[k] == best_action) {
+			continue;
+		}
+		row.edges[row.count++] = ranked[k];
+	}
+	return best_action;
+}
+
+HistoryRow UCTNode::historyRow(uint32_t hash, size_t chosen_id, int depth) const {
+	const EdgeStats& chosen = stats(chosen_id);
 	HistoryRow row;
 	row.hash = hash;
-	row.chosen = chosen.id;
+	row.chosen = (uint32_t)chosen_id;
 	row.node_N = N;
 	row.depth = depth;
 	row.edges[0] = { chosen.R, chosen.N, chosen.prior };
@@ -197,30 +300,12 @@ HistoryRow UCTNode::historyRow(uint32_t hash, const Action& chosen, int depth) c
 	// keep the strongest siblings; the rest are unlikely to overtake before we're back
 	float c = c_puct(N, depth);
 	float best[HISTORY_COMPETITORS];
-	for (const Action& edge : actions) {
-		if (edge.id == chosen.id) {
+	for (size_t i = 0; i < actionCount(); i++) {
+		if (i == chosen_id) {
 			continue;
 		}
-		float p = priority(c, N, edge.R, edge.N, edge.prior);
-
-		// insertion into the small sorted list of competitors
-		uint32_t i = row.count - 1;
-		if (i == HISTORY_COMPETITORS && p <= best[i - 1]) {
-			continue;
-		}
-		if (i == HISTORY_COMPETITORS) {
-			i--;
-		}
-		else {
-			row.count++;
-		}
-		while (i > 0 && best[i - 1] < p) {
-			best[i] = best[i - 1];
-			row.edges[i + 1] = row.edges[i];
-			i--;
-		}
-		best[i] = p;
-		row.edges[i + 1] = { edge.R, edge.N, edge.prior };
+		const EdgeStats& edge = stats(i);
+		offerCompetitor(row, best, HISTORY_COMPETITORS, priority(c, N, edge.R, edge.N, edge.prior), edge);
 	}
 	return row;
 }
@@ -236,13 +321,13 @@ bool HistoryRow::stillChosen() const {
 	return true;
 }
 
-Action& UCTNode::select_SOR(RNG &rng) {
+size_t UCTNode::select_SOR(RNG &rng) {
 	const float k = 0.0;
 
 	std::vector<Stochastic<int>> policy;
 
-	for (int idx = 0; idx < actions.size(); idx++) {
-		policy.push_back(Stochastic<int>(idx, std::max(actions[idx].eval, actions[idx].R)));
+	for (size_t idx = 0; idx < actionCount(); idx++) {
+		policy.push_back(Stochastic<int>((int)idx, std::max(eval(idx), stats(idx).R)));
 	}
 
 	sort_des(policy);
@@ -254,11 +339,7 @@ Action& UCTNode::select_SOR(RNG &rng) {
 
 	policy = normalise(policy);
 
-	int id = sample(policy, rng);
-
-	Action &action = actions[id];
-
-	return action;
+	return (size_t)sample(policy, rng);
 }
 
 bool UCT::nodeExists(uint32_t nodeID) {

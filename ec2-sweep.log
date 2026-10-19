@@ -1,70 +1,80 @@
-setting up 3.138.190.115 (benchmarking master = 90f71b1acb3b162ed4ddcffbb2e34a6d0cae696f)
-uploading uncommitted files: scripts/ablation_bench.sh cpp/Tetris/bot/Search.cpp cpp/Tetris/bot/Search.hpp cpp/Tetris/bot/UCT.hpp cpp/Util/MPSC.hpp ec2-sweep.log 
-Shutdown scheduled for Mon 2026-10-19 06:24:25 UTC, use 'shutdown -c' to cancel.
+setting up 18.119.13.207 (benchmarking master = 69c3bfb3b042c2cd89863bb8104517afbb6cf997)
+uploading uncommitted files: scripts/ablation_bench.sh cpp/Tetris/bot/Search.cpp cpp/Tetris/bot/Search.hpp cpp/Tetris/bot/UCT.cpp cpp/Tetris/bot/UCT.hpp cpp/bench.cpp cpp/msgbench.cpp ec2-sweep.log 
+Shutdown scheduled for Mon 2026-10-19 07:11:18 UTC, use 'shutdown -c' to cancel.
 Hit:1 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute InRelease
 Hit:2 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-updates InRelease
 Hit:3 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-backports InRelease
 Hit:4 http://security.ubuntu.com/ubuntu resolute-security InRelease
 Reading package lists...
 sweep running; polling every 60s (instance stops itself after 180 minutes regardless)
-test 0  threads 1  rep 2 done
-test 0  threads 8  rep 2 done
-test 0  threads 16  rep 1 done
+test 0  threads 1  rep 1 done
+test 0  threads 8  rep 1 done
+test 0  threads 8  rep 4 done
+test 0  threads 16  rep 2 done
 test 0  threads 32  rep 1 done
 test 0  threads 32  rep 3 done
-test 1  threads 1  rep 4 done
-test 1  threads 8  rep 3 done
+test 1  threads 1  rep 3 done
+test 1  threads 8  rep 2 done
+test 1  threads 16  rep 1 done
 test 1  threads 16  rep 3 done
 test 1  threads 32  rep 2 done
 sweep finished with exit code 0
-copying results to ec2-results/20261019-122413
+copying results to ec2-results/20261019-131106
 shutting the instance down
-median of reps; ratios are medians of per-rep ratios (same rep = run back to back)
-vs base: includes the cheaper profiling; vs sample: the change itself
+median of reps; ratios are medians of per-rep ratios vs base (same rep = run back to back)
+rss/sim: memory per simulation run, vs baseline (the tree grows with simulations)
 
 test 0
-  thr variant    sims/s  vs base vs sample   wait  select backprop  rollout queue us  rss MiB stranded
-    1 base        73.0k                      0.0%     640      154     9212      0.1      534        0
-    1 sample      74.3k    1.012             0.0%     610      174     9188      0.1      538        0
-    1 ptr         76.6k    1.064     1.041   0.0%     640      144     8730      0.0      564        0
-    1 bell        76.1k    1.028     1.024   0.0%     626      179     8696      0.1      552        0
-    1 all         78.2k    1.084     1.060   0.0%     626      146     8614      0.0      570        0
-    8 base       457.1k                      4.2%     879      304    10674      6.9     3439        0
-    8 sample     462.3k    1.011             9.2%     848      312    10217      6.8     3490        0
-    8 ptr        478.7k    1.040     1.036   9.1%     815      257     9543      6.6     3592        0
-    8 bell       461.2k    1.009     0.996   7.4%     852      319     9838      6.7     3521        0
-    8 all        477.8k    1.054     1.032   9.2%     802      271     9507      6.3     3662        0
-   16 base       769.7k                      5.8%    1162      573    11137      8.7     5848        0
-   16 sample     770.0k    1.003             7.6%    1159      575    10678      8.3     5871        0
-   16 ptr        826.2k    1.073     1.094   8.1%    1111      491     9846      7.6     6238        0
-   16 bell       764.9k    1.012     0.990   7.5%    1242      640    10360      8.4     5873        0
-   16 all        830.2k    1.109     1.096   7.2%    1136      555     9579      7.6     6092        0
-   32 base      1341.2k                      8.1%    1351      771    11837     10.5    10611        0
-   32 sample    1299.6k    0.996             9.5%    1398      781    11382     10.3    10471        0
-   32 ptr       1484.7k    1.108     1.148  10.3%    1267      617    10282      9.3    10869        0
-   32 bell      1262.5k    0.939     0.972  11.7%    1394      829    10979     10.9    10359        1
-   32 all       1375.5k    1.048     1.078   9.5%    1347      689    10370      9.4    10398        0
+  thr variant     sims/s  ratio   wait  select backprop  rollout queue us  rss MiB rss/sim depth bad moves
+    1 base         76.7k          0.0%     603      129     8924      0.0      560            23         0
+    1 compact      75.9k  0.988   0.0%     616      131     9188      0.0      430   0.788    20         0
+    1 single       78.8k  1.027   0.0%     560      126     8858      0.0      583   1.020    20         0
+    1 nocopy       74.8k  0.975   0.0%     638      164     8919      0.0      557   1.032    20         0
+    1 lookup       76.8k  0.984   0.0%     632      131     8935      0.0      569   1.030    22         0
+    1 all          77.4k  1.009   0.0%     576      174     9112      0.0      437   0.778    22         0
+    8 base        478.2k          6.0%     847      284    10317      6.9     3632            28         0
+    8 compact     494.2k  1.033   6.0%     848      272     9779      6.7     2718   0.736    28         0
+    8 single      478.1k  1.012   6.0%     785      258    10543      6.9     3735   1.034    26         0
+    8 nocopy      469.5k  1.002   6.4%     809      338    10305      6.9     3630   1.013    26         0
+    8 lookup      479.3k  0.990   6.3%     847      272    10036      6.9     3618   1.008    28         0
+    8 all         482.2k  1.012   6.2%     822      310     9923      6.8     2752   0.752    26         0
+   16 base        836.0k          5.1%    1167      558     9904      7.8     6059            30         0
+   16 compact     835.7k  1.001   4.7%    1168      531     9832      7.6     4671   0.768    30         0
+   16 single      830.8k  0.999   4.9%    1096      530    10307      7.9     6331   1.057    28         0
+   16 nocopy      820.1k  0.983   4.8%    1121      592    10152      7.8     6138   1.029    26         0
+   16 lookup      839.0k  1.001   4.8%    1183      539    10046      7.7     6018   1.002    28         0
+   16 all         847.3k  1.018   5.2%    1084      619     9733      7.7     4614   0.768    28         0
+   32 base       1416.0k          8.1%    1328      685    10852      9.8    10719            28         0
+   32 compact    1432.4k  1.012   7.5%    1334      687    10219      9.3     7985   0.739    30         0
+   32 single     1428.4k  1.005   7.7%    1295      693    10534      9.5    11057   1.025    30         0
+   32 nocopy     1365.3k  0.967   8.2%    1334      790    10583      9.9    10280   0.992    30         0
+   32 lookup     1448.6k  1.002   7.2%    1327      687    10400      9.4    10658   0.988    30         0
+   32 all        1476.4k  1.039   7.7%    1253      782    10088      9.6     8242   0.739    29         0
 
 test 1
-  thr variant    sims/s  vs base vs sample   wait  select backprop  rollout queue us  rss MiB stranded
-    1 base        73.1k                      0.0%     572      198    10098      0.1      570        0
-    1 sample      73.4k    1.005             0.0%     604      199     9510      0.1      559        0
-    1 ptr         80.8k    1.087     1.090   0.0%     572      166     8910      0.0      611        0
-    1 bell        76.6k    1.062     1.024   0.0%     603      219     9201      0.1      588        0
-    1 all         82.0k    1.103     1.120   0.0%     573      171     8839      0.0      613        0
-    8 base       459.8k                      5.0%     893      334    10765      7.0     3560        0
-    8 sample     464.5k    1.025             9.5%     851      318    10073      7.0     3544        0
-    8 ptr        490.8k    1.070     1.048   9.9%     797      264     9862      6.4     3710        0
-    8 bell       468.6k    1.019     1.009   8.3%     851      329    10013      6.6     3597        0
-    8 all        482.7k    1.069     1.042   9.5%     803      281     9807      6.6     3698        0
-   16 base       788.2k                      5.4%    1180      605    10847      8.4     6044        0
-   16 sample     776.9k    0.990             8.3%    1140      593    10346      8.5     5778        0
-   16 ptr        877.4k    1.122     1.133   7.8%    1077      484     9857      7.2     6382        0
-   16 bell       785.1k    0.987     1.011   8.4%    1194      659     9509      8.0     5997        0
-   16 all        811.2k    1.039     1.047   7.4%    1172      556    10088      7.9     6062        0
-   32 base      1316.9k                      7.7%    1356      775    12039     10.5    10752        0
-   32 sample    1325.3k    0.995             9.7%    1331      777    11208     10.1    10704        0
-   32 ptr       1412.2k    1.083     1.072   9.8%    1275      622    10803      9.2    10780        0
-   32 bell      1231.3k    0.944     0.938  10.9%    1424      846    11490     10.9    10420        1
-   32 all       1426.8k    1.087     1.083   9.4%    1304      686    10662      9.3    10600        0
-results in ec2-results/20261019-122413
+  thr variant     sims/s  ratio   wait  select backprop  rollout queue us  rss MiB rss/sim depth bad moves
+    1 base         77.9k          0.0%     600      152     9044      0.0      588            26         0
+    1 compact      83.1k  1.066   0.0%     556      164     8574      0.0      462   0.735    26         0
+    1 single       79.9k  1.031   0.0%     562      150     8962      0.0      592   0.991    26         0
+    1 nocopy       79.9k  1.019   0.0%     582      203     8764      0.0      581   0.952    26         0
+    1 lookup       75.8k  0.996   0.0%     602      158     9302      0.0      595   1.027    26         0
+    1 all          78.8k  1.018   0.0%     542      201     9011      0.0      455   0.750    26         0
+    8 base        485.1k          6.6%     826      289     9914      6.8     3687            30         0
+    8 compact     496.2k  1.024   5.9%     819      276    10280      6.7     2802   0.743    28         0
+    8 single      501.5k  1.022   6.6%     764      288     9801      6.7     3876   1.015    30         0
+    8 nocopy      485.7k  0.997   6.2%     813      352    10018      6.9     3771   1.029    30         0
+    8 lookup      496.8k  1.005   6.5%     833      283     9899      6.7     3669   0.981    30         0
+    8 all         501.0k  1.015   6.3%     763      346     9875      6.7     2767   0.757    30         0
+   16 base        782.6k          5.9%    1178      560    10601      8.2     6004            30         0
+   16 compact     837.4k  1.053   4.7%    1127      536    10297      7.6     4682   0.736    30         0
+   16 single      858.2k  1.095   4.8%    1066      533    10429      7.7     6488   0.997    28         0
+   16 nocopy      798.2k  1.007   5.4%    1150      612    10002      8.1     6040   0.986    30         0
+   16 lookup      840.1k  1.069   4.8%    1163      550    10032      7.7     6391   0.998    31         0
+   16 all         851.1k  1.071   5.1%    1067      620    10234      7.7     4833   0.750    31         0
+   32 base       1502.6k          7.0%    1299      682    10419      9.1    11331            30         0
+   32 compact    1525.3k  1.028   6.8%    1316      679    10193      8.7     8533   0.731    32         0
+   32 single     1541.9k  1.034   7.2%    1230      685    10267      8.8    11259   0.951    32         0
+   32 nocopy     1448.9k  0.983   7.3%    1302      766    10333      9.2    10953   0.990    32         0
+   32 lookup     1516.5k  1.033   7.1%    1295      675    10522      9.0    11357   0.983    30         0
+   32 all        1472.1k  0.978   7.0%    1240      775    10457      8.9     8287   0.751    30         0
+results in ec2-results/20261019-131106

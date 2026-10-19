@@ -672,7 +672,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         if (exists) {
 
             UCTNode& node = uct.getNode(hash, threadIdx);
-            Action* action = &node.actions[0];
+            size_t action = 0;
+            [[maybe_unused]] HistoryRow row;
 
 #ifdef NANA_BENCH
             for (const HashActionPair& step : job.path) {
@@ -688,28 +689,45 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 node.history = job.history;
             }
 
-            if constexpr (search_style == NANA) {
-                action = &node.select(depth);
+            // MP-MCTS with PUCT: the select scan also collects the history row's competitors
+            constexpr bool single_pass = NANA_MPMCTS && search_style == NANA;
+            if constexpr (single_pass) {
+                action = node.selectWithCompetitors(depth, row);
+            }
+            else if constexpr (search_style == NANA) {
+                action = node.select(depth);
             }
             if constexpr (search_style == CC) {
 
-                action = &node.select_SOR(uct.rng[threadIdx]);
+                action = node.select_SOR(uct.rng[threadIdx]);
             }
 
             // Virtual Loss by setting N := N+1
             node.N += 1;
 
-            action->addN();
+            EdgeStats& edge = node.stats(action);
+            edge.addN();
 
-            action->updateTime(time);
+            node.updateTime(action, time);
 
             // remember how this choice looked, and where we were, in case we restart here
             if constexpr (NANA_MPMCTS) {
-                job.history.push_back(node.historyRow(hash, *action, depth));
+                if constexpr (single_pass) {
+                    // the competitors came from the select scan; the rest is after the virtual loss
+                    row.hash = hash;
+                    row.chosen = (uint32_t)action;
+                    row.node_N = node.N;
+                    row.depth = depth;
+                    row.edges[0] = { edge.R, edge.N, edge.prior };
+                    job.history.push_back(row);
+                }
+                else {
+                    job.history.push_back(node.historyRow(hash, action, depth));
+                }
                 job.snapshots.push_back(state);
             }
 
-            state.set_move(state.specific_move(action->move));
+            state.set_move(state.specific_move(node.move(action)));
 
             state.play_moves();
             state.chance_move();
@@ -720,7 +738,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             uint32_t ownerIdx = uct.getOwner(new_hash);
 
             // reuse this job for the next select step
-            job.path.push_back(HashActionPair(hash, action->id));
+            job.path.push_back(HashActionPair(hash, (int)action));
 
             uct.stats[threadIdx].deepest_node = std::max(uct.stats[threadIdx].deepest_node, (uint64_t)job.path.size());
 
@@ -738,7 +756,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         uct.stats[threadIdx].backprop_messages++;
         UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
-        Action& edge = node.actions[job.path.back().actionID];
+        EdgeStats& edge = node.stats(job.path.back().actionID);
 
         float reward = job.R;
 
@@ -1004,8 +1022,8 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
 
     float max_eval = 0.0;
 
-    for (auto& action : node.actions) {
-        max_eval = std::max(max_eval, action.eval);
+    for (size_t i = 0; i < node.actionCount(); i++) {
+        max_eval = std::max(max_eval, node.eval(i));
     }
 
     maybeInsertNode(std::move(node), threadIdx);
@@ -1038,19 +1056,21 @@ Move Search::bestMove() {
     float biggest_R = 0;
     Move best_move;
 
-    for (Action& action : uct.getNode(root_state.hash()).actions) {
+    UCTNode& root = uct.getNode(root_state.hash());
+    for (size_t i = 0; i < root.actionCount(); i++) {
+        const EdgeStats& action = root.stats(i);
         if constexpr (search_style == NANA) {
             if (action.N == biggest_N) {
                 if (action.R > biggest_R) {
                     biggest_R = action.R;
                     biggest_N = action.N;
-                    best_move = action.move;
+                    best_move = root.move(i);
                 }
             }
             if (action.N > biggest_N) {
                 biggest_R = action.R;
                 biggest_N = action.N;
-                best_move = action.move;
+                best_move = root.move(i);
             }
 #ifndef TBP
            //std::cout << "N:" << action.N << " R_avg:" << action.Q() << std::endl;
@@ -1060,7 +1080,7 @@ Move Search::bestMove() {
             if (action.R > biggest_R) {
                 biggest_R = action.R;
                 biggest_N = action.N;
-                best_move = action.move;
+                best_move = root.move(i);
             }
 
 #ifndef TBP

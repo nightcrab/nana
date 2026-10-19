@@ -86,26 +86,28 @@ void print_strength() {
 	float biggest_R = 0;
 	Move best_move;
 
-	for (Action& action : Search::uct.getNode(Search::root_state.hash()).actions) {
+	UCTNode& root = Search::uct.getNode(Search::root_state.hash());
+	for (size_t i = 0; i < root.actionCount(); i++) {
+		const EdgeStats& action = root.stats(i);
 		if constexpr (Search::search_style == NANA) {
 			if (action.N == biggest_N) {
 				if (action.R > biggest_R) {
 					biggest_R = action.R;
 					biggest_N = action.N;
-					best_move = action.move;
+					best_move = root.move(i);
 				}
 			}
 			if (action.N > biggest_N) {
 				biggest_R = action.R;
 				biggest_N = action.N;
-				best_move = action.move;
+				best_move = root.move(i);
 			}
 		}
 		if constexpr (Search::search_style == CC) {
 			if (action.R > biggest_R) {
 				biggest_R = action.R;
 				biggest_N = action.N;
-				best_move = action.move;
+				best_move = root.move(i);
 			}
 		}
 
@@ -115,6 +117,9 @@ void print_strength() {
 	std::cout << biggest_R << std::endl;
 	std::cout << "best N: " << biggest_N << std::endl;
 	std::cout << "best Q: " << (biggest_N > 0 ? biggest_R / biggest_N : 0.0f) << std::endl;
+	const Piece& piece = best_move.piece;
+	std::cout << "best move: type " << (int)piece.type << " rotation " << (int)piece.rotation
+		<< " x " << (int)piece.position.x << " y " << (int)piece.position.y << " spin " << (int)piece.spin << std::endl;
 }
 
 int main(int argc, const char** args) {

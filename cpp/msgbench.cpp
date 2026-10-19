@@ -397,7 +397,7 @@ static uint64_t op_movegen() {
 
 static uint64_t op_node() {
 	UCTNode node(proto_state);
-	return node.actions.size();
+	return node.actionCount();
 }
 
 static double scale_run(const ScaleWorkload& w, int threads, double seconds) {

@@ -17,38 +17,35 @@
 
 class UCT;
 
-class Action {
-   public:
-    Action(Move move, uint32_t id) {
-        this->move = move;
-        this->N = 0;
-        this->R = 0;
-        this->prior = 1;
-        this->eval = 0.0;
-        this->id = id;
-    }
-    Action(Move move, uint32_t id, float eval) {
-        this->move = move;
-        this->N = 0;
-        this->R = 0;
-        this->prior = 1;
-        this->eval = eval;
-        this->id = id;
-    }
+// an edge's search statistics: everything selection reads. kept in their own array per node,
+// apart from the rest of the edge (ColdAction), so a select scans 12 bytes per edge
+struct EdgeStats {
+    float R = 0;
+    float N = 0;
+    float prior = 1;
 
     void addReward(float reward);
     void addN();
-    float Q();
-    void updateTime(int newtime);
+    float Q() const;
+};
 
-    static const int WINDOW_SIZE = 1000;
-    Move move;
-    float R;
-    float prior;
-    float eval;
-    float N;
-    int time;
-    uint32_t id;
+// a move without its minos, which follow from type and rotation (6 bytes instead of 14)
+struct PackedMove {
+    Coord position;
+    RotationDirection rotation;
+    PieceType type;
+    spinType spin;
+    bool null_move;
+
+    static PackedMove pack(const Move& move);
+    Move unpack() const;
+};
+
+// what an edge needs besides its statistics
+struct ColdAction {
+    PackedMove move;
+    int time = 0;
+    float eval = 0;
 };
 
 // MP-MCTS (Yang, Aasawat, Yoshizoe 2021) history: for each depth of a job's path,
@@ -86,14 +83,6 @@ class UCTNode {
    public:
     UCTNode() {};
     UCTNode(const EmulationGame &state);
-    UCTNode(const std::vector<Action>& p_actions, int id, int N) {
-        this->actions = p_actions;
-        for (int i = 0; i < actions.size(); i++) {
-            actions[i].id = i;
-        }
-        this->id = id;
-        this->N = N;
-    }
 
     uint32_t id;
     int N;
@@ -107,19 +96,38 @@ class UCTNode {
     // freshest history for the path that last reached us, only kept on busy nodes
     std::vector<HistoryRow> history;
 
-    std::vector<Action> actions;
+    // edge i's statistics and the rest of it, in parallel arrays
+    std::vector<EdgeStats> edge_stats;
+    std::vector<ColdAction> cold;
+
+    size_t actionCount() const { return edge_stats.size(); }
+    EdgeStats& stats(size_t i) { return edge_stats[i]; }
+    const EdgeStats& stats(size_t i) const { return edge_stats[i]; }
+    Move move(size_t i) const { return cold[i].move.unpack(); }
+    float eval(size_t i) const { return cold[i].eval; }
+    int& time(size_t i) { return cold[i].time; }
+
+    // the first time an edge is used in a new search (tree reuse), its stats are scaled down
+    void updateTime(size_t i, int newtime);
 
     // PUCT, shared by select and the history check so they always agree
     static float c_puct(float node_N, int depth);
     static float priority(float c, float node_N, float R, float N, float prior);
 
-    // the history row for taking `chosen` from this node, recorded after its virtual loss
-    HistoryRow historyRow(uint32_t hash, const Action& chosen, int depth) const;
+    // the history row for taking edge `chosen` from this node, recorded after its virtual loss
+    // (used with select_SOR; select_with_competitors builds it during the select scan)
+    HistoryRow historyRow(uint32_t hash, size_t chosen, int depth) const;
 
-    Action& select_uct(int depth);
-    Action& select(int depth);
-    Action& select_r_max();
-    Action& select_SOR(RNG& rng);
+    // select (PUCT on the stats before virtual loss) and, in the same scan, the competitors
+    // historyRow would record after the virtual loss (node N + 1). fills row.count and
+    // row.edges[1..]; the caller fills the rest once the virtual loss is applied
+    size_t selectWithCompetitors(int depth, HistoryRow& row) const;
+
+    // these return the index of the chosen edge
+    size_t select_uct(int depth);
+    size_t select(int depth);
+    size_t select_r_max();
+    size_t select_SOR(RNG& rng);
 };
 
 class HashActionPair {
