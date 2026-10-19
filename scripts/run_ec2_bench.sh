@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
-# Run scripts/bench_scaling.sh on an EC2 instance, copy the results back, then shut it down.
+# Run a benchmark script (default scripts/bench_scaling.sh) on an EC2 instance, copy the results
+# back, then shut it down.
 #
 # usage: scripts/run_ec2_bench.sh <host> <key.pem> [ref] [bench args...]
 #   host   public DNS or IP of a running Ubuntu 24.04 instance (user: $EC2_USER, default ubuntu)
 #   key    the instance's ssh key
 #   ref    branch or commit to benchmark; must be pushed to origin (default: current branch)
-#   bench args are passed to bench_scaling.sh: [max_threads] [reps] [ms_per_run]
+#   bench args are passed to the script, e.g. bench_scaling.sh [max_threads] [reps] [ms_per_run]
+#   or flamegraph.sh [threads] [ms_per_run] [test]
 #
 # env:
 #   EC2_USER      ssh user (default ubuntu)
 #   MAX_MINUTES   the instance shuts itself down after this long no matter what (default 180),
 #                 so a crashed sweep or a sleeping laptop can't leave it running
 #   POLL_SECONDS  how often to check whether the sweep is done (default 60)
+#   THREADS       thread counts to sweep, e.g. "1 4 8 16 32" (default 1, 2, 4, ... max_threads)
+#   SCRIPT        which script in scripts/ to run (default bench_scaling.sh)
+#   WORKTREE      1 = also upload this checkout's modified and untracked files over the clone,
+#                 to benchmark uncommitted work (default 0: just ref)
+#
+# The local copy of the script is uploaded over the checkout's, so harness
+# changes don't need pushing; only the code under test comes from ref.
 #
 # The instance is shut down from inside, which stops it; launch it with
 # "shutdown behavior: terminate" if you want it terminated instead.
@@ -32,6 +41,8 @@ user=${EC2_USER:-ubuntu}
 max_minutes=${MAX_MINUTES:-180}
 poll=${POLL_SECONDS:-60}
 repo=$(git remote get-url origin)
+script=${SCRIPT:-bench_scaling.sh}
+worktree=${WORKTREE:-0}
 
 ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ConnectTimeout=20)
 remote() { ssh "${ssh_opts[@]}" "$user@$host" "$@"; }
@@ -39,9 +50,16 @@ remote() { ssh "${ssh_opts[@]}" "$user@$host" "$@"; }
 local_dir="ec2-results/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$local_dir"
 
+armed=0  # set once the instance's own shutdown timer is scheduled
 shutdown_instance() {
     echo "shutting the instance down"
-    remote "sudo shutdown -h now" || echo "could not reach the instance to shut it down; it will stop itself after $max_minutes minutes"
+    if ! remote "sudo shutdown -h now"; then
+        if [ "$armed" = 1 ]; then
+            echo "could not reach the instance to shut it down; it will stop itself after $max_minutes minutes"
+        else
+            echo "could not reach the instance and its shutdown timer was never set: STOP IT MANUALLY"
+        fi
+    fi
 }
 
 if ! git ls-remote --exit-code origin "$ref" > /dev/null 2>&1 && ! git cat-file -e "$ref^{commit}" 2>/dev/null; then
@@ -54,6 +72,17 @@ if ! git branch -r --contains "$commit" 2>/dev/null | grep -q .; then
 fi
 
 echo "setting up $host (benchmarking $ref = $commit)"
+scp "${ssh_opts[@]}" "$(dirname "$0")/$script" "$user@$host:$script" || { echo "upload failed"; shutdown_instance; exit 1; }
+extract=":"
+if [ "$worktree" = 1 ]; then
+    tarball=ec2-results/worktree-upload.tgz  # gitignored, and a relative path keeps tar and scp happy on Windows
+    git ls-files -m -o --exclude-standard | tar -czf "$tarball" -T -
+    echo "uploading uncommitted files: $(git ls-files -m -o --exclude-standard | tr '\n' ' ')"
+    scp "${ssh_opts[@]}" "$tarball" "$user@$host:worktree.tgz" || { echo "upload failed"; shutdown_instance; exit 1; }
+    rm -f "$tarball"
+    # files edited on Windows may have CRLF endings, which bash scripts can't run with
+    extract="tar -xzf ../worktree.tgz && sed -i 's/\r\$//' scripts/*.sh"
+fi
 remote bash -s <<EOF || { echo "setup failed"; shutdown_instance; exit 1; }
 set -euo pipefail
 # dead man's switch: stop no matter what after max_minutes
@@ -64,9 +93,13 @@ rm -rf nana
 git clone -q "$repo" nana
 cd nana
 git checkout -q "$commit"
-nohup bash -c 'bash scripts/bench_scaling.sh $bench_args; echo \$? > ../bench.done' > ../bench.log 2>&1 < /dev/null &
+$extract
+cp ../$script scripts/$script
+rm -f ../bench.done
+nohup bash -c 'THREADS="${THREADS:-}" bash scripts/$script $bench_args; echo \$? > ../bench.done' > ../bench.log 2>&1 < /dev/null &
 EOF
 
+armed=1
 echo "sweep running; polling every ${poll}s (instance stops itself after $max_minutes minutes regardless)"
 while true; do
     sleep "$poll"

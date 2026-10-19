@@ -1,6 +1,8 @@
 #include "Affinity.hpp"
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #ifdef _WIN32
@@ -196,10 +198,38 @@ void pin(const LogicalCpu& cpu) {
 
 #endif
 
+// NANA_PIN_LAYOUT=spread: deal workers round-robin across L3 groups (worker 0 on the first
+// group, worker 1 on the second, ...) instead of filling one group before the next. for
+// measuring what crossing chiplets costs at a fixed thread count
+void spreadAcrossL3(Topology& t) {
+    int groups = 0;
+    for (int g : t.l3_group) groups = std::max(groups, g + 1);
+    std::vector<std::vector<size_t>> members(groups);
+    for (size_t i = 0; i < t.order.size(); i++) {
+        members[t.l3_group[i]].push_back(i);
+    }
+    Topology spread = t;
+    spread.order.clear();
+    spread.l3_group.clear();
+    for (size_t k = 0; spread.order.size() < t.order.size(); k++) {
+        for (int g = 0; g < groups; g++) {
+            if (k < members[g].size()) {
+                spread.order.push_back(t.order[members[g][k]]);
+                spread.l3_group.push_back(g);
+            }
+        }
+    }
+    t = spread;
+}
+
 const Topology& topology() {
     static const Topology topology = [] {
         Topology t = readTopology();
         t.l3_group = readL3Groups(t.order);
+        const char* layout = std::getenv("NANA_PIN_LAYOUT");
+        if (layout && std::strcmp(layout, "spread") == 0) {
+            spreadAcrossL3(t);
+        }
         return t;
     }();
     return topology;

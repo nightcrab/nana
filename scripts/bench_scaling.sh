@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Thread-scaling benchmark: TDS-UCT vs MP-MCTS on a many-core Linux machine.
+# Thread-scaling benchmark for MP-MCTS (optionally against TDS-UCT) on a many-core Linux machine.
 #
 # usage: scripts/bench_scaling.sh [max_threads] [reps] [ms_per_run]
+#   THREADS="1 4 8 16 32" overrides the thread counts (default 1, 2, 4, ... max_threads)
+#   BUILDS="mp"           builds to run: mp (NANA_MPMCTS=1), tds (NANA_MPMCTS=0) or "tds mp".
+#                         TDS-UCT is root-bound and only worth running for a specific reason.
+#   TARGET=1              also run 1 thread for N x ms_per_run at each thread count N (0 = skip).
+#                         N threads build about the tree 1 thread builds in N times as long, and
+#                         simulations slow down as the tree grows, so N x that run's rate is the
+#                         fair target for N threads rather than N x the short 1-thread rate.
+#                         Costs reps x (sum of N > 1) x ms_per_run per test and build.
 #
-# Builds nana_bench twice (NANA_MPMCTS=0 and 1, headless, Release) and runs both
-# position tests at 1, 2, 4, ... threads up to max_threads, interleaving the two
-# builds so clock and thermal drift hit both equally. Also runs nana_msgbench scale,
-# which shows how much plain work slows per thread as cores are added.
+# Builds nana_bench (headless, Release) once per build and runs both position tests at
+# 1, 2, 4, ... threads up to max_threads, interleaving the builds so clock and thermal
+# drift hit them equally. Also runs nana_msgbench scale, which shows how much plain work
+# slows per thread as cores are added.
 #
 # Writes results/<host>-<date>/{runs.csv,summary.txt,scale.txt}.
 # Needs cmake, a C++23 compiler (gcc 13+ or clang 17+) and python3 for the summary.
@@ -18,13 +26,17 @@ cd "$(dirname "$0")/.."
 max_threads=${1:-$(nproc)}
 reps=${2:-3}
 ms=${3:-3000}
+read -ra builds <<< "${BUILDS:-mp}"
+target=${TARGET:-1}
 
 git submodule update --init --recursive
 
-for mode in 0 1; do
-    cmake -S . -B "build-bench-mp$mode" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF \
-        -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=$mode" > /dev/null
-    cmake --build "build-bench-mp$mode" --target nana_bench nana_msgbench -j "$(nproc)" > /dev/null
+declare -A mode=([tds]=0 [mp]=1)
+for build in "${builds[@]}"; do
+    m=${mode[$build]:?unknown build $build (use mp or tds)}
+    cmake -S . -B "build-bench-mp$m" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF \
+        -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=$m" > /dev/null
+    cmake --build "build-bench-mp$m" --target nana_bench nana_msgbench -j "$(nproc)" > /dev/null
 done
 tds=build-bench-mp0/cpp/nana_bench
 mp=build-bench-mp1/cpp/nana_bench
@@ -32,52 +44,76 @@ mp=build-bench-mp1/cpp/nana_bench
 out="results/$(hostname)-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"
 {
-    echo "host: $(hostname)  cpus: $(nproc)  max_threads: $max_threads  reps: $reps  ms: $ms"
+    echo "host: $(hostname)  cpus: $(nproc)  threads: ${THREADS:-1..$max_threads}  reps: $reps  ms: $ms  builds: ${builds[*]}  target: $target"
     lscpu 2>/dev/null | grep -E "Model name|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\)|MHz" || true
     git log -1 --format="commit: %h %s"
 } > "$out/machine.txt"
 
 threads=()
-for ((n = 1; n < max_threads; n *= 2)); do threads+=("$n"); done
-threads+=("$max_threads")
+if [ -n "${THREADS:-}" ]; then
+    read -ra threads <<< "$THREADS"
+else
+    for ((n = 1; n < max_threads; n *= 2)); do threads+=("$n"); done
+    threads+=("$max_threads")
+fi
 
 field() { grep "^$1" <<< "$2" | head -1 | awk -F': ' '{print $2}' | tr -d '%'; }
 
-echo "build,test,threads,rep,sims_per_s,nodes_per_s,wait_pct,depth,restarts,root_backprops" > "$out/runs.csv"
+# run <build> <test> <threads> <rep> <ms>: one search, appended to runs.csv
+run() {
+    local bin=${!1}
+    local o wait
+    o=$("$bin" "$3" "$5" "$2")
+    # mean wait over the per-thread profile rows
+    wait=$(awk '/^ +[0-9]+ +[0-9.]+%/ { gsub("%", "", $2); s += $2; c++ } END { if (c) printf "%.1f", s / c }' <<< "$o")
+    echo "$1,$2,$3,$4,$5,$(field 'simulations / second' "$o"),$(field 'nodes / second' "$o"),$wait,$(field 'tree depth' "$o"),$(field 'restarts' "$o"),$(field 'root backprops' "$o")" >> "$out/runs.csv"
+    echo "test $2  threads $3  ms $5  rep $4  $1 done"
+}
+
+echo "build,test,threads,rep,ms,sims_per_s,nodes_per_s,wait_pct,depth,restarts,root_backprops" > "$out/runs.csv"
 for test in 0 1; do
     for n in "${threads[@]}"; do
         for ((r = 1; r <= reps; r++)); do
-            for build in tds mp; do
-                bin=${!build}
-                o=$("$bin" "$n" "$ms" "$test")
-                # mean wait over the per-thread profile rows
-                wait=$(awk '/^ +[0-9]+ +[0-9.]+%/ { gsub("%", "", $2); s += $2; c++ } END { if (c) printf "%.1f", s / c }' <<< "$o")
-                echo "$build,$test,$n,$r,$(field 'simulations / second' "$o"),$(field 'nodes / second' "$o"),$wait,$(field 'tree depth' "$o"),$(field 'restarts' "$o"),$(field 'root backprops' "$o")" >> "$out/runs.csv"
-                echo "test $test  threads $n  rep $r  $build done"
+            for build in "${builds[@]}"; do
+                run "$build" "$test" "$n" "$r" "$ms"
+                # target for n threads: 1 thread searching n times as long
+                if [ "$target" = 1 ] && [ "$n" -gt 1 ]; then
+                    run "$build" "$test" 1 "$r" $((n * ms))
+                fi
             done
         done
     done
 done
 
 # plain-work slowdown per thread as cores are added (no search), pinned like the workers
-build-bench-mp1/cpp/nana_msgbench scale "$max_threads" | tee "$out/scale.txt"
+first=${builds[0]}
+"$(dirname "${!first}")/nana_msgbench" scale "$max_threads" | tee "$out/scale.txt"
 
-python3 - "$out/runs.csv" <<'EOF' | tee "$out/summary.txt"
+python3 - "$out/runs.csv" "$ms" <<'EOF' | tee "$out/summary.txt"
 import csv, statistics as st, sys, collections
+ms = int(sys.argv[2])
 d = collections.defaultdict(list)
 for r in csv.DictReader(open(sys.argv[1])):
-    d[(r['build'], r['test'], int(r['threads']))].append(r)
+    d[(r['build'], r['test'], int(r['threads']), int(r['ms']))].append(r)
 med = lambda rs, k: st.median(float(x[k]) for x in rs if x[k])
+builds = [b for b in ('tds', 'mp') if any(k[0] == b for k in d)]
 for test in sorted({k[1] for k in d}):
-    print(f"\ntest {test}: simulations/s, median of reps (speedup vs own 1 thread, mean wait)")
-    base = {b: med(d[(b, test, 1)], 'sims_per_s') for b in ('tds', 'mp')}
-    for n in sorted({k[2] for k in d if k[1] == test}):
+    print(f"\ntest {test}: simulations/s, median of reps")
+    print("  (speedup vs own 1 thread at the same ms; target = n x rate of 1 thread run n times as long)")
+    for n in sorted({k[2] for k in d if k[1] == test and k[3] == ms}):
         cells = []
-        for b in ('tds', 'mp'):
-            rs = d[(b, test, n)]
+        for b in builds:
+            rs = d[(b, test, n, ms)]
             s = med(rs, 'sims_per_s')
-            cells.append(f"{b} {s / 1e3:8.1f}k ({s / base[b]:5.2f}x) wait {med(rs, 'wait_pct'):5.1f}%")
-        ratio = med(d[('mp', test, n)], 'sims_per_s') / med(d[('tds', test, n)], 'sims_per_s')
-        print(f"  {n:3d} threads | " + " | ".join(cells) + f" | mp/tds x{ratio:.2f}")
+            cell = f"{b} {s / 1e3:8.1f}k ({s / med(d[(b, test, 1, ms)], 'sims_per_s'):5.2f}x"
+            long = d.get((b, test, 1, n * ms))
+            if long:
+                t = n * med(long, 'sims_per_s')
+                cell += f", target {t / 1e3:7.1f}k = {100 * s / t:3.0f}%"
+            cells.append(cell + f") wait {med(rs, 'wait_pct'):5.1f}%")
+        line = f"  {n:3d} threads | " + " | ".join(cells)
+        if len(builds) == 2:
+            line += f" | mp/tds x{med(d[('mp', test, n, ms)], 'sims_per_s') / med(d[('tds', test, n, ms)], 'sims_per_s'):.2f}"
+        print(line)
 EOF
 echo "results in $out"

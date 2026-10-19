@@ -1,0 +1,38 @@
+setting up 18.188.22.218 (benchmarking master = 93954c43cb1c4a69ff385df93bdf7919d7db70f3)
+uploading uncommitted files: cpp/play.cpp ec2-sweep.log scripts/chiplet_bench.sh scripts/owner_bench.sh scripts/owner_locality.sh scripts/plot_scaling.py scripts/survival_ladder.sh scripts/survival_summary.py cpp/CMakeLists.txt cpp/Tetris/bot/Search.cpp cpp/Tetris/bot/UCT.cpp cpp/Tetris/bot/UCT.hpp cpp/Tetris/game/EmulationGame.cpp cpp/Tetris/game/EmulationGame.hpp cpp/Util/Affinity.cpp cpp/bench.cpp scripts/bench_scaling.sh scripts/flamegraph.sh scripts/run_ec2_bench.sh 
+Shutdown scheduled for Mon 2026-10-19 05:08:34 UTC, use 'shutdown -c' to cancel.
+Hit:1 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute InRelease
+Get:2 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-updates InRelease [137 kB]
+Hit:3 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-backports InRelease
+Get:4 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-updates/main amd64v3 Packages [739 kB]
+Get:5 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-updates/universe amd64v3 Packages [330 kB]
+Hit:6 http://security.ubuntu.com/ubuntu resolute-security InRelease
+Fetched 1207 kB in 0s (5105 kB/s)
+Reading package lists...
+sweep running; polling every 60s (instance stops itself after 180 minutes regardless)
+test 0  threads 8  rep 3 done
+test 1  threads 4  rep 3 done
+test 1  threads 16  rep 2 done
+sweep finished with exit code 0
+copying results to ec2-results/20261019-110822
+shutting the instance down
+median of reps; ratio = median of per-rep spread/packed; ns = mean over threads, per job
+
+test 0
+  thr layout   L3    sims/s  ratio   wait select ns backprop ns rollout ns queue us  stolen
+    4 packed    1    254.1k          3.2%       779         288       9825      5.5   17.0%
+    4 spread    4    202.0k  0.808   1.2%      1166         704       9635      6.1   17.1%
+    8 packed    1    460.5k          4.3%       915         327      10305      6.9   23.6%
+    8 spread    4    376.1k  0.815   2.6%      1279         755      10060      7.7   23.2%
+   16 packed    2    773.0k          5.8%      1240         654      10342      8.9   24.8%
+   16 spread    4    720.6k  0.949   4.8%      1338         805      10337      9.0   25.8%
+
+test 1
+  thr layout   L3    sims/s  ratio   wait select ns backprop ns rollout ns queue us  stolen
+    4 packed    1    264.6k          3.3%       772         291       9720      5.3   16.1%
+    4 spread    4    205.9k  0.779   1.3%      1138         731      10163      6.0   15.2%
+    8 packed    1    457.4k          4.5%       914         340      10562      6.9   22.1%
+    8 spread    4    404.6k  0.878   2.6%      1214         769       9984      7.3   19.6%
+   16 packed    2    731.6k          6.3%      1248         672      10713      9.1   25.2%
+   16 spread    4    694.6k  0.935   5.2%      1363         817      10677      9.2   25.3%
+results in ec2-results/20261019-110822

@@ -26,6 +26,14 @@ class EmulationGame {
     RNG rng;
     Opponent opponent;
 
+    // survival-mode garbage ramp: the opponent's garbage is scaled by
+    // 1 + ramp_pieces / garbage_ramp (0 = off). the search plays the same ramp
+    int garbage_ramp = 0;
+    // pieces placed this game; unlike pieces, the search doesn't reset it at each root
+    int ramp_pieces = 0;
+    // fraction of a line owed from scaling, so the ramp is exact without using the rng
+    float ramp_carry = 0;
+
     int pieces = 0;
     int lines = 0;
     int attack = 0;

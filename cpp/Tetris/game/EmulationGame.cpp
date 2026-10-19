@@ -32,6 +32,12 @@ void EmulationGame::chance_move() {
 
     garbage_amount = opponent.play();
 
+    if (garbage_ramp > 0 && garbage_amount > 0) {
+        float scaled = garbage_amount * (1.0f + (float)ramp_pieces / garbage_ramp) + ramp_carry;
+        garbage_amount = (int)scaled;
+        ramp_carry = scaled - garbage_amount;
+    }
+
     if (garbage_amount > 0) {
         buffered_garbage.insert(buffered_garbage.begin(), garbage_amount);
     }
@@ -58,6 +64,7 @@ void EmulationGame::play_moves(){
     if (!move.null_move) {
         game.place_piece(move.piece);
         pieces += 1;
+        ramp_pieces += 1;
     }
     int cleared_lines = game.board.clearLines();
 

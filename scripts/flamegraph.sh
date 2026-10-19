@@ -36,7 +36,9 @@ git diff --stat >> "$out/commit.txt"
 for n in 1 "$threads"; do
     echo "profiling $n thread(s)"
     perf record -q -F 499 -g --call-graph fp -o "$out/perf-t$n.data" -- "$bench" "$n" "$ms" "$test" > "$out/bench-t$n.txt"
-    perf script -i "$out/perf-t$n.data" 2> /dev/null | FlameGraph/stackcollapse-perf.pl > "$out/t$n.folded"
+    # --no-inline: one frame per real function. with inlined frames expanded, helpers like
+    # __rdtsc or vector::begin show up as huge frames wrapping the work they were inlined into
+    perf script --no-inline -i "$out/perf-t$n.data" 2> /dev/null | FlameGraph/stackcollapse-perf.pl > "$out/t$n.folded"
     FlameGraph/flamegraph.pl --title "nana_bench, $n thread(s), test $test" "$out/t$n.folded" > "$out/t$n.svg"
 
     # top functions by self time (the leaf frame of each stack)

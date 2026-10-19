@@ -71,6 +71,7 @@ add_executable (tbp_tetris "tbp.cpp" ${TETRIS_SOURCES})
 add_executable (nana_bench "bench.cpp" ${TETRIS_SOURCES})
 target_compile_definitions(nana_bench PRIVATE NANA_BENCH)
 add_executable (nana_msgbench "msgbench.cpp" ${TETRIS_SOURCES})
+add_executable (nana_play "play.cpp" ${TETRIS_SOURCES})
 
 target_compile_definitions(tbp_tetris PRIVATE TBP TBP2)
 
@@ -86,6 +87,7 @@ endif()
 target_link_libraries(tbp_tetris ShakTris)
 target_link_libraries(nana_bench ShakTris)
 target_link_libraries(nana_msgbench ShakTris)
+target_link_libraries(nana_play ShakTris)
 
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
@@ -95,4 +97,5 @@ if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET tbp_tetris PROPERTY CXX_STANDARD 23)
   set_property(TARGET nana_bench PROPERTY CXX_STANDARD 23)
   set_property(TARGET nana_msgbench PROPERTY CXX_STANDARD 23)
+  set_property(TARGET nana_play PROPERTY CXX_STANDARD 23)
 endif()
