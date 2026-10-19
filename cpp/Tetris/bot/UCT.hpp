@@ -214,6 +214,11 @@ class Job {
     uint64_t sent_at = 0;
 };
 
+// queues pass jobs by pointer: a message is 8 bytes instead of a 448-byte Job, and a receiver
+// only touches the fields it uses (a backprop never reads the state). search jobs are
+// allocated once and reused, so this doesn't allocate per message except for control messages
+using Msg = std::unique_ptr<Job>;
+
 class WorkerStatistics {
 public:
     uint64_t nodes = 0;

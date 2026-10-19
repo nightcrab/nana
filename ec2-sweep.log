@@ -1,38 +1,70 @@
-setting up 18.188.22.218 (benchmarking master = 93954c43cb1c4a69ff385df93bdf7919d7db70f3)
-uploading uncommitted files: cpp/play.cpp ec2-sweep.log scripts/chiplet_bench.sh scripts/owner_bench.sh scripts/owner_locality.sh scripts/plot_scaling.py scripts/survival_ladder.sh scripts/survival_summary.py cpp/CMakeLists.txt cpp/Tetris/bot/Search.cpp cpp/Tetris/bot/UCT.cpp cpp/Tetris/bot/UCT.hpp cpp/Tetris/game/EmulationGame.cpp cpp/Tetris/game/EmulationGame.hpp cpp/Util/Affinity.cpp cpp/bench.cpp scripts/bench_scaling.sh scripts/flamegraph.sh scripts/run_ec2_bench.sh 
-Shutdown scheduled for Mon 2026-10-19 05:08:34 UTC, use 'shutdown -c' to cancel.
+setting up 3.138.190.115 (benchmarking master = 90f71b1acb3b162ed4ddcffbb2e34a6d0cae696f)
+uploading uncommitted files: scripts/ablation_bench.sh cpp/Tetris/bot/Search.cpp cpp/Tetris/bot/Search.hpp cpp/Tetris/bot/UCT.hpp cpp/Util/MPSC.hpp ec2-sweep.log 
+Shutdown scheduled for Mon 2026-10-19 06:24:25 UTC, use 'shutdown -c' to cancel.
 Hit:1 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute InRelease
-Get:2 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-updates InRelease [137 kB]
+Hit:2 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-updates InRelease
 Hit:3 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-backports InRelease
-Get:4 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-updates/main amd64v3 Packages [739 kB]
-Get:5 http://us-east-2.ec2.archive.ubuntu.com/ubuntu resolute-updates/universe amd64v3 Packages [330 kB]
-Hit:6 http://security.ubuntu.com/ubuntu resolute-security InRelease
-Fetched 1207 kB in 0s (5105 kB/s)
+Hit:4 http://security.ubuntu.com/ubuntu resolute-security InRelease
 Reading package lists...
 sweep running; polling every 60s (instance stops itself after 180 minutes regardless)
-test 0  threads 8  rep 3 done
-test 1  threads 4  rep 3 done
-test 1  threads 16  rep 2 done
+test 0  threads 1  rep 2 done
+test 0  threads 8  rep 2 done
+test 0  threads 16  rep 1 done
+test 0  threads 32  rep 1 done
+test 0  threads 32  rep 3 done
+test 1  threads 1  rep 4 done
+test 1  threads 8  rep 3 done
+test 1  threads 16  rep 3 done
+test 1  threads 32  rep 2 done
 sweep finished with exit code 0
-copying results to ec2-results/20261019-110822
+copying results to ec2-results/20261019-122413
 shutting the instance down
-median of reps; ratio = median of per-rep spread/packed; ns = mean over threads, per job
+median of reps; ratios are medians of per-rep ratios (same rep = run back to back)
+vs base: includes the cheaper profiling; vs sample: the change itself
 
 test 0
-  thr layout   L3    sims/s  ratio   wait select ns backprop ns rollout ns queue us  stolen
-    4 packed    1    254.1k          3.2%       779         288       9825      5.5   17.0%
-    4 spread    4    202.0k  0.808   1.2%      1166         704       9635      6.1   17.1%
-    8 packed    1    460.5k          4.3%       915         327      10305      6.9   23.6%
-    8 spread    4    376.1k  0.815   2.6%      1279         755      10060      7.7   23.2%
-   16 packed    2    773.0k          5.8%      1240         654      10342      8.9   24.8%
-   16 spread    4    720.6k  0.949   4.8%      1338         805      10337      9.0   25.8%
+  thr variant    sims/s  vs base vs sample   wait  select backprop  rollout queue us  rss MiB stranded
+    1 base        73.0k                      0.0%     640      154     9212      0.1      534        0
+    1 sample      74.3k    1.012             0.0%     610      174     9188      0.1      538        0
+    1 ptr         76.6k    1.064     1.041   0.0%     640      144     8730      0.0      564        0
+    1 bell        76.1k    1.028     1.024   0.0%     626      179     8696      0.1      552        0
+    1 all         78.2k    1.084     1.060   0.0%     626      146     8614      0.0      570        0
+    8 base       457.1k                      4.2%     879      304    10674      6.9     3439        0
+    8 sample     462.3k    1.011             9.2%     848      312    10217      6.8     3490        0
+    8 ptr        478.7k    1.040     1.036   9.1%     815      257     9543      6.6     3592        0
+    8 bell       461.2k    1.009     0.996   7.4%     852      319     9838      6.7     3521        0
+    8 all        477.8k    1.054     1.032   9.2%     802      271     9507      6.3     3662        0
+   16 base       769.7k                      5.8%    1162      573    11137      8.7     5848        0
+   16 sample     770.0k    1.003             7.6%    1159      575    10678      8.3     5871        0
+   16 ptr        826.2k    1.073     1.094   8.1%    1111      491     9846      7.6     6238        0
+   16 bell       764.9k    1.012     0.990   7.5%    1242      640    10360      8.4     5873        0
+   16 all        830.2k    1.109     1.096   7.2%    1136      555     9579      7.6     6092        0
+   32 base      1341.2k                      8.1%    1351      771    11837     10.5    10611        0
+   32 sample    1299.6k    0.996             9.5%    1398      781    11382     10.3    10471        0
+   32 ptr       1484.7k    1.108     1.148  10.3%    1267      617    10282      9.3    10869        0
+   32 bell      1262.5k    0.939     0.972  11.7%    1394      829    10979     10.9    10359        1
+   32 all       1375.5k    1.048     1.078   9.5%    1347      689    10370      9.4    10398        0
 
 test 1
-  thr layout   L3    sims/s  ratio   wait select ns backprop ns rollout ns queue us  stolen
-    4 packed    1    264.6k          3.3%       772         291       9720      5.3   16.1%
-    4 spread    4    205.9k  0.779   1.3%      1138         731      10163      6.0   15.2%
-    8 packed    1    457.4k          4.5%       914         340      10562      6.9   22.1%
-    8 spread    4    404.6k  0.878   2.6%      1214         769       9984      7.3   19.6%
-   16 packed    2    731.6k          6.3%      1248         672      10713      9.1   25.2%
-   16 spread    4    694.6k  0.935   5.2%      1363         817      10677      9.2   25.3%
-results in ec2-results/20261019-110822
+  thr variant    sims/s  vs base vs sample   wait  select backprop  rollout queue us  rss MiB stranded
+    1 base        73.1k                      0.0%     572      198    10098      0.1      570        0
+    1 sample      73.4k    1.005             0.0%     604      199     9510      0.1      559        0
+    1 ptr         80.8k    1.087     1.090   0.0%     572      166     8910      0.0      611        0
+    1 bell        76.6k    1.062     1.024   0.0%     603      219     9201      0.1      588        0
+    1 all         82.0k    1.103     1.120   0.0%     573      171     8839      0.0      613        0
+    8 base       459.8k                      5.0%     893      334    10765      7.0     3560        0
+    8 sample     464.5k    1.025             9.5%     851      318    10073      7.0     3544        0
+    8 ptr        490.8k    1.070     1.048   9.9%     797      264     9862      6.4     3710        0
+    8 bell       468.6k    1.019     1.009   8.3%     851      329    10013      6.6     3597        0
+    8 all        482.7k    1.069     1.042   9.5%     803      281     9807      6.6     3698        0
+   16 base       788.2k                      5.4%    1180      605    10847      8.4     6044        0
+   16 sample     776.9k    0.990             8.3%    1140      593    10346      8.5     5778        0
+   16 ptr        877.4k    1.122     1.133   7.8%    1077      484     9857      7.2     6382        0
+   16 bell       785.1k    0.987     1.011   8.4%    1194      659     9509      8.0     5997        0
+   16 all        811.2k    1.039     1.047   7.4%    1172      556    10088      7.9     6062        0
+   32 base      1316.9k                      7.7%    1356      775    12039     10.5    10752        0
+   32 sample    1325.3k    0.995             9.7%    1331      777    11208     10.1    10704        0
+   32 ptr       1412.2k    1.083     1.072   9.8%    1275      622    10803      9.2    10780        0
+   32 bell      1231.3k    0.944     0.938  10.9%    1424      846    11490     10.9    10420        1
+   32 all       1426.8k    1.087     1.083   9.4%    1304      686    10662      9.3    10600        0
+results in ec2-results/20261019-122413

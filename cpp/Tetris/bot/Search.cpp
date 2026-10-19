@@ -46,7 +46,7 @@ std::mutex min_work_mutex;
 std::condition_variable min_work_cv;
 std::atomic_bool min_work_bool;
 
-std::vector<std::unique_ptr<mpsc<Job>>> Search::queues;
+std::vector<std::unique_ptr<mpsc<Msg>>> Search::queues;
 std::vector<int> core_indices;
 std::vector<std::jthread> worker_threads;
 
@@ -126,7 +126,7 @@ static void loadTuning() {
 // state private to one worker
 struct alignas(64) WorkerLocal {
     // rollouts for new leaves we own, run when there are no messages or given away on request
-    std::vector<Job> pending;
+    std::vector<Msg> pending;
     // last load each thread told us about, piggybacked on their messages (work units)
     std::vector<int> load_view;
     bool request_outstanding = false;
@@ -181,7 +181,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     queues.reserve(core_count);
 
     for (int i = 0; i < core_count; i++) {
-        queues.push_back(std::make_unique<mpsc<Job>>(core_count + 1));
+        queues.push_back(std::make_unique<mpsc<Msg>>(core_count + 1));
     }
 
     // Thread indices
@@ -196,7 +196,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     for (int i = 0; i < LOAD_FACTOR * core_count; i++) {
         root_state.rng.PPTRNG = fast_seed();
         root_state.opponent.reset_rng();
-        queues[rootOwnerIdx]->enqueue(Job(root_state, SELECT), core_count);
+        queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(root_state, SELECT), core_count);
     }
 
     loadTuning();
@@ -247,7 +247,7 @@ void Search::continueSearch(EmulationGame state) {
     queues.reserve(core_count);
     // Initialise worker queues
     for (int i = 0; i < core_count; i++) {
-        queues.emplace_back(std::make_unique<mpsc<Job>>(core_count + 1));
+        queues.emplace_back(std::make_unique<mpsc<Msg>>(core_count + 1));
     }
 
     core_indices = std::vector<int>(core_count);
@@ -259,7 +259,7 @@ void Search::continueSearch(EmulationGame state) {
         for (int i = 0; i < LOAD_FACTOR; i++) {
             root_state.opponent.reset_rng();
             root_state.rng.PPTRNG = fast_seed();
-            queues[rootOwnerIdx]->enqueue(Job(root_state, SELECT), core_count);
+            queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(root_state, SELECT), core_count);
         }
 
     }
@@ -282,7 +282,7 @@ void Search::endSearch() {
     thread_stopper.request_stop();
 
     for (int i = 0; i < core_count; i++) {
-        queues[i]->enqueue(Job(), core_count);
+        queues[i]->enqueue(std::make_unique<Job>(), core_count);
     }
 
     // join threads
@@ -427,13 +427,13 @@ static int myLoad(int threadIdx) {
 }
 
 // every message carries the sender's load, so receivers learn everyone's load for free
-static void send(int from, int to, Job&& job) {
-    job.sender = (uint16_t)from;
-    job.sender_load = myLoad(from);
+static void send(int from, int to, Msg&& msg) {
+    msg->sender = (uint16_t)from;
+    msg->sender_load = myLoad(from);
 #ifdef NANA_BENCH
-    job.sent_at = __rdtsc();
+    msg->sent_at = __rdtsc();
 #endif
-    Search::queues[to]->enqueue(std::move(job), from);
+    Search::queues[to]->enqueue(std::move(msg), from);
 }
 
 static uint64_t allThreadsMask() {
@@ -524,10 +524,10 @@ static void maybeRequest(int threadIdx) {
 
     int target = chooseVictim(threadIdx, threadIdx, allThreadsMask() & ~(1ull << threadIdx));
 
-    Job request(REQUEST);
-    request.requester = threadIdx;
-    request.requester_load = load;
-    request.visited = (1ull << threadIdx) | (1ull << target);
+    Msg request = std::make_unique<Job>(REQUEST);
+    request->requester = threadIdx;
+    request->requester_load = load;
+    request->visited = (1ull << threadIdx) | (1ull << target);
 
     local.request_outstanding = true;
     local.ran_dry = false;
@@ -536,7 +536,8 @@ static void maybeRequest(int threadIdx) {
 }
 
 // give a rollout if that evens out the load, otherwise pass the request on
-static void handleRequest(int threadIdx, Job&& request) {
+static void handleRequest(int threadIdx, Msg&& msg) {
+    Job& request = *msg;
     WorkerLocal& local = worker_local[threadIdx];
     int requester = request.requester;
 
@@ -545,9 +546,9 @@ static void handleRequest(int threadIdx, Job&& request) {
     int requester_load = request.requester_load;
     if (!local.pending.empty() && myLoad(threadIdx) - tuning.rollout_weight >= requester_load + tuning.give_margin) {
         // give away the oldest one
-        Job rollout = std::move(local.pending.front());
+        Msg rollout = std::move(local.pending.front());
         local.pending.erase(local.pending.begin());
-        rollout.is_reply = true;
+        rollout->is_reply = true;
 
         auto& stats = Search::uct.stats[threadIdx];
         stats.gave++;
@@ -563,7 +564,7 @@ static void handleRequest(int threadIdx, Job&& request) {
     if (unvisited == 0) {
         // everyone was asked
         request.type = NO_WORK;
-        send(threadIdx, requester, std::move(request));
+        send(threadIdx, requester, std::move(msg));
         return;
     }
 
@@ -571,10 +572,12 @@ static void handleRequest(int threadIdx, Job&& request) {
     int next = chooseVictim(threadIdx, requester, unvisited);
     request.visited |= 1ull << next;
     Search::uct.stats[threadIdx].forwards++;
-    send(threadIdx, next, std::move(request));
+    send(threadIdx, next, std::move(msg));
 }
 
-void Search::processJob(const int threadIdx, Job&& job) {
+void Search::processJob(const int threadIdx, Msg&& msg) {
+    // the job lives on the heap and belongs to whoever holds msg: don't touch it after sending
+    Job& job = *msg;
 
     if (job.type == PUT) {
         if (!uct.insertNode(std::move(*job.node))) {
@@ -584,7 +587,7 @@ void Search::processJob(const int threadIdx, Job&& job) {
     }
 
     if (job.type == REQUEST) {
-        handleRequest(threadIdx, std::move(job));
+        handleRequest(threadIdx, std::move(msg));
         return;
     }
 
@@ -622,7 +625,7 @@ void Search::processJob(const int threadIdx, Job&& job) {
         job.depth = job.state.pieces;
         job.type = BACKPROP;
 
-        send(threadIdx, parentIdx, std::move(job));
+        send(threadIdx, parentIdx, std::move(msg));
         return;
     }
 
@@ -654,7 +657,7 @@ void Search::processJob(const int threadIdx, Job&& job) {
             job.depth = state.pieces;
             job.type = BACKPROP;
 
-            send(threadIdx, parentIdx, std::move(job));
+            send(threadIdx, parentIdx, std::move(msg));
 
             return;
         }
@@ -721,14 +724,14 @@ void Search::processJob(const int threadIdx, Job&& job) {
 
             uct.stats[threadIdx].deepest_node = std::max(uct.stats[threadIdx].deepest_node, (uint64_t)job.path.size());
 
-            send(threadIdx, ownerIdx, std::move(job));
+            send(threadIdx, ownerIdx, std::move(msg));
         }
         else {
             // a new leaf we own: queue its rollout so an idle thread can ask for it.
             // whoever runs it sends the reward to the parent's owner
             uct.stats[threadIdx].deferred++;
             job.type = EXPAND;
-            worker_local[threadIdx].pending.push_back(std::move(job));
+            worker_local[threadIdx].pending.push_back(std::move(msg));
         }
     }
     else if (job.type == BACKPROP) {
@@ -785,13 +788,13 @@ void Search::processJob(const int threadIdx, Job&& job) {
             }
 
             // give ourself this job
-            queues[threadIdx]->enqueue(std::move(job), threadIdx);
+            queues[threadIdx]->enqueue(std::move(msg), threadIdx);
 
             return;
         }
 
         if constexpr (!NANA_MPMCTS) {
-            send(threadIdx, uct.getOwner(job.path.back().hash), std::move(job));
+            send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
             return;
         }
 
@@ -850,7 +853,7 @@ void Search::processJob(const int threadIdx, Job&& job) {
             job.type = SELECT;
 
             // we own this node, so the select starts with us
-            send(threadIdx, threadIdx, std::move(job));
+            send(threadIdx, threadIdx, std::move(msg));
             return;
         }
 
@@ -864,7 +867,7 @@ void Search::processJob(const int threadIdx, Job&& job) {
         node.R_buffer = 0;
         node.N_buffer = 0;
 
-        send(threadIdx, uct.getOwner(job.path.back().hash), std::move(job));
+        send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
     }
 }
 
@@ -876,7 +879,7 @@ void Search::maybeInsertNode(UCTNode node, const int threadIdx) {
         }
     }
     else {
-        send(threadIdx, owner, Job(std::move(node), PUT));
+        send(threadIdx, owner, std::make_unique<Job>(std::move(node), PUT));
     }
 }
 
@@ -908,12 +911,12 @@ void Search::search(std::stop_token stop, const int threadIdx) {
 
     WorkerLocal& local = worker_local[threadIdx];
 
-    auto run = [&](Job&& job, [[maybe_unused]] uint64_t start) {
+    auto run = [&](Msg&& msg, [[maybe_unused]] uint64_t start) {
 #ifdef NANA_BENCH
-        const JobType type = job.type;
-        const bool top = type == SELECT && job.path.size() <= 1;
+        const JobType type = msg->type;
+        const bool top = type == SELECT && msg->path.size() <= 1;
 #endif
-        processJob(threadIdx, std::move(job));
+        processJob(threadIdx, std::move(msg));
 #ifdef NANA_BENCH
         uint64_t cycles = __rdtsc() - start;
         profile.local.job_cycles[type] += cycles;
@@ -940,7 +943,8 @@ void Search::search(std::stop_token stop, const int threadIdx) {
 
         // messages first: they're cheap, and other threads' simulations wait on them
         if (has_message) {
-            Job job = queues[threadIdx]->dequeue();
+            Msg msg = queues[threadIdx]->dequeue();
+            Job& job = *msg;
             if (job.sender < core_count) {
                 local.load_view[job.sender] = job.sender_load;
             }
@@ -957,13 +961,13 @@ void Search::search(std::stop_token stop, const int threadIdx) {
             if (job.type == STOP) {
                 return;
             }
-            run(std::move(job), t0);
+            run(std::move(msg), t0);
         }
         else if (!local.pending.empty()) {
             // our own newest rollout, while its state is still in cache
-            Job job = std::move(local.pending.back());
+            Msg msg = std::move(local.pending.back());
             local.pending.pop_back();
-            run(std::move(job), t0);
+            run(std::move(msg), t0);
         }
         else {
             local.ran_dry = true;

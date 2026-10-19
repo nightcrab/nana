@@ -32,7 +32,7 @@ namespace Search {
 
     extern EmulationGame root_state;
 
-    extern std::vector<std::unique_ptr<mpsc<Job>>> queues;
+    extern std::vector<std::unique_ptr<mpsc<Msg>>> queues;
 
     extern bool initialised;
 
@@ -48,7 +48,7 @@ namespace Search {
 
     void search(std::stop_token stop, int threadIdx);
 
-    void processJob(const int threadIdx, Job&& job);
+    void processJob(const int threadIdx, Msg&& msg);
 
     float rollout(EmulationGame& state, int threadIdx);
 
