@@ -9,7 +9,7 @@
 
 Nana is a parallel search program for two-player stacking games, such as Versus Tetris. 
 
-The program is somewhat general, and designed for similar games that have any or all of the following properties:
+The program is ruleset-agnostic and designed for similar games that have any or all of the following properties:
 
 * Zero-sum games
 * Large branching factors
@@ -27,12 +27,15 @@ MCTS operates on the premise that we can generate an analysis of the game's loca
 
 Transposition Driven Scheduling is a load balancing technique that allows a program to efficiently scale to many threads while searching for solutions, and has historically been applied to puzzle games. It works by having the program globally agree to allocate ownership of certain gamestates to certain threads, based on the state's hash. This means that any thread can calculate who the owner is of a state that has never been seen before. 
 
-### Work Witholding
+### Work Requesting
 
-One of the challenges specifically of searching Tetris using TDS-MCTS is that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3)[[4]](#4) encounter significant load balancing and workload congestion issues when applied directly.
+One of the challenges specifically of searching Tetris using TDS-MCTS is that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3)[[4]](#4) encounter significant load balancing and workload congestion issues when applied without dynamic load balancing.
 
-To address this, Nana uses a technique similar to Work Stealing that we call Work Witholding. Essentially, it allows threads who would otherwise exhaust their own job queue to 'steal' work that would otherwise be sent to neighbouring threads. This advances typical TDS-MCTS to an algorithm that has guaranteed progress both per-thread and system wide.
+To address this, Nana uses a type of work stealing called Work Requesting that prevents the need for a global job structure or system-wide mutexes. In particular it preserves the message-passing paradigm that avoids significant read-write contention at high worker counts.
 
+Nana workers try to predict when they are at risk of running out of work, and request to borrow work from individual workers using a tuned heuristic taking into account load statistics and memory topology. The request may or may not be fulfilled based on the victim's available work which is determined at the time of request arrival.
+
+WR replaces the previous load balancing strategy of Work Witholding used in older versions of Nana. Unlike WR, WW eliminates wait times, but introduces increasing mutex pressure as more work stealing takes place.
 
 ## Scaling Experiments
 
