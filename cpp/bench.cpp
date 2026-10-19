@@ -157,16 +157,32 @@ int main(int argc, const char** args) {
 	game.game.current_piece = test_games.at(test_number).current_piece;
 
 	Search::startSearch(game, core_count);
+	// nana_speed times only the search window; printStatistics' clock also covers building
+	// the tree, joining the workers and garbage collection
+	[[maybe_unused]] auto start = std::chrono::steady_clock::now();
 
 	// run the search for the specified time
 	std::this_thread::sleep_for(std::chrono::milliseconds(time));
 
+	// workers stop after their current job, so this misses at most one job each
+	[[maybe_unused]] auto end = std::chrono::steady_clock::now();
+
 	// end the search
 	Search::endSearch();
 
+#ifdef NANA_BENCH
 	// check and print the stats
 	print_strength();
 	Search::printStatistics();
+#else
+	// every simulation ends in exactly one rollout (see printStatistics)
+	uint64_t simulations = 0;
+	for (const WorkerStatistics& s : Search::uct.stats) simulations += s.deferred;
+	double seconds = std::chrono::duration<double>(end - start).count();
+	std::cout << "simulations: " << simulations << std::endl;
+	std::cout << "seconds: " << seconds << std::endl;
+	std::cout << "simulations / second: " << simulations / seconds << std::endl;
+#endif
 
 	return 0;
 }

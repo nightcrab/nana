@@ -34,6 +34,25 @@ One of the challenges specifically of searching Tetris using TDS-MCTS is that co
 To address this, Nana uses a technique similar to Work Stealing that we call Work Witholding. Essentially, it allows threads who would otherwise exhaust their own job queue to 'steal' work that would otherwise be sent to neighbouring threads. This advances typical TDS-MCTS to an algorithm that has guaranteed progress both per-thread and system wide.
 
 
+## Scaling Experiments
+
+We benchmarked simulations per second on a 32-core AMD EPYC 9R45 (SMT disabled), at every thread count from 1 to 32 on two positions. 
+
+The engine achieves throughput efficiency of 80% on the first 8 cores, stablizing at around 60% on 32 cores. The loss in efficiency is largely attributable to NUMA overhead. Reducing cross-chiplet communication remains an open problem.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/scaling-sims-dark.png">
+  <img width="800" alt="Simulations per second against threads, 1 to 32: about 80k at 1 thread, 500k at 8 and 1.54M at 32, below the dashed linear-scaling line" src="./docs/scaling-sims-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/scaling-eff-dark.png">
+  <img width="800" alt="Parallel efficiency against threads: 100% at 1 thread, about 79% at 8, 72% at 9 and about 60% at 32" src="./docs/scaling-eff-light.png">
+</picture>
+
+To reproduce, run `scripts/speed_scaling.sh` on the machine (or through `scripts/run_ec2_bench.sh` with `SCRIPT=speed_scaling.sh`), then plot it with `node scripts/plot_speed.mjs <results dir>`.
+
+
 ## Usage
 
 To use, Nana needs to be built from its C++ source code using CMake, i.e.
