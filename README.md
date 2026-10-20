@@ -30,7 +30,7 @@ Transposition Driven Scheduling is a load balancing technique that allows a prog
 
 ### Work Requesting
 
-One of the challenges specifically of searching Tetris that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3)[[4]](#4) encounter significant congestion issues when applied to this domain without dynamic load balancing.
+One of the challenges specifically of searching Tetris that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3) encounter significant congestion issues when applied to this domain without dynamic load balancing.
 
 To address this, Nana workers try to predict when they are at risk of running out of work, and pre-emptively request to borrow work from individual workers using a tuned heuristic taking into account load statistics and memory topology.
 
@@ -41,6 +41,12 @@ Nana uses a special variant of MCTS that combines state abstraction with open-lo
 State abstraction allows Nana to combine search statistics on gamestates that look similar but differ superficially, while open-loop MCTS walks forward random simulations of the game without needing to know the underlying transition probabilities.
 
 The result of this is that Nana can optimize against simulated random outcomes in real time, which is part of the reason it needs to search so many nodes compared to traditional engines.
+
+### Gated Backpropagation
+
+Nana's search parallelization is based on the optimized version of TDS-MCTS presented by Yang et al. 2020[[4]](#4), named MP-MCTS. By skipping redundant backpropagations, MP-MCTS significantly reduces root contention.
+
+To adapt MP-MCTS's optimizations to ISMCTS, Nana uses the MP-MCTS history table to compute a simulator replay that hands the rollout off to another worker if sampled dynamics diverge. This restores the statistical properties of sequential ISMCTS.
 
 ### Markovian Opponent Modelling
 
