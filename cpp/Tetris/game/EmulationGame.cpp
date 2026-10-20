@@ -170,6 +170,11 @@ uint32_t EmulationGame::hash() const {
     hash = fasthash32(&game.combo, sizeof(u16), hash);
     if (game.hold)
         hash = fasthash32(&*game.hold, sizeof(*game.hold), hash);
+#if NANA_HASH_QUEUE_FRONT
+    else
+        // with nothing held, holding plays the next piece: it decides the node's moves
+        hash = fasthash32(&game.queue.front(), sizeof(PieceType), hash);
+#endif
     for (int garbage : garbage_meter) {
         hash = fasthash32(&garbage, sizeof(garbage), hash);
     }

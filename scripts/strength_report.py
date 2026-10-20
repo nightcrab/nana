@@ -46,9 +46,17 @@ def load(dirs):
     return configs
 
 
+NAME = re.compile(r"t(\d+)-x(\d+)-lf(\d+)(?:-v([\w.]+))?")
+
+
 def parse(name):
-    threads, mult, lf = map(int, re.fullmatch(r"t(\d+)-x(\d+)-lf(\d+)", name).groups())
-    return threads, mult, lf
+    match = NAME.fullmatch(name)
+    return int(match[1]), int(match[2]), int(match[3])
+
+
+def variant(name):
+    """the build variant (strength_ladder.sh VARIANTS), "" for the plain build"""
+    return NAME.fullmatch(name)[4] or ""
 
 
 def app(game):
@@ -107,7 +115,8 @@ def main():
         print("no games")
         return
     names = sorted(configs, key=lambda n: (parse(n)[0], parse(n)[2] != 6, parse(n)[1]))
-    ladder_names = sorted((n for n in names if parse(n)[0] == 1 and parse(n)[2] == 6), key=lambda n: parse(n)[1])
+    ladder_names = sorted((n for n in names if parse(n)[0] == 1 and parse(n)[2] == 6 and not variant(n)),
+                          key=lambda n: parse(n)[1])
     parallel = [n for n in names if parse(n)[0] > 1]
     first = next(iter(configs[names[0]].values()))
     base_ms, horizon = first["base_ms"], first["max_pieces"]
@@ -137,6 +146,8 @@ def main():
         ratio = lambda p: sum(y for _, y in p) / sum(x for x, _ in p) if sum(x for x, _ in p) else math.nan
         low, high = interval([ratio(rng.choices(pairs, k=len(pairs))) for _ in range(REPS)])
         return ratio(pairs), low, high, len(seeds), sum(y > x for x, y in pairs)
+
+    variants_report(configs, names, rng)
 
     if BASELINE in configs:
         print(f"\npaired against {BASELINE}: ratio of means [95% CI] on common seeds")
@@ -201,6 +212,49 @@ def main():
     if args.plot:
         plot(args.plot, args.dark, base_ms, horizon, names, ladder_names, parallel, stats, results)
         print(f"\nplot: {args.plot}")
+
+
+def variants_report(configs, names, rng):
+    """each build variant against the control at the same thread count: the "default" (or "off") variant if it
+    was played, else the plain build. paired over common seeds"""
+    groups = {}
+    for name in names:
+        if variant(name):
+            groups.setdefault(parse(name), []).append(name)
+    for key, group in sorted(groups.items()):
+        plain = f"t{key[0]}-x{key[1]}-lf{key[2]}"
+        control = next((n for n in group if variant(n) in ("default", "off")), plain if plain in configs else None)
+        if control is None:
+            continue
+        print(f"\nvariants at {key[0]} threads, paired against {control}: ratio of means [95% CI]")
+        print(f"{'config':<20} {'seeds':>5} {'APP@H':>22} {'attack rate':>22} {'deaths':>11} {'sims/move':>10}"
+              f" {'restarts':>9} {'to root':>8} {'leaks':>7}")
+        mean_of = lambda games, k: statistics.fmean(g.get(k, math.nan) for g in games)
+        # attack per piece actually played, as in the breakdown table
+        per_piece = lambda games: sum(g["attack"] for g in games) / max(sum(g["pieces"] for g in games), 1)
+        for name in [control] + [n for n in group if n != control]:
+            seeds = sorted(set(configs[control]) & set(configs[name]))
+            pairs = [(configs[control][s], configs[name][s]) for s in seeds]
+            games = [b for _, b in pairs]
+            counters = " ".join(f"{mean_of(games, k):>{w}.3f}" for k, w in
+                                (("restarts_per_sim", 9), ("root_per_sim", 8), ("leaks_per_sim", 7)))
+            sims = mean_of(games, "sims_per_move")
+            deaths = sum(g["died"] for g in games)
+            if name == control:
+                print(f"{name:<20} {len(seeds):>5} {'(control)':>22} {'':>22} {deaths:>11} {sims:>10.0f} {counters}")
+                continue
+
+            def paired_ratio(statistic):
+                def r(p):
+                    base = statistic([x for x, _ in p])
+                    return statistic([y for _, y in p]) / base if base else math.nan
+                low, high = interval([r(rng.choices(pairs, k=len(pairs))) for _ in range(REPS)])
+                return f"x{r(pairs):.3f} [{low:.3f}, {high:.3f}]"
+
+            app_mean = lambda games: statistics.fmean(app(g) for g in games)
+            control_deaths = sum(a["died"] for a, _ in pairs)
+            print(f"{name:<20} {len(seeds):>5} {paired_ratio(app_mean):>22} {paired_ratio(per_piece):>22}"
+                  f" {f'{deaths} vs {control_deaths}':>11} {sims:>10.0f} {counters}")
 
 
 def line_fit(points):

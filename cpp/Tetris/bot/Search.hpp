@@ -38,6 +38,15 @@ namespace Search {
 
     extern int time;
 
+    // NANA_FLUSH_AT_END: at the end of each search, what the parked MP-MCTS buffers were hiding
+    // from the root's statistics, which bestMove reads
+    struct FlushStats {
+        uint64_t searches = 0;
+        uint64_t changed = 0;       // searches where the hidden visits would change the best move
+        double hidden_share = 0;    // share of the root's visits that were hidden, summed over searches
+    };
+    extern FlushStats flush_stats;
+
     void startSearch(const EmulationGame& state, int core_count);
 
     void continueSearch(EmulationGame state);

@@ -52,10 +52,17 @@ struct ColdAction {
 // the stats of the edge it took and of its strongest siblings when it passed through.
 // a backprop can stop and restart selection below a node only if every depth would
 // still choose the same edge. full sibling lists don't fit Tetris' branching factor,
-// so only the top competitors are kept.
-constexpr int HISTORY_COMPETITORS = 3;
+// so only the top competitors are kept. (df-UCT kept the best and second best; MP-MCTS all siblings)
+#ifndef NANA_HISTORY_COMPETITORS
+#define NANA_HISTORY_COMPETITORS 3
+#endif
+constexpr int HISTORY_COMPETITORS = NANA_HISTORY_COMPETITORS;
 // nodes with at least this many visits also store the freshest history for their path
-constexpr int HISTORY_MIN_VISITS = 32;
+// (MP-MCTS stores it in every node)
+#ifndef NANA_HISTORY_MIN_VISITS
+#define NANA_HISTORY_MIN_VISITS 32
+#endif
+constexpr int HISTORY_MIN_VISITS = NANA_HISTORY_MIN_VISITS;
 
 struct HistoryEdge {
     float R = 0;
@@ -92,6 +99,11 @@ class UCTNode {
     // with transpositions that may be a different path than the one they came from
     float R_buffer = 0.0;
     int N_buffer = 0;
+
+    // the parent and edge this node was last selected from (NANA_FLUSH_AT_END only), so parked
+    // buffers can be walked up to the root once a search ends; with transpositions, the latest
+    uint32_t parent_hash = 0;
+    int parent_action = -1;
 
     // freshest history for the path that last reached us, only kept on busy nodes
     std::vector<HistoryRow> history;
@@ -153,6 +165,9 @@ enum JobType {
     // EXPAND, or forwards the request, or returns it as NO_WORK once everyone was asked
     REQUEST,
     NO_WORK,
+    // NANA_REPLAY_RESTART: carry a diverged restart's result and the buffers it abandons up a
+    // slice of path, adding them to each edge, then park them at the top and stop (no select)
+    FLUSH,
     JOB_TYPE_COUNT,
 };
 
@@ -202,6 +217,10 @@ class Job {
     // so a backprop that stops partway can restart selection from there
     std::vector<HistoryRow> history;
     std::vector<EmulationGame> snapshots;
+    // NANA_REPLAY_RESTART: parallel to path, the move taken at each node, so a restart can replay
+    // the path from the search root with fresh chance (the nodes, and so their moves, belong to
+    // other threads)
+    std::vector<PackedMove> moves;
 
     // BACKPROP: visits on top of the one already counted on the way down,
     // drained from nodes where simulations restarted
@@ -250,6 +269,12 @@ public:
     uint64_t restarts = 0;        // backprops that stopped and restarted selection below the root
     uint64_t restart_depth = 0;   // depth of those restarts, summed
     uint64_t root_backprops = 0;  // backprops that reached the root
+    uint64_t leaks = 0;           // would-be restarts the leaky gate sent on up (NANA_LEAK)
+    uint64_t illegal_moves = 0;       // select steps playing a piece that's neither current nor next to hold
+    uint64_t replay_matched = 0;      // NANA_REPLAY_RESTART: replays that reached the restart node
+    uint64_t replay_diverged = 0;     // ...that left the path first, so the select went elsewhere
+    uint64_t replay_diverge_depth = 0; // depth where they left it, summed
+    uint64_t flushes = 0;             // FLUSH messages handled
     uint64_t cycles = 0;          // selects that reached a node already on their own path
     uint64_t depth_capped = 0;    // selects treated as leaves because the path was too long
 

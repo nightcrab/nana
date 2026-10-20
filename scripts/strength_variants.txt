@@ -1,0 +1,15 @@
+# build variants for strength_ladder.sh VARIANTS=name,name,...
+# name       compile flags, added to -DNANA_MPMCTS=1 -DNANA_LOAD_FACTOR=6
+default
+# the original MP-MCTS: buffers left parked when a search ends, hash without the next piece,
+# restarts resuming from the job's snapshot
+original     -DNANA_FLUSH_AT_END=0 -DNANA_HASH_QUEUE_FRONT=0 -DNANA_REPLAY_RESTART=0
+# leaky gate for MP-MCTS restarts (notes/leaky-gate-mp-mcts.md, NANA_LEAK in Search.cpp)
+always       -DNANA_LEAK=3 -DNANA_LEAK_EPS=0
+eps02        -DNANA_LEAK=3 -DNANA_LEAK_EPS=0.02
+eps10        -DNANA_LEAK=3 -DNANA_LEAK_EPS=0.1
+k16          -DNANA_LEAK=2 -DNANA_LEAK_K=16
+p10          -DNANA_LEAK=1 -DNANA_LEAK_P=0.1
+# MP-MCTS stores history in every node; we keep it for busy nodes, and the top 3 competitors
+history-all  -DNANA_HISTORY_MIN_VISITS=1
+competitors8 -DNANA_HISTORY_COMPETITORS=8

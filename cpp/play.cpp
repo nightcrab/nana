@@ -67,6 +67,20 @@ struct GameResult {
     int pieces = 0;
     bool died = false;
     uint64_t simulations = 0;
+    // MP-MCTS: backprops that restarted below the root, reached it, or were sent on up by the leaky gate
+    uint64_t restarts = 0;
+    uint64_t root_backprops = 0;
+    uint64_t leaks = 0;
+    uint64_t illegal_moves = 0;
+    uint64_t replay_matched = 0;
+    uint64_t replay_diverged = 0;
+    uint64_t replay_diverge_depth = 0;
+    uint64_t flushes = 0;
+    // NANA_FLUSH_AT_END: moves whose choice the parked buffers' hidden visits would change, and the
+    // share of the root's visits that were hidden, summed over moves
+    uint64_t flush_searches = 0;
+    uint64_t flush_changed = 0;
+    double hidden_share = 0;
     double think_seconds = 0;
     // where think time goes beyond searching: starting the workers, waking late from
     // the sleep, and stopping them (which waits for at least one finished simulation)
@@ -81,6 +95,7 @@ static GameResult playGame(EmulationGame& game, const Options& options) {
 
     GameResult result;
     bool first = true;
+    const Search::FlushStats flush_start = Search::flush_stats;
 
     while (true) {
         if (Shaktris::Utility::collides(game.game.board, game.game.current_piece)) {
@@ -119,6 +134,14 @@ static GameResult playGame(EmulationGame& game, const Options& options) {
         // every simulation ends in exactly one rollout
         for (const WorkerStatistics& stats : Search::uct.stats) {
             result.simulations += stats.deferred;
+            result.restarts += stats.restarts;
+            result.root_backprops += stats.root_backprops;
+            result.leaks += stats.leaks;
+            result.illegal_moves += stats.illegal_moves;
+            result.replay_matched += stats.replay_matched;
+            result.replay_diverged += stats.replay_diverged;
+            result.replay_diverge_depth += stats.replay_diverge_depth;
+            result.flushes += stats.flushes;
         }
 
         if (move.null_move) {
@@ -133,6 +156,9 @@ static GameResult playGame(EmulationGame& game, const Options& options) {
     }
 
     result.pieces = game.ramp_pieces;
+    result.flush_searches = Search::flush_stats.searches - flush_start.searches;
+    result.flush_changed = Search::flush_stats.changed - flush_start.changed;
+    result.hidden_share = Search::flush_stats.hidden_share - flush_start.hidden_share;
     return result;
 }
 
@@ -200,6 +226,15 @@ int main(int argc, const char** argv) {
             // before the ramp scales it
             << ",\"opponent_attack\":" << game.opponent.total_damage
             << ",\"sims_per_move\":" << result.simulations / moves
+            << ",\"restarts_per_sim\":" << (double)result.restarts / std::max<uint64_t>(result.simulations, 1)
+            << ",\"root_per_sim\":" << (double)result.root_backprops / std::max<uint64_t>(result.simulations, 1)
+            << ",\"leaks_per_sim\":" << (double)result.leaks / std::max<uint64_t>(result.simulations, 1)
+            << ",\"illegal_per_sim\":" << (double)result.illegal_moves / std::max<uint64_t>(result.simulations, 1)
+            << ",\"replay_match_rate\":" << (double)result.replay_matched / std::max<uint64_t>(result.replay_matched + result.replay_diverged, 1)
+            << ",\"replay_diverge_depth\":" << (double)result.replay_diverge_depth / std::max<uint64_t>(result.replay_diverged, 1)
+            << ",\"flushes_per_sim\":" << (double)result.flushes / std::max<uint64_t>(result.simulations, 1)
+            << ",\"flush_changed\":" << (double)result.flush_changed / std::max<uint64_t>(result.flush_searches, 1)
+            << ",\"hidden_share\":" << result.hidden_share / std::max<uint64_t>(result.flush_searches, 1)
             << ",\"ms_per_move\":" << 1000.0 * result.think_seconds / moves
             << ",\"start_ms\":" << 1000.0 * result.start_seconds / moves
             << ",\"oversleep_ms\":" << 1000.0 * result.oversleep_seconds / moves

@@ -4,8 +4,8 @@
     strength_merge.py DIR BASE_MS
 
 Reads DIR/parts/<config>-seed<seed>.jsonl, where config is t<threads>-x<multiple>-lf<load
-factor>, and writes DIR/<config>.jsonl sorted by seed, with config, mult, base_ms and
-load_factor added to every game.
+factor>[-v<variant>], and writes DIR/<config>.jsonl sorted by seed, with config, mult, base_ms,
+load_factor and variant ("" for the plain build) added to every game.
 """
 
 import collections
@@ -21,7 +21,8 @@ def main():
     configs = collections.defaultdict(list)
     for path in glob.glob(os.path.join(out, "parts", "*.jsonl")):
         name = re.sub(r"-seed\d+\.jsonl$", "", os.path.basename(path))
-        threads, mult, lf = map(int, re.fullmatch(r"t(\d+)-x(\d+)-lf(\d+)", name).groups())
+        match = re.fullmatch(r"t(\d+)-x(\d+)-lf(\d+)(?:-v([\w.]+))?", name)
+        mult, lf, variant = int(match[2]), int(match[3]), match[4] or ""
         # utf-8-sig: PowerShell's Out-File may start the file with a byte order mark
         for line in open(path, encoding="utf-8-sig"):
             if line.startswith("{"):
@@ -31,7 +32,7 @@ def main():
                     # e.g. two processes wrote the file at once; drop the game rather than the run
                     print(f"skipping a corrupt line in {path}: {error}", file=sys.stderr)
                     continue
-                game.update(config=name, mult=mult, base_ms=base_ms, load_factor=lf)
+                game.update(config=name, mult=mult, base_ms=base_ms, load_factor=lf, variant=variant)
                 configs[name].append(game)
     for name, rows in configs.items():
         seeds = collections.Counter(game["seed"] for game in rows)

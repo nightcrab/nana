@@ -15,7 +15,8 @@
 # them, e.g. SCRIPT=strength_ladder.sh run_ec2_bench.sh <host> <key> master SEED0=100);
 # defaults in brackets:
 #   BASE_MS      base think time per move [80]
-#   MULTS        think-time multiples for the 1-thread ladder, space or comma separated ["1 2 4 8 16"]
+#   MULTS        think-time multiples for the 1-thread ladder, space or comma separated, or none
+#                (to pool a ladder from an earlier run on the same seeds) ["1 2 4 8 16"]
 #   PAR_THREADS  thread counts played at the base think time ["16"]; each must divide nproc,
 #                and nproc / threads of them run at once (16 on 32 cpus: two at a time)
 #   GAMES        games per config, on seeds SEED0..SEED0+GAMES-1 [300]
@@ -23,10 +24,16 @@
 #   HORIZON      pieces per game [50]
 #   LF1          1 = also play 1 thread at the base think time with LOAD_FACTOR 1 [1]
 #   CHUNK_UNITS  base-think-time games per task, so long configs are split finely [8]
-#   BUILD        0 = don't build; use BIN_LF6 / BIN_LF1 instead [1]
+#   EXTRA_FLAGS  compile flags for the plain builds (ladder, LF1, and parallel configs without
+#                VARIANTS), comma separated, e.g. -DNANA_LEAK=3,-DNANA_LEAK_EPS=0.1 [""]
+#   VARIANTS     builds to compare, comma separated names from scripts/strength_variants.txt;
+#                each parallel config is played once per variant (named t<n>-x1-lf6-v<name>),
+#                interleaved task by task on the same seeds. empty = the plain build [""]
+#   BUILD        0 = don't build: reuse earlier builds, or BIN_LF6 / BIN_LF1 if set (BIN_LF6 then
+#                stands in for every variant) [1]
 #   PIN          0 = don't taskset (for a plumbing check off Linux) [1]
 #
-# Configs are named t<threads>-x<multiple>-lf<load factor>. The 1-thread configs run nproc at
+# Configs are named t<threads>-x<multiple>-lf<load factor>[-v<variant>]. The 1-thread configs run nproc at
 # a time, one per cpu: each game then shares its L3 with as many others as a worker does
 # inside the full-width search, so the comparison holds the hardware fixed. An N-thread
 # config runs nproc / N games at a time on consecutive cpu blocks (consecutive cpus share an
@@ -49,7 +56,18 @@ for setting in "$@"; do
     export "${setting?}"
 done
 base_ms=${BASE_MS:-80}
-read -ra mults <<< "$(tr , " " <<< "${MULTS:-1 2 4 8 16}")"
+mults_setting=${MULTS:-1 2 4 8 16}
+[ "$mults_setting" = none ] && mults_setting=""
+read -ra mults <<< "$(tr , " " <<< "$mults_setting")"
+read -ra variants <<< "$(tr , " " <<< "${VARIANTS:-}")"
+extra_flags=$(tr , " " <<< "${EXTRA_FLAGS:-}")
+variants_file=scripts/strength_variants.txt
+variant_flags() {
+    awk -v name="$1" '$1 == name { $1 = ""; sub(/^ +/, ""); print; found = 1 } END { exit !found }' "$variants_file"
+}
+for v in "${variants[@]}"; do
+    variant_flags "$v" > /dev/null || { echo "no variant $v in $variants_file" >&2; exit 1; }
+done
 read -ra par_threads <<< "$(tr , " " <<< "${PAR_THREADS:-16}")"
 games=${GAMES:-300}
 seed0=${SEED0:-0}
@@ -70,12 +88,27 @@ if [ "${BUILD:-1}" = 1 ]; then
     git submodule update --init --recursive
     for lf in 6 1; do
         [ "$lf" = 1 ] && [ "$lf1" != 1 ] && continue
+        # the plain build plays the ladder and, without variants, the parallel configs
+        [ "$lf" = 6 ] && (( ${#mults[@]} == 0 && ${#variants[@]} > 0 )) && continue
         cmake -S . -B "build-strength-lf$lf" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF \
-            -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1 -DNANA_LOAD_FACTOR=$lf" > /dev/null
+            -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1 -DNANA_LOAD_FACTOR=$lf $extra_flags" > /dev/null
         cmake --build "build-strength-lf$lf" --target nana_play -j "$cpus" > /dev/null
     done
+    for v in "${variants[@]}"; do
+        cmake -S . -B "build-strength-v$v" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF             -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1 -DNANA_LOAD_FACTOR=6 $(variant_flags "$v")" > /dev/null
+        cmake --build "build-strength-v$v" --target nana_play -j "$cpus" > /dev/null
+    done
 fi
+# a task names its binary by key: 6 and 1 are the plain builds by load factor, v<name> a variant
 declare -A bins=([6]=${BIN_LF6:-$PWD/build-strength-lf6/cpp/nana_play} [1]=${BIN_LF1:-$PWD/build-strength-lf1/cpp/nana_play})
+# with BUILD=0 (later batches of strength_batches.sh) a variant reuses its earlier build, unless
+# BIN_LF6 is set, which then stands in for every variant (a plumbing check off Linux)
+for v in "${variants[@]}"; do
+    bins[v$v]=${BIN_LF6:-$PWD/build-strength-v$v/cpp/nana_play}
+done
+for key in "${!bins[@]}"; do
+    [[ $key == v* ]] && [ ! -x "${bins[$key]}" ] && { echo "missing binary for variant ${key#v}: ${bins[$key]}" >&2; exit 1; }
+done
 
 out="results/$(hostname)-strength-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out/parts"
@@ -83,6 +116,8 @@ log() { echo "$*" | tee -a "$out/machine.txt"; }
 {
     echo "host: $(hostname)  cpus: $cpus  base_ms: $base_ms  mults: ${mults[*]}  par_threads: ${par_threads[*]}"
     echo "games: $games  seeds: $seed0..$(( seed0 + games - 1 ))  horizon: $horizon  lf1: $lf1"
+    echo "extra flags (plain builds): ${extra_flags:-none}"
+    for v in "${variants[@]}"; do echo "variant $v: $(variant_flags "$v")"; done
     lscpu 2>/dev/null | grep -E "Model name|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\)|L3|MHz" || true
     uname -r
     git log -1 --format="commit: %h %s"
@@ -104,7 +139,7 @@ fi
 log "load average at start: $(cut -d' ' -f1-3 /proc/loadavg 2> /dev/null)"
 
 # run_tasks <threads> <dir> <task>...: plays every task, cpus / threads at a time. a task is
-# "<name> <lf> <ms> <seed> <games>"; its games go to <dir>/<name>-seed<seed>.jsonl
+# "<name> <bin> <ms> <seed> <games>", <bin> a key of bins; its games go to <dir>/<name>-seed<seed>.jsonl
 run_tasks() {
     local threads=$1 dir=$2
     shift 2
@@ -154,17 +189,27 @@ ladder_units=0
 for m in "${mults[@]}"; do ladder_units=$(( ladder_units + m )); done
 # an N-thread config plays cpus / N games at a time, so it costs N cpus per game
 par_units=0
-for n in "${par_threads[@]}"; do par_units=$(( par_units + n )); done
+for n in "${par_threads[@]}"; do par_units=$(( par_units + n * (${#variants[@]} > 0 ? ${#variants[@]} : 1) )); done
 log "estimate: 1-thread ladder $(( (ladder_units + lf1) * games * base_ms * horizon / 1000 / cpus ))s," \
     "parallel runs $(( par_units * games * base_ms * horizon / 1000 / cpus ))s (less where games die early)"
 
 for n in "${par_threads[@]}"; do
     log "$(date +%H:%M:%S) $n threads at ${base_ms}ms, $(( cpus / n )) at a time"
-    mapfile -t tasks < <(chunk "t$n-x1-lf6" 6 1 "$seed0" "$games")
+    if (( ${#variants[@]} == 0 )); then
+        mapfile -t tasks < <(chunk "t$n-x1-lf6" 6 1 "$seed0" "$games")
+    else
+        # every variant's chunk of seeds before the next chunk, so drift hits them all alike
+        tasks=()
+        while read -r _ _ ms seed count; do
+            for v in "${variants[@]}"; do
+                tasks+=("t$n-x1-lf6-v$v v$v $ms $seed $count")
+            done
+        done < <(chunk "t$n-x1-lf6" 6 1 "$seed0" "$games")
+    fi
     run_tasks "$n" "$out/parts" "${tasks[@]}"
 done
 
-log "$(date +%H:%M:%S) 1-thread ladder, $cpus at a time"
+(( ${#mults[@]} > 0 || lf1 == 1 )) && log "$(date +%H:%M:%S) 1-thread ladder, $cpus at a time"
 tasks=()
 for ((i = ${#mults[@]} - 1; i >= 0; i--)); do
     mapfile -t -O "${#tasks[@]}" tasks < <(chunk "t1-x${mults[i]}-lf6" 6 "${mults[i]}" "$seed0" "$games")
@@ -172,7 +217,7 @@ done
 if [ "$lf1" = 1 ]; then
     mapfile -t -O "${#tasks[@]}" tasks < <(chunk "t1-x1-lf1" 1 1 "$seed0" "$games")
 fi
-run_tasks 1 "$out/parts" "${tasks[@]}"
+(( ${#tasks[@]} > 0 )) && run_tasks 1 "$out/parts" "${tasks[@]}"
 log "$(date +%H:%M:%S) done; load average at end: $(cut -d' ' -f1-3 /proc/loadavg 2> /dev/null)"
 
 python3 scripts/strength_merge.py "$out" "$base_ms"

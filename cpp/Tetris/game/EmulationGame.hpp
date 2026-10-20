@@ -4,6 +4,13 @@
 
 #include <queue>
 
+// node hashes include the next piece when nothing is held: holding then plays that piece, so it
+// decides the node's moves. 0 = leave it out (the original hash, under which one node can stand for
+// states with different hold placements)
+#ifndef NANA_HASH_QUEUE_FRONT
+#define NANA_HASH_QUEUE_FRONT 1
+#endif
+
 // analogous to an APM survival mode
 // simulates a versus game with a highly simplified opponent model
 class EmulationGame {

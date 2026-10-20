@@ -54,6 +54,7 @@ std::chrono::steady_clock::time_point search_start_time;
 
 bool Search::initialised = false;
 int Search::time = 0;
+Search::FlushStats Search::flush_stats;
 
 // jobs in flight per worker
 #ifndef NANA_LOAD_FACTOR
@@ -69,6 +70,78 @@ constexpr size_t MAX_PATH_DEPTH = 64;
 #ifndef NANA_MPMCTS
 #define NANA_MPMCTS 1
 #endif
+
+// leaky gate for MP-MCTS restarts (notes/leaky-gate-mp-mcts.md): a leak carries a backprop on up
+// although every ancestor would still choose its path, delivering what's parked below them.
+// when a would-be restart leaks:
+// 0 = never
+// 1 = with probability NANA_LEAK_P
+// 2 = once the node's parked visits would reach NANA_LEAK_K
+// 3 = once they'd reach NANA_LEAK_EPS x the node's visits (0 = always: every backprop reaches the root)
+#ifndef NANA_LEAK
+#define NANA_LEAK 0
+#endif
+#ifndef NANA_LEAK_P
+#define NANA_LEAK_P 0.05
+#endif
+#ifndef NANA_LEAK_K
+#define NANA_LEAK_K 32
+#endif
+#ifndef NANA_LEAK_EPS
+#define NANA_LEAK_EPS 0.05
+#endif
+
+// a restart at node X parks its reward for X's parent edge, and the root's edge to its favoured
+// child only gets the parked results when the root's choice moves away from that child. so when a
+// search ends, the root's statistics (which bestMove reads) can miss much of the search, and tree
+// reuse starts the next search from them. like TDS-df-UCT forcing every job back to the root when
+// its search ends (Yoshizoe et al. 2011), at the end of each search (workers stopped):
+// 0 = leave the buffers parked (the original behaviour)
+// 1 = walk every parked buffer up its parent chain to the root first
+// 2 = only measure what that would change (Search::flush_stats), leave the buffers parked
+#ifndef NANA_FLUSH_AT_END
+#define NANA_FLUSH_AT_END 1
+#endif
+
+// restarts in a stochastic game: "every ancestor would choose the same edge" only means a fresh
+// select would take the same moves. the chance between them (the next piece past the preview, the
+// opponent's garbage, both in the hash) could still take it to other nodes, and the state a restart
+// resumes from (the job's snapshot) is one sampled future: the hidden queue, the opponent's stack.
+// so on restart:
+// 1 = replay the path's moves from the search root with fresh chance, as a fresh select would. if it
+//     reaches the restart node, restart there with the replayed state; if it leaves the path at
+//     depth k, send a SELECT with the replayed state to the node it reached, and a FLUSH that carries
+//     this result and the abandoned buffers up to depth k - 1. a node's moves must then be legal in
+//     any state reaching it: NANA_HASH_QUEUE_FRONT
+// 0 = resume from the snapshot (the original behaviour)
+#ifndef NANA_REPLAY_RESTART
+#define NANA_REPLAY_RESTART 1
+#endif
+static_assert(!NANA_REPLAY_RESTART || NANA_HASH_QUEUE_FRONT, "NANA_REPLAY_RESTART needs NANA_HASH_QUEUE_FRONT");
+
+// the search root as the workers start (root_state's rng is reseeded by workers on root backprops)
+static EmulationGame replay_root;
+static uint32_t replay_root_hash = 0;
+
+// play the job's path from the search root with fresh chance. returns the depth of the first node
+// the replay doesn't reach (path.size() + 1 if it reaches restart_hash after the whole path), with
+// the replayed state at that depth in state
+[[maybe_unused]] static size_t replayPath(const Job& job, uint32_t restart_hash, EmulationGame& state) {
+    state = replay_root;
+    state.rng.PPTRNG = fast_seed();
+    state.opponent.reset_rng();
+    const size_t depth = job.path.size();
+    for (size_t i = 0; i < depth; i++) {
+        state.set_move(state.specific_move(job.moves[i].unpack()));
+        state.play_moves();
+        state.chance_move();
+        const uint32_t expected = i + 1 < depth ? job.path[i + 1].hash : restart_hash;
+        if (state.game_over || state.hash() != expected) {
+            return i + 1;
+        }
+    }
+    return depth + 1;
+}
 
 // load balancing is lock-free work requesting: each node is only touched by its owner,
 // so the only work that can move between threads is a rollout (expansion + eval).
@@ -199,6 +272,8 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
         queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(root_state, SELECT), core_count);
     }
 
+    replay_root = root_state;
+    replay_root_hash = root_state.hash();
     loadTuning();
     resetWorkerLocal(core_count);
 
@@ -264,12 +339,107 @@ void Search::continueSearch(EmulationGame state) {
 
     }
 
+    replay_root = root_state;
+    replay_root_hash = root_state.hash();
     loadTuning();
     resetWorkerLocal(core_count);
 
     for (auto& idx : core_indices) {
         worker_threads[idx] = std::jthread(search, thread_stopper.get_token(), idx);
     }
+}
+
+// the root edge bestMove would pick, with optional extra visits and rewards per edge
+static size_t mostVisited(const UCTNode& root, const std::vector<float>* extra_N = nullptr,
+                          const std::vector<float>* extra_R = nullptr) {
+    float biggest_N = 0;
+    float biggest_R = 0;
+    size_t best = 0;
+    for (size_t i = 0; i < root.actionCount(); i++) {
+        float N = root.stats(i).N + (extra_N ? (*extra_N)[i] : 0);
+        float R = root.stats(i).R + (extra_R ? (*extra_R)[i] : 0);
+        if (N > biggest_N || (N == biggest_N && R > biggest_R)) {
+            biggest_N = N;
+            biggest_R = R;
+            best = i;
+        }
+    }
+    return best;
+}
+
+// NANA_FLUSH_AT_END: every parked buffer belongs to all edges from its node's parent up to the
+// root. walk each one up the recorded parent chain, recording what reaches the root's edges and,
+// with apply, adding it to every edge on the way (as the backprops that never came would have).
+// only called with the workers stopped, so it may touch every shard
+static void flushParked(bool apply) {
+    using Search::uct;
+    const uint32_t root_hash = Search::root_state.hash();
+    if (!uct.nodeExists(root_hash)) {
+        return;
+    }
+    UCTNode& root = uct.getNode(root_hash);
+    std::vector<float> hidden_N(root.actionCount(), 0.0f);
+    std::vector<float> hidden_R(root.actionCount(), 0.0f);
+
+    std::vector<UCTNode*> parked;
+    for (auto* side : { &uct.nodes_left, &uct.nodes_right }) {
+        for (auto& shard : *side) {
+            for (auto& [id, node] : shard.obj_) {
+                if (node.N_buffer != 0 || node.R_buffer != 0) {
+                    parked.push_back(&node);
+                }
+            }
+        }
+    }
+
+    for (UCTNode* node : parked) {
+        const float N = (float)node->N_buffer;
+        const float R = node->R_buffer;
+        UCTNode* child = node;
+        for (size_t step = 0; step < MAX_PATH_DEPTH; step++) {
+            const uint32_t parent_hash = child->parent_hash;
+            const int action = child->parent_action;
+            if (action < 0 || child->id == root_hash || !uct.nodeExists(parent_hash)) {
+                break;
+            }
+            UCTNode& parent = uct.getNode(parent_hash);
+            if ((size_t)action >= parent.actionCount()) {
+                break;
+            }
+            if (apply) {
+                parent.stats(action).R += R;
+                parent.stats(action).N += N;
+                parent.N += (int)N;
+            }
+            if (parent_hash == root_hash) {
+                hidden_N[action] += N;
+                hidden_R[action] += R;
+                break;
+            }
+            child = &parent;
+        }
+        if (apply) {
+            node->N_buffer = 0;
+            node->R_buffer = 0;
+        }
+    }
+
+    // compare with the root as it was (with apply, the root already has the hidden visits)
+    std::vector<float> minus_N(hidden_N.size()), minus_R(hidden_R.size());
+    for (size_t i = 0; i < hidden_N.size(); i++) {
+        minus_N[i] = -hidden_N[i];
+        minus_R[i] = -hidden_R[i];
+    }
+    const size_t before = apply ? mostVisited(root, &minus_N, &minus_R) : mostVisited(root);
+    const size_t after = apply ? mostVisited(root) : mostVisited(root, &hidden_N, &hidden_R);
+    float total = 0, hidden = 0;
+    for (size_t i = 0; i < root.actionCount(); i++) {
+        total += root.stats(i).N + (apply ? 0 : hidden_N[i]);
+        hidden += hidden_N[i];
+    }
+    Search::flush_stats.searches++;
+    Search::flush_stats.changed += before != after;
+    Search::flush_stats.hidden_share += total > 0 ? hidden / total : 0;
 }
 
 void Search::endSearch() {
@@ -294,6 +464,28 @@ void Search::endSearch() {
     min_work_bool = false;
     // reset the thread stopper
     thread_stopper = std::stop_source();
+
+    if constexpr (NANA_REPLAY_RESTART) {
+        // FLUSH messages still queued hold results that are in no buffer yet: deliver them first
+        // (workers are joined, so this thread may consume every queue)
+        bool delivered = true;
+        while (delivered) {
+            delivered = false;
+            for (int i = 0; i < core_count; i++) {
+                while (!queues[i]->isempty()) {
+                    Msg msg = queues[i]->dequeue();
+                    if (msg->type == FLUSH) {
+                        processJob(i, std::move(msg));
+                        delivered = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if constexpr (NANA_FLUSH_AT_END != 0) {
+        flushParked(NANA_FLUSH_AT_END == 1);
+    }
 
     // garbage collect
     if (uct.map_size() > 200000) {
@@ -356,6 +548,7 @@ void Search::printStatistics() {
         sum.restarts += s.restarts;
         sum.restart_depth += s.restart_depth;
         sum.root_backprops += s.root_backprops;
+        sum.leaks += s.leaks;
         sum.cycles += s.cycles;
         sum.depth_capped += s.depth_capped;
     }
@@ -377,6 +570,7 @@ void Search::printStatistics() {
     std::cout << "backprops stopped early: " << (backprops ? 100.0 * sum.restarts / backprops : 0.0) << "%" << std::endl;
     std::cout << "mean restart depth: " << (sum.restarts ? (double)sum.restart_depth / sum.restarts : 0.0) << std::endl;
     std::cout << "root backprops: " << sum.root_backprops << std::endl;
+    std::cout << "leaks (NANA_LEAK " << NANA_LEAK << "): " << sum.leaks << std::endl;
     std::cout << "cycles: " << sum.cycles << std::endl;
     std::cout << "depth capped: " << sum.depth_capped << std::endl;
     std::cout << "nodes storing history: " << history_nodes << " (" << history_rows * sizeof(HistoryRow) / 1024 << " KiB)" << std::endl;
@@ -593,6 +787,35 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
     // the job lives on the heap and belongs to whoever holds msg: don't touch it after sending
     Job& job = *msg;
 
+    if (job.type == FLUSH) {
+        // path.back() is the node whose edge gets the carried result; the last entry is the top
+        uct.stats[threadIdx].flushes++;
+        UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
+        EdgeStats& edge = node.stats(job.path.back().actionID);
+        edge.R += job.R;
+        edge.N += job.extra_N;
+        node.N += job.extra_N;
+        if (job.path.size() == 1) {
+            // the top: the diverged select's virtual visit goes through this edge too, and the
+            // ancestors above still owe all of it, so park it here
+            edge.N += 1;
+            node.N += 1;
+            if (node.id != replay_root_hash) {
+                node.R_buffer += job.R;
+                node.N_buffer += job.extra_N + 1;
+            }
+            return;
+        }
+        // this node is being left too: its own parked results belong to the edge above
+        job.R += node.R_buffer;
+        job.extra_N += node.N_buffer;
+        node.R_buffer = 0;
+        node.N_buffer = 0;
+        job.path.pop_back();
+        send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
+        return;
+    }
+
     if (job.type == PUT) {
         if (!uct.insertNode(std::move(*job.node))) {
             uct.stats[threadIdx].duplicate_puts++;
@@ -689,6 +912,13 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             UCTNode& node = uct.getNode(hash, threadIdx);
 
+            if constexpr (NANA_FLUSH_AT_END != 0) {
+                if (!job.path.empty()) {
+                    node.parent_hash = job.path.back().hash;
+                    node.parent_action = job.path.back().actionID;
+                }
+            }
+
             if (node.actionCount() == 0) {
                 // no legal placement: lost, like topping out. run it again as a terminal state
                 state.game_over = true;
@@ -751,6 +981,16 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 job.snapshots.push_back(state);
             }
 
+            {
+                const PieceType type = node.move(action).piece.type;
+                const PieceType hold_candidate = state.game.hold ? *state.game.hold : state.game.queue.front();
+                if (type != state.game.current_piece.type && type != hold_candidate) {
+                    uct.stats[threadIdx].illegal_moves++;
+                }
+            }
+            if constexpr (NANA_REPLAY_RESTART) {
+                job.moves.push_back(node.cold[action].move);
+            }
             state.set_move(state.specific_move(node.move(action)));
 
             state.play_moves();
@@ -801,6 +1041,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         node.N += job.extra_N;
 
         job.path.pop_back();
+        if (!job.moves.empty()) {
+            job.moves.pop_back();
+        }
 
         if (job.path.empty()) {
             uct.stats[threadIdx].root_backprops++;
@@ -814,6 +1057,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.R = 0.0;
             job.extra_N = 0;
             job.history.clear();
+            job.moves.clear();
             job.snapshots.clear();
             job.type = SELECT;
 
@@ -854,7 +1098,25 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             still_chosen = still_chosen && row.stillChosen();
         }
 
-        if (still_chosen) {
+        // visits this node would have parked, counting this one, if it restarted here
+        [[maybe_unused]] const int parked = node.N_buffer + job.extra_N + 1;
+        bool leak = false;
+        if constexpr (NANA_LEAK == 1) {
+            // getRand(n) is (16-bit draw * n) >> 16 in 32 bits, so n must stay at or below 2^16
+            constexpr uint32_t scale = 1u << 16;
+            leak = still_chosen && uct.rng[threadIdx].getRand(scale) < (uint32_t)(NANA_LEAK_P * scale);
+        }
+        else if constexpr (NANA_LEAK == 2) {
+            leak = still_chosen && parked >= NANA_LEAK_K;
+        }
+        else if constexpr (NANA_LEAK == 3) {
+            leak = still_chosen && parked >= NANA_LEAK_EPS * node.N;
+        }
+        if (leak) {
+            uct.stats[threadIdx].leaks++;
+        }
+
+        if (still_chosen && !leak) {
             // the ancestors would just send a simulation straight back here, so start it here.
             // park the reward for the next backprop that leaves this node, plus a visit for
             // the restarted simulation, which the ancestors haven't counted
@@ -878,6 +1140,57 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             if (node.N >= HISTORY_MIN_VISITS) {
                 node.history = rows;
+            }
+
+            if constexpr (NANA_REPLAY_RESTART) {
+                const size_t depth = job.path.size();
+                size_t left = depth + 1;
+                if (job.moves.size() == depth) {
+                    left = replayPath(job, node.id, job.state);
+                }
+                else {
+                    // no move record to replay (shouldn't happen): restart from the snapshot
+                    job.state = std::move(here);
+                }
+                if (left <= depth) {
+                    // a fresh select would have left the path at depth `left`: undo the restart's
+                    // parking here and send this result, with what's parked, up to depth left - 1
+                    node.R_buffer -= reward;
+                    node.N_buffer -= job.extra_N + 1;
+                    uct.stats[threadIdx].restarts--;
+                    uct.stats[threadIdx].restart_depth -= depth;
+                    uct.stats[threadIdx].replay_diverged++;
+                    uct.stats[threadIdx].replay_diverge_depth += left;
+
+                    Msg flush = std::make_unique<Job>(FLUSH);
+                    flush->R = reward + node.R_buffer;
+                    flush->extra_N = job.extra_N + node.N_buffer;
+                    node.R_buffer = 0;
+                    node.N_buffer = 0;
+                    flush->path.assign(job.path.begin() + (left - 1), job.path.end());
+                    send(threadIdx, uct.getOwner(flush->path.back().hash), std::move(flush));
+
+                    // the select carries on from the node the replay reached, keeping the
+                    // path above it (the rows already have its visit through those depths)
+                    // (erase, not resize: shrinking with resize needs default-constructible elements)
+                    job.path.erase(job.path.begin() + left, job.path.end());
+                    job.moves.erase(job.moves.begin() + left, job.moves.end());
+                    job.snapshots.erase(job.snapshots.begin() + std::min(left, job.snapshots.size()), job.snapshots.end());
+                    rows.erase(rows.begin() + std::min(left, rows.size()), rows.end());
+                    job.history = rows;
+                    job.R = 0.0;
+                    job.extra_N = 0;
+                    job.type = SELECT;
+                    send(threadIdx, uct.getOwner(job.state.hash()), std::move(msg));
+                    return;
+                }
+                uct.stats[threadIdx].replay_matched++;
+                job.history = rows;
+                job.R = 0.0;
+                job.extra_N = 0;
+                job.type = SELECT;
+                send(threadIdx, threadIdx, std::move(msg));
+                return;
             }
 
             here.rng.PPTRNG = fast_seed();

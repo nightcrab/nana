@@ -16,6 +16,10 @@
 #   POLL_SECONDS  how often to check whether the sweep is done (default 60)
 #   THREADS       thread counts to sweep, e.g. "1 4 8 16 32" (default 1, 2, 4, ... max_threads)
 #   SCRIPT        which script in scripts/ to run (default bench_scaling.sh)
+#   SELF_SHUTDOWN 1 = the instance shuts itself down 3 minutes after the benchmark exits, so a run
+#                 finishes cleanly even if this machine sleeps or loses its connection (default 0).
+#                 Results stay on the stopped instance's disk; the next run moves them to
+#                 ~/results-archive before re-cloning, so they can still be fetched
 #   WORKTREE      1 = also upload this checkout's modified and untracked files over the clone,
 #                 to benchmark uncommitted work (default 0: just ref)
 #
@@ -43,6 +47,7 @@ poll=${POLL_SECONDS:-60}
 repo=$(git remote get-url origin)
 script=${SCRIPT:-bench_scaling.sh}
 worktree=${WORKTREE:-0}
+self_shutdown=${SELF_SHUTDOWN:-0}
 
 ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ConnectTimeout=20)
 remote() { ssh "${ssh_opts[@]}" "$user@$host" "$@"; }
@@ -89,6 +94,11 @@ set -euo pipefail
 sudo shutdown -h +$max_minutes "nana bench time limit" || true
 sudo apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q git cmake g++ python3 > /dev/null
+# keep results a previous run never got copied back
+if [ -d nana/results ] && [ -n "\$(ls -A nana/results 2> /dev/null)" ]; then
+    mkdir -p results-archive
+    mv nana/results "results-archive/\$(date +%Y%m%d-%H%M%S)"
+fi
 rm -rf nana
 git clone -q "$repo" nana
 cd nana
@@ -96,7 +106,7 @@ git checkout -q "$commit"
 $extract
 cp ../$script scripts/$script
 rm -f ../bench.done
-nohup bash -c 'THREADS="${THREADS:-}" bash scripts/$script $bench_args; echo \$? > ../bench.done' > ../bench.log 2>&1 < /dev/null &
+nohup bash -c 'THREADS="${THREADS:-}" bash scripts/$script $bench_args; echo \$? > ../bench.done; [ "$self_shutdown" = 1 ] && sudo shutdown -h +3 "nana bench done"' > ../bench.log 2>&1 < /dev/null &
 EOF
 
 armed=1
