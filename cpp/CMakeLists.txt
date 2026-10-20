@@ -16,6 +16,7 @@ set(TETRIS_SOURCES
 	"Tetris/game/EmulationGame.cpp"
 	"Tetris/game/EmulationGame.hpp"
 	"Tetris/game/Opponent.cpp"
+	"Tetris/game/MarkovOpponent.cpp"
 	"Tetris/bot/UCT.cpp"
 	"Tetris/bot/UCT.hpp"
 	"Tetris/bot/Search.cpp"

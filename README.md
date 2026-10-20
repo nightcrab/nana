@@ -42,6 +42,15 @@ State abstraction allows Nana to combine search statistics on gamestates that lo
 
 The result of this is that Nana can optimize against simulated random outcomes in real time, which is part of the reason it needs to search so many nodes compared to traditional engines.
 
+### Markovian Opponent Modelling
+
+To model garbage-trading dynamics and macro state, Nana uses an internal simulator that implements an Input-Output Hidden Markov Model (IOHMM). [[7]](#7) 
+
+The IOHMM models an opponent as a probability distribution over a fixed number of states (usually 8), with state transitions that depend on attacks that the model receives.
+
+Nana cannot see the IOHMM's internal state, and treats it as a hidden variable for ISMCTS to abstract over. This separation of search and modelling allows Nana to allocate focus between stacking and handling multi agent interactions. This is often referred to as the micro/macro split in Versus Tetris.
+
+
 ## Scaling Experiments
 
 We benchmarked simulations per second on a 32-core AMD EPYC 9R45 (SMT disabled), at every thread count from 1 to 32 on two positions. 
@@ -105,3 +114,4 @@ There is also a standalone, graphical version of the bot that requires SDL2.
 4. Practical Massively Parallel Monte-Carlo Tree Search Applied to Molecular Design, Yang et al. 2020 (https://arxiv.org/pdf/2006.10504)
 5. Open Loop Optimistic Planning, Bubeck and Munos 2010 (https://chercheurs.lille.inria.fr/munos/papers/files/olop.pdf)
 6. Information Set Monte Carlo Tree Search, Cowling et al. 2012 (https://eprints.whiterose.ac.uk/id/eprint/75048/1/CowlingPowleyWhitehouse2012.pdf)
+7. An Input Output HMM Architecture, Bengio and Frasconi 1995 (https://www.iro.umontreal.ca/~lisa/bib/pub_subject/language/pointeurs/iohmm-nips7.pdf)

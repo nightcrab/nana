@@ -1,7 +1,9 @@
 #pragma once
 #include "Opponent.hpp"
+#include "MarkovOpponent.hpp"
 #include "engine/Game.hpp"
 
+#include <ostream>
 #include <queue>
 
 // node hashes include the next piece when nothing is held: holding then plays that piece, so it
@@ -32,6 +34,9 @@ class EmulationGame {
     Move move;
     RNG rng;
     Opponent opponent;
+    // plays markov in place of opponent
+    MarkovOpponent markov;
+    bool markov_opponent = false;
 
     // survival-mode garbage ramp: the opponent's garbage is scaled by
     // 1 + ramp_pieces / garbage_ramp (0 = off). the search plays the same ramp
@@ -47,6 +52,9 @@ class EmulationGame {
 
     // does not count cancelling
     int true_attack = 0;
+
+    // damage sent to the opponent by the last move, after cancelling, for logging
+    int last_sent = 0;
 
     bool game_over = false;
 
@@ -67,4 +75,17 @@ class EmulationGame {
     std::vector<Move> legal_moves();
 
     uint32_t hash() const;
+
+    // the opponent model in play
+    double opponent_jeopardy() const;
+    double opponent_deaths() const;
+    bool opponent_dead() const;
+    void reset_opponent_rng();
+    // a fresh opponent of either model
+    void reset_opponent(bool markov);
+
+    // one CSV row of what passed between us and the opponent this piece, after play_moves and
+    // chance_move: the training data for scripts/train_markov_opponent.py
+    static void write_opponent_header(std::ostream& out);
+    void write_opponent_step(std::ostream& out, uint64_t game_id) const;
 };

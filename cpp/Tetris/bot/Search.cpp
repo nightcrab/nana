@@ -129,7 +129,7 @@ static uint32_t replay_root_hash = 0;
 [[maybe_unused]] static size_t replayPath(const Job& job, uint32_t restart_hash, EmulationGame& state) {
     state = replay_root;
     state.rng.PPTRNG = fast_seed();
-    state.opponent.reset_rng();
+    state.reset_opponent_rng();
     const size_t depth = job.path.size();
     for (size_t i = 0; i < depth; i++) {
         state.set_move(state.specific_move(job.moves[i].unpack()));
@@ -196,6 +196,13 @@ static void loadTuning() {
     tuning.steal_topk = std::clamp(tuning.steal_topk, 1, MAX_STEAL_TOPK);
 }
 
+// NANA_MARKOV_OPPONENT=1: the search models the opponent with MarkovOpponent instead of the
+// handcrafted Opponent, whichever the game being played uses. read when a search starts
+static bool markovSearch() {
+    const char* text = std::getenv("NANA_MARKOV_OPPONENT");
+    return text && std::atoi(text) != 0;
+}
+
 // state private to one worker
 struct alignas(64) WorkerLocal {
     // rollouts for new leaves we own, run when there are no messages or given away on request
@@ -239,6 +246,10 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     Search::core_count = core_count;
 
     root_state = state;
+    // the game may play the other model
+    if (root_state.markov_opponent != markovSearch()) {
+        root_state.reset_opponent(markovSearch());
+    }
 
     time = 0;
 
@@ -268,7 +279,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     // Spawn jobs
     for (int i = 0; i < LOAD_FACTOR * core_count; i++) {
         root_state.rng.PPTRNG = fast_seed();
-        root_state.opponent.reset_rng();
+        root_state.reset_opponent_rng();
         queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(root_state, SELECT), core_count);
     }
 
@@ -308,8 +319,7 @@ void Search::continueSearch(EmulationGame state) {
     root_state.true_attack = state.true_app() * 0;
     root_state.pieces = 0;
     root_state.lines = 2;
-    root_state.opponent.deaths = 0;
-    root_state.opponent = Opponent();
+    root_state.reset_opponent(markovSearch());
 
     if (!uct.nodeExists(state.hash())) {
         uct.insertNode(UCTNode(state));
@@ -332,7 +342,7 @@ void Search::continueSearch(EmulationGame state) {
     int rootOwnerIdx = uct.getOwner(state.hash());
     for (int j = 0; j < core_count; j++) {
         for (int i = 0; i < LOAD_FACTOR; i++) {
-            root_state.opponent.reset_rng();
+            root_state.reset_opponent_rng();
             root_state.rng.PPTRNG = fast_seed();
             queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(root_state, SELECT), core_count);
         }
@@ -1048,7 +1058,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         if (job.path.empty()) {
             uct.stats[threadIdx].root_backprops++;
 
-            root_state.opponent.reset_rng();
+            root_state.reset_opponent_rng();
             root_state.rng.PPTRNG = fast_seed();
 
             // reuse this job for a fresh select from the root;
@@ -1194,7 +1204,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             }
 
             here.rng.PPTRNG = fast_seed();
-            here.opponent.reset_rng();
+            here.reset_opponent_rng();
 
             job.state = std::move(here);
             job.history = rows;
@@ -1376,13 +1386,13 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
         reward = std::max(reward, r);
     }
 
-    if (state.opponent.garbage_height() > 15) {
-        reward += state.opponent.garbage_height() / 20;
+    if (state.opponent_jeopardy() > 15) {
+        reward += state.opponent_jeopardy() / 20;
     }
 
-    reward += state.opponent.deaths / 3;
+    reward += state.opponent_deaths() / 3;
 
-    if (state.opponent.is_dead()) {
+    if (state.opponent_dead()) {
         // gottem
         reward = 1;
     }

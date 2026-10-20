@@ -4,8 +4,13 @@
 // so two configs played on the same seeds can be compared game by game.
 //
 // usage: nana_play [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
+//                  [--markov-env 0|1] [--opponent-log FILE]
 //
 // prints one JSON line per game to stdout and a summary to stderr.
+// --markov-env 1 plays the games against MarkovOpponent instead of the handcrafted Opponent (the
+// search's model is set separately, by NANA_MARKOV_OPPONENT). --opponent-log writes what passed
+// between the bot and the opponent each piece, to fit MarkovOpponent with
+// scripts/train_markov_opponent.py.
 // on Linux, run several at once on separate chiplets with e.g. taskset -c 8-15.
 
 #include "EmulationGame.hpp"
@@ -15,6 +20,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -34,6 +40,8 @@ struct Options {
     int ramp = 0;
     // games still alive here are cut off (counted as survived, not died)
     int max_pieces = 2000;
+    bool markov_env = false;
+    std::string opponent_log;
 };
 
 static uint32_t seedFor(uint64_t game_seed, uint64_t stream) {
@@ -44,9 +52,9 @@ static uint32_t seedFor(uint64_t game_seed, uint64_t stream) {
     return uint32_t((z ^ (z >> 31)) >> 32);
 }
 
-static EmulationGame newGame(uint64_t game_seed, int ramp) {
+static EmulationGame newGame(uint64_t game_seed, const Options& options) {
     EmulationGame game;
-    game.garbage_ramp = ramp;
+    game.garbage_ramp = options.ramp;
 
     game.rng.PPTRNG = seedFor(game_seed, 0);
     game.rng.makebag();
@@ -55,6 +63,10 @@ static EmulationGame newGame(uint64_t game_seed, int ramp) {
     game.opponent.rng.PPTRNG = seedFor(game_seed, 1);
     game.opponent.nextI = game.opponent.rng.getRand(7);
     game.opponent.nextSpinPiece = game.opponent.rng.getRand(7);
+    if (options.markov_env) {
+        game.reset_opponent(true);
+        game.markov.seed(seedFor(game_seed, 1));
+    }
 
     game.game.current_piece = game.rng.getPiece();
     for (auto& piece : game.game.queue) {
@@ -89,7 +101,7 @@ struct GameResult {
     double stop_seconds = 0;
 };
 
-static GameResult playGame(EmulationGame& game, const Options& options) {
+static GameResult playGame(EmulationGame& game, const Options& options, uint64_t game_seed, std::ostream* opponent_log) {
     using clock = std::chrono::steady_clock;
     auto seconds = [](clock::duration d) { return std::chrono::duration<double>(d).count(); };
 
@@ -153,6 +165,9 @@ static GameResult playGame(EmulationGame& game, const Options& options) {
         game.set_move(game.specific_move(move));
         game.play_moves();
         game.chance_move();
+        if (opponent_log) {
+            game.write_opponent_step(*opponent_log, game_seed);
+        }
     }
 
     result.pieces = game.ramp_pieces;
@@ -168,6 +183,10 @@ static bool parse(int argc, const char** argv, Options& options) {
         if (i + 1 >= argc) {
             return false;
         }
+        if (arg == "--opponent-log") {
+            options.opponent_log = argv[++i];
+            continue;
+        }
         long long value = std::stoll(argv[++i]);
         if (arg == "--threads") options.threads = (int)value;
         else if (arg == "--games") options.games = (int)value;
@@ -175,6 +194,7 @@ static bool parse(int argc, const char** argv, Options& options) {
         else if (arg == "--seed") options.seed = (uint64_t)value;
         else if (arg == "--ramp") options.ramp = (int)value;
         else if (arg == "--max-pieces") options.max_pieces = (int)value;
+        else if (arg == "--markov-env") options.markov_env = value != 0;
         else return false;
     }
     return options.threads > 0 && options.games > 0 && options.ms > 0;
@@ -189,13 +209,24 @@ int main(int argc, const char** argv) {
     }
     catch (const std::exception&) {
         std::cerr << "usage: " << argv[0]
-            << " [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]" << std::endl;
+            << " [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]"
+            << " [--markov-env 0|1] [--opponent-log FILE]" << std::endl;
         return 1;
     }
 
 #ifdef _WIN32
     timeBeginPeriod(1);
 #endif
+
+    std::ofstream opponent_log;
+    if (!options.opponent_log.empty()) {
+        opponent_log.open(options.opponent_log);
+        if (!opponent_log) {
+            std::cerr << "can't write " << options.opponent_log << std::endl;
+            return 1;
+        }
+        EmulationGame::write_opponent_header(opponent_log);
+    }
 
     int deaths = 0;
     long long total_pieces = 0;
@@ -204,8 +235,8 @@ int main(int argc, const char** argv) {
 
     for (int i = 0; i < options.games; i++) {
         uint64_t game_seed = options.seed + i;
-        EmulationGame game = newGame(game_seed, options.ramp);
-        GameResult result = playGame(game, options);
+        EmulationGame game = newGame(game_seed, options);
+        GameResult result = playGame(game, options, game_seed, opponent_log ? &opponent_log : nullptr);
 
         deaths += result.died;
         total_pieces += result.pieces;
@@ -224,7 +255,7 @@ int main(int argc, const char** argv) {
             << ",\"true_attack\":" << game.true_attack
             << ",\"lines\":" << game.lines
             // before the ramp scales it
-            << ",\"opponent_attack\":" << game.opponent.total_damage
+            << ",\"opponent_attack\":" << (game.markov_opponent ? game.markov.total_damage : game.opponent.total_damage)
             << ",\"sims_per_move\":" << result.simulations / moves
             << ",\"restarts_per_sim\":" << (double)result.restarts / std::max<uint64_t>(result.simulations, 1)
             << ",\"root_per_sim\":" << (double)result.root_backprops / std::max<uint64_t>(result.simulations, 1)

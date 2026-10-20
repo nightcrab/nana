@@ -30,7 +30,7 @@ void EmulationGame::chance_move() {
 
     // simulate opponent
 
-    garbage_amount = opponent.play();
+    garbage_amount = markov_opponent ? (int)markov.play() : (int)opponent.play();
 
     if (garbage_ramp > 0 && garbage_amount > 0) {
         float scaled = garbage_amount * (1.0f + (float)ramp_pieces / garbage_ramp) + ramp_carry;
@@ -44,6 +44,8 @@ void EmulationGame::chance_move() {
 };
 
 void EmulationGame::play_moves(){
+    last_sent = 0;
+
     if (game_over) {
         return;
     }
@@ -105,7 +107,13 @@ void EmulationGame::play_moves(){
     }
 
     // send damage
-    opponent.receiveAttack(damage);
+    if (markov_opponent) {
+        markov.receiveAttack(damage);
+    }
+    else {
+        opponent.receiveAttack(damage);
+    }
+    last_sent = damage;
 
     // combo block
     if (cleared_lines == 0) {
@@ -196,4 +204,50 @@ float EmulationGame::apl() {
 
 float EmulationGame::b2b() {
     return (float) game.b2b; 
+}
+
+double EmulationGame::opponent_jeopardy() const {
+    return markov_opponent ? markov.jeopardy() : opponent.jeopardy();
+}
+
+double EmulationGame::opponent_deaths() const {
+    return markov_opponent ? markov.deaths : opponent.deaths;
+}
+
+bool EmulationGame::opponent_dead() const {
+    return markov_opponent ? markov.is_dead() : opponent.dead;
+}
+
+void EmulationGame::reset_opponent_rng() {
+    if (markov_opponent) {
+        markov.reset_rng();
+    }
+    else {
+        opponent.reset_rng();
+    }
+}
+
+void EmulationGame::reset_opponent(bool markov) {
+    markov_opponent = markov;
+    if (markov) {
+        this->markov = MarkovOpponent();
+        // empty, so copying the state doesn't allocate
+        opponent.stack.clear();
+        opponent.garbage.clear();
+    }
+    else {
+        opponent = Opponent();
+    }
+}
+
+void EmulationGame::write_opponent_header(std::ostream& out) {
+    out << "game,piece,sent,opp_attack,opp_sent,opp_meter,opp_dead\n";
+}
+
+void EmulationGame::write_opponent_step(std::ostream& out, uint64_t game_id) const {
+    const double opp_attack = markov_opponent ? markov.last_attack : opponent.last_attack;
+    // chance_move leaves only what the opponent sent this piece in buffered_garbage, after the ramp
+    const int opp_sent = buffered_garbage.empty() ? 0 : buffered_garbage.front();
+    out << game_id << ',' << ramp_pieces << ',' << last_sent << ',' << opp_attack << ',' << opp_sent << ','
+        << opponent_jeopardy() << ',' << (opponent_dead() ? 1 : 0) << '\n';
 }

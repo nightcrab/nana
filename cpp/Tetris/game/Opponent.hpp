@@ -135,6 +135,8 @@ public:
 
     float pieces = 0;
     float total_damage = 0;
+    // attack this piece before cancelling, for logging
+    double last_attack = 0;
 
     double nextI = rng.getRand(7);;
     double nextSpinPiece = rng.getRand(7);
@@ -269,7 +271,7 @@ public:
         if (can_attack()) {
             return true;
         }
-        if (garbage_height() + stack_height() > 15) {
+        if (jeopardy() + stack_height() > 15) {
             return true;
         }
         return false;
@@ -592,9 +594,10 @@ public:
         }
         return height;
     }
-    double garbage_height() {
+    // jeopardy: the garbage in the meter, not yet cancelled or tanked
+    double jeopardy() const {
         double height = 0;
-        for (StackLayer& layer : garbage) {
+        for (const StackLayer& layer : garbage) {
             height += layer.height;
         }
         return height;
@@ -670,6 +673,8 @@ public:
     // Advances internal state and returns outgoing damage this turn
     double play() {
 
+        last_attack = 0;
+
         if (dead) {
             // revive
             stack.clear();
@@ -695,6 +700,8 @@ public:
         else {
             build();
         }
+
+        last_attack = attack;
 
         // cancelling logic
         attack = process_meter((double) attack);
