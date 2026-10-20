@@ -29,9 +29,17 @@ Transposition Driven Scheduling is a load balancing technique that allows a prog
 
 ### Work Requesting
 
-One of the challenges specifically of searching Tetris using TDS-MCTS is that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3)[[4]](#4) encounter significant congestion issues when applied to this domain without dynamic load balancing.
+One of the challenges specifically of searching Tetris that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3)[[4]](#4) encounter significant congestion issues when applied to this domain without dynamic load balancing.
 
 To address this, Nana workers try to predict when they are at risk of running out of work, and pre-emptively request to borrow work from individual workers using a tuned heuristic taking into account load statistics and memory topology.
+
+### Information State MCTS
+
+Nana uses a special variant of MCTS that combines state abstraction with open-loop MCTS [[5]](#5) to games with randomness and hidden information. It is based on Information State MCTS [[6]](#6) which was designed for games with hidden information.
+
+State abstraction allows Nana to combine search statistics on gamestates that look similar but differ superficially, while open-loop MCTS walks forward random simulations of the game without needing to know the underlying transition probabilities.
+
+The result of this is that Nana can optimize against simulated random outcomes in real time, which is part of the reason it needs to search so many nodes compared to traditional engines.
 
 ## Scaling Experiments
 
@@ -94,6 +102,5 @@ There is also a standalone, graphical version of the bot that requires SDL2.
 2. https://en.wikipedia.org/wiki/Transposition-driven_scheduling
 3. Scalable Distributed Monte-Carlo Tree Search, Yoshizoe et al. 2011 (https://www.graco.c.u-tokyo.ac.jp/~kaneko/papers/socs2011pmcts.pdf)
 4. Practical Massively Parallel Monte-Carlo Tree Search Applied to Molecular Design, Yang et al. 2020 (https://arxiv.org/pdf/2006.10504)
-
-
-
+5. Open Loop Optimistic Planning, Bubeck and Munos 2010 (https://chercheurs.lille.inria.fr/munos/papers/files/olop.pdf)
+6. Information Set Monte Carlo Tree Search, Cowling et al. 2012 (https://eprints.whiterose.ac.uk/id/eprint/75048/1/CowlingPowleyWhitehouse2012.pdf)
