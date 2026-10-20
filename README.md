@@ -9,14 +9,15 @@
 
 Nana is a parallel search program for two-player stacking games, such as Versus Tetris. 
 
-The program is ruleset-agnostic and designed for similar games that have any or all of the following properties:
+Versus Tetris presents a variety of challenges that Nana chooses to approach explicitly, namely:
 
-* Zero-sum games
 * Large branching factors
 * Random chance
 * Hidden information
 * Efficient parallelisation
 * Online any-time planning
+
+The engine is designed to run on tournament hardware with an emphasis on high core counts and modern x86.
 
 
 ## How It Works
