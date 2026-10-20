@@ -46,10 +46,11 @@ The result of this is that Nana can optimize against simulated random outcomes i
 
 To model garbage-trading dynamics and macro state, Nana uses an internal simulator that implements an Input-Output Hidden Markov Model (IOHMM). [[7]](#7) 
 
-The IOHMM models an opponent as a probability distribution over a fixed number of states (usually 8), with state transitions that depend on attacks that the model receives.
+The IOHMM models an opponent as a probability distribution over a fixed number of states, with transitions conditioned on incoming damage.
 
 Nana cannot see the IOHMM's internal state, and treats it as a hidden variable for ISMCTS to abstract over. This separation of search and modelling allows Nana to allocate focus between stacking and handling multi agent interactions. This is often referred to as the micro/macro split in Versus Tetris.
 
+The default opponent model is the 8-state IOHMM trained on Nana's own play. In principle, it could be retuned or replaced with a custom model supporting the same input-output structure.
 
 ## Scaling Experiments
 
