@@ -298,7 +298,8 @@ double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
 
     score += get_row_transitions(board) * row_transitions;
 
-    if (tspin) {
+    // tspin is set for any piece's spin, so an I piece can spin four lines: the table stops at three
+    if (tspin && lines < (int)std::size(tspins)) {
         score += tspins[lines];
     }
 

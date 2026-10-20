@@ -575,6 +575,20 @@ static void handleRequest(int threadIdx, Msg&& msg) {
     send(threadIdx, next, std::move(msg));
 }
 
+// tell the main thread a simulation has completed; it only needs telling once per search,
+// so later simulations skip the mutex entirely
+static void notifySimulationDone() {
+    if (!min_work_bool.load(std::memory_order_relaxed)) {
+        // extra scope to prevent notifying the main thread while holding the lock
+        // this is to prevent the main thread from waiting on the condition variable while we're holding the lock
+        {
+            std::scoped_lock lock(min_work_mutex);
+            min_work_bool = true;
+        }
+        min_work_cv.notify_one();
+    }
+}
+
 void Search::processJob(const int threadIdx, Msg&& msg) {
     // the job lives on the heap and belongs to whoever holds msg: don't touch it after sending
     Job& job = *msg;
@@ -644,6 +658,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             float reward = rollout(state, threadIdx);
 
             if (job.path.empty()) {
+                // the root itself is lost: nothing to search, but don't leave endSearch waiting
+                notifySimulationDone();
                 return;
             }
 
@@ -672,6 +688,14 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         if (exists) {
 
             UCTNode& node = uct.getNode(hash, threadIdx);
+
+            if (node.actionCount() == 0) {
+                // no legal placement: lost, like topping out. run it again as a terminal state
+                state.game_over = true;
+                send(threadIdx, threadIdx, std::move(msg));
+                return;
+            }
+
             size_t action = 0;
             [[maybe_unused]] HistoryRow row;
 
@@ -793,17 +817,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.snapshots.clear();
             job.type = SELECT;
 
-            // tell the main thread a simulation has completed; it only needs telling once per
-            // search, so later root backprops skip the mutex (and the root hash) entirely
-            if (!min_work_bool.load(std::memory_order_relaxed)) {
-                // extra scope to prevent notifying the main thread while holding the lock
-                // this is to prevent the main thread from waiting on the condition variable while we're holding the lock
-                {
-                    std::scoped_lock lock(min_work_mutex);
-                    min_work_bool = true;
-                }
-                min_work_cv.notify_one();
-            }
+            notifySimulationDone();
 
             // give ourself this job
             queues[threadIdx]->enqueue(std::move(msg), threadIdx);
@@ -856,6 +870,11 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             uct.stats[threadIdx].restarts++;
             uct.stats[threadIdx].restart_depth += job.path.size();
+
+            // a simulation finished here too. when every ancestor keeps its choice (forced
+            // moves, or all alternatives lost) no backprop may reach the root for the rest of
+            // the search, and endSearch would wait forever
+            notifySimulationDone();
 
             if (node.N >= HISTORY_MIN_VISITS) {
                 node.history = rows;
@@ -1026,7 +1045,14 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
         max_eval = std::max(max_eval, node.eval(i));
     }
 
+    // no legal placement: as lost as topping out
+    const bool stuck = node.actionCount() == 0;
+
     maybeInsertNode(std::move(node), threadIdx);
+
+    if (stuck) {
+        return 0.0;
+    }
 
     if constexpr (search_style == NANA) {
         float r = state.true_app() / 3 + max_eval / 2;

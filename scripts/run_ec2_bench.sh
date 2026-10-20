@@ -116,7 +116,12 @@ done
 
 echo "copying results to $local_dir"
 scp "${ssh_opts[@]}" "$user@$host:bench.log" "$local_dir/" || echo "could not copy bench.log"
-scp "${ssh_opts[@]}" -r "$user@$host:nana/results/*" "$local_dir/" || echo "could not copy results"
+# one tarball rather than scp -r, which pays a round trip per file (a strength run has thousands)
+if remote "cd nana/results && tar -czf - ." > "$local_dir/results.tgz"; then
+    tar -xzf "$local_dir/results.tgz" -C "$local_dir" && rm "$local_dir/results.tgz"
+else
+    echo "could not copy results"
+fi
 
 shutdown_instance
 

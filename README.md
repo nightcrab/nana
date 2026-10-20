@@ -51,6 +51,28 @@ The engine achieves throughput efficiency of 80% on the first 8 cores, stablizin
 
 To reproduce, run `scripts/speed_scaling.sh` on the machine (or through `scripts/run_ec2_bench.sh` with `SCRIPT=speed_scaling.sh`), then plot it with `node scripts/plot_speed.mjs <results dir>`.
 
+### Playing Strength
+
+We also measured end-to-end strength scaling by comparing more threads vs. more thinking time.  
+
+Every configuration played 300 games of APM survival, and was scored by its attack per piece over the first 50 pieces (a bot that dies early sends nothing for the pieces it didn't play). 
+
+Interestingly, over the regime we tested, a single thread given 80 to 2560 ms per move gained a consistent 6% APP per doubling of think time.
+
+On 32 cores, Nana plays about as well as a single core given 11x thinking time.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/strength-effort-dark.png">
+  <img width="800" alt="Attack per piece against simulations per move: one thread thinking longer rises from 0.79 at 6k simulations to 1.08 at 165k; more threads at 80 ms track it up to 4 threads, then fall below it, reaching 0.97 at 32 threads and 119k simulations" src="./docs/strength-effort-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/strength-speedup-dark.png">
+  <img width="800" alt="Speedup over one thread against threads, 1 to 32: simulations per move reach 21.5x at 32 threads, while strength speedup follows the ideal line to 4 threads and reaches 10.9x at 32" src="./docs/strength-speedup-light.png">
+</picture>
+
+To reproduce, run `scripts/strength_batches.sh` through `scripts/run_ec2_bench.sh` (e.g. `SCRIPT=strength_batches.sh scripts/run_ec2_bench.sh <host> <key> <ref> MULTS=1,2,4,8,16,32 PAR_THREADS=2,4,8,16,32`), then `python scripts/strength_report.py <batch dirs>` for the numbers and `python scripts/plot_strength.py <batch dirs>` for these plots.
+
 
 ## Usage
 

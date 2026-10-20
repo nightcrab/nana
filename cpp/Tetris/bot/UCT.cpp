@@ -2,6 +2,7 @@
 #include "Util/MPSC.hpp"
 #include "Util/Distribution.hpp"
 #include "Eval.hpp"
+#include "engine/Utility.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -66,6 +67,11 @@ Move PackedMove::unpack() const {
 
 UCTNode::UCTNode(const EmulationGame &state) {
 	std::vector<Piece> raw_actions = state.game.get_possible_piece_placements();
+	// the smeared movegen occasionally yields a placement with a mino off the board (seen at x = -1),
+	// which place_piece would write outside the board's columns
+	std::erase_if(raw_actions, [&](const Piece& piece) {
+		return Shaktris::Utility::collides(state.game.board, piece);
+	});
 
 	std::vector<EdgeStats> edge_stats(raw_actions.size());
 	std::vector<ColdAction> cold;
