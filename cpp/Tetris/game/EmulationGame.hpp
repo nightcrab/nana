@@ -110,6 +110,9 @@ class EmulationGame {
     double opponent_deaths() const;
     bool opponent_dead() const;
     void reset_opponent_rng();
+    // a simulation starting from the search root: fresh randomness, and the HMM opponent's hidden
+    // state drawn from the root belief. on a copy of the root, never on the shared root itself
+    void start_from_root();
     // a fresh opponent of either model
     void reset_opponent(bool markov);
 

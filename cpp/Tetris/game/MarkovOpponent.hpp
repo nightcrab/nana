@@ -61,7 +61,37 @@ struct Params {
 const Params& params();
 // death_value for an opponent that hasn't drawn its state yet: averaged over the initial distribution
 float fresh_death_value(int jeopardy, int since);
+
+// the jeopardy bucket of a meter
+inline int jeopardy_bucket(float meter) {
+    const Params& p = params();
+    int bucket = 0;
+    while (bucket < JEOPARDY - 1 && meter >= p.jeopardy_limits[bucket]) {
+        bucket++;
+    }
+    return bucket;
 }
+
+// the probability of entry i of a distribution stored as a CDF
+template <size_t N>
+inline float probability(const std::array<float, N>& cdf, int i) {
+    return cdf[i] - (i > 0 ? cdf[i - 1] : 0.0f);
+}
+
+// the search's belief over the opponent's hidden state at the root, as a CDF: every simulation that
+// starts from the root draws its opponent's state from it (MarkovOpponent::resample_from_root). the
+// main thread writes it before a search starts and nothing writes it during one, so it sits read-only
+// in every core's cache; its own cache line keeps writes to neighbouring data from invalidating it
+struct alignas(64) RootBelief {
+    std::array<float, STATES> cdf{};
+    // its pieces-since-its-last-attack counter, which the search's root doesn't observe either
+    std::array<float, SINCE> since_cdf{};
+    bool active = false;
+};
+inline RootBelief root_belief;
+}
+
+struct RootOpponent;
 
 class MarkovOpponent {
 public:
@@ -146,12 +176,7 @@ public:
     }
 
     int jeopardy_bucket() const {
-        const markov::Params& p = markov::params();
-        int bucket = 0;
-        while (bucket < markov::JEOPARDY - 1 && meter >= p.jeopardy_limits[bucket]) {
-            bucket++;
-        }
-        return bucket;
+        return markov::jeopardy_bucket(meter);
     }
 
     // the value of the opponent's death from here (see Params::death_value); 1 if it just died
@@ -171,6 +196,18 @@ public:
 
     void reset_rng() { rng = fast_seed(); }
     void seed(uint32_t seed) { rng = seed; }
+
+    // take what's known of the real opponent at the search root: its meter and whether it has played
+    // yet. its hidden state and since counter come from the root belief (resample_from_root)
+    inline void adopt(const RootOpponent& root);
+
+    // draw its hidden state and since counter from the root belief, if the search has one
+    void resample_from_root() {
+        if (markov::root_belief.active && !fresh) {
+            state = (uint8_t)sample(markov::root_belief.cdf);
+            since = (uint8_t)sample(markov::root_belief.since_cdf);
+        }
+    }
 
 private:
     uint8_t state = 0;
@@ -224,3 +261,49 @@ private:
         return sample(p.emission[state], p.emission[state][markov::DEATH - 1]);
     }
 };
+
+// what's known of the real opponent at a search root, from whoever can see it (tbp: its board, through
+// the opponent encoder). the search's HMM opponent carries on from it instead of starting fresh
+struct RootOpponent {
+    // P(its hidden state) and P(its since counter), meaningful unless fresh
+    std::array<float, markov::STATES> state{};
+    std::array<float, markov::SINCE> since{};
+    // it hasn't played yet (an empty board): its first state comes from the initial distribution
+    bool fresh = true;
+    // garbage pending against it, if known
+    float meter = 0;
+    // its last piece's attack, if known (stadium rules tank on a piece that sent nothing)
+    double last_attack = 0;
+
+    // publish as the root belief for the next search (main thread, between searches)
+    void publish() const {
+        markov::root_belief.active = !fresh;
+        toCdf(state, markov::root_belief.cdf);
+        toCdf(since, markov::root_belief.since_cdf);
+    }
+
+private:
+    template <size_t N>
+    static void toCdf(const std::array<float, N>& p, std::array<float, N>& cdf) {
+        float total = 0;
+        for (float x : p) {
+            total += x;
+        }
+        float sum = 0;
+        for (size_t i = 0; i < N; i++) {
+            sum += total > 0 ? p[i] / total : (i == 0 ? 1.0f : 0.0f);
+            cdf[i] = sum;
+        }
+        cdf[N - 1] = 1.0f;
+    }
+};
+
+inline void MarkovOpponent::adopt(const RootOpponent& root) {
+    meter = root.meter;
+    last_attack = root.last_attack;
+    since = 0;
+    received = 0;
+    dead = false;
+    fresh = root.fresh;
+    state = 0;
+}

@@ -58,6 +58,12 @@ namespace Search {
     // between jobs, so with one thread a search runs exactly this many, and with fast_seed_reset a
     // game replays exactly (tuner/ relies on this)
     extern uint64_t simulation_limit;
+
+    // what's known of the real opponent (RootOpponent, from its board through the opponent encoder),
+    // set by the caller before a search: the search's HMM opponent then carries on from it (a hidden
+    // state and since counter drawn per simulation) instead of starting fresh at every root.
+    // nullptr = start fresh
+    extern const RootOpponent* root_opponent;
     // wait until the search reaches simulation_limit, or for timeout; false on timeout
     bool waitForSimulations(std::chrono::milliseconds timeout);
 

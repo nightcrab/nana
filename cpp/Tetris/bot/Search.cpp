@@ -49,6 +49,7 @@ std::condition_variable min_work_cv;
 std::atomic_bool min_work_bool;
 
 uint64_t Search::simulation_limit = 0;
+const RootOpponent* Search::root_opponent = nullptr;
 static std::mutex budget_mutex;
 static std::condition_variable budget_cv;
 static std::atomic_bool budget_reached;
@@ -148,8 +149,7 @@ static uint32_t replay_root_hash = 0;
 // the replayed state at that depth in state
 [[maybe_unused]] static size_t replayPath(const Job& job, uint32_t restart_hash, EmulationGame& state) {
     state = replay_root;
-    state.rng.PPTRNG = fast_seed();
-    state.reset_opponent_rng();
+    state.start_from_root();
     const size_t depth = job.path.size();
     for (size_t i = 0; i < depth; i++) {
         state.set_move(state.specific_move(job.moves[i].unpack()));
@@ -238,13 +238,24 @@ static void loadRewardTuning() {
         reward_tuning.app_only = std::strcmp(text, "app") == 0;
     }
     auto read = [](const char* name, float& value) {
-        if (const char* text = std::getenv(name)) {
+        // an empty variable counts as unset (atof would read it as 0)
+        if (const char* text = std::getenv(name); text && *text) {
             value = (float)std::atof(text);
         }
     };
     read("NANA_REWARD_SCALE", reward_tuning.scale);
     read("NANA_KILL_LAMBDA", reward_tuning.lambda);
     read("NANA_KILL_DISCOUNT", reward_tuning.discount);
+}
+
+// carry the HMM opponent on from what the caller knows of the real one, if anything, and publish the
+// belief for the simulations to sample from; otherwise the opponent starts fresh
+static void adoptOpponentBelief(EmulationGame& root) {
+    markov::root_belief.active = false;
+    if (root.markov_opponent && Search::root_opponent) {
+        root.markov.adopt(*Search::root_opponent);
+        Search::root_opponent->publish();
+    }
 }
 
 // count the opponent's death from the search root, in the discount the reward uses
@@ -306,10 +317,9 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     Search::core_count = core_count;
 
     root_state = state;
-    // the game may play the other model
-    if (root_state.markov_opponent != markovSearch()) {
-        root_state.reset_opponent(markovSearch());
-    }
+    // the game's own opponent may be the HMM, true state and all: the search starts from its model
+    root_state.reset_opponent(markovSearch());
+    adoptOpponentBelief(root_state);
     resetKill(root_state);
 
     time = 0;
@@ -339,9 +349,9 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
 
     // Spawn jobs
     for (int i = 0; i < LOAD_FACTOR * core_count; i++) {
-        root_state.rng.PPTRNG = fast_seed();
-        root_state.reset_opponent_rng();
-        queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(root_state, SELECT), core_count);
+        EmulationGame start = root_state;
+        start.start_from_root();
+        queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(std::move(start), SELECT), core_count);
     }
 
     replay_root = root_state;
@@ -382,6 +392,7 @@ void Search::continueSearch(EmulationGame state) {
     root_state.pieces = 0;
     root_state.lines = 2;
     root_state.reset_opponent(markovSearch());
+    adoptOpponentBelief(root_state);
     resetKill(root_state);
 
     if (!uct.nodeExists(state.hash())) {
@@ -414,9 +425,9 @@ void Search::continueSearch(EmulationGame state) {
     int rootOwnerIdx = uct.getOwner(state.hash());
     for (int j = 0; j < core_count; j++) {
         for (int i = 0; i < LOAD_FACTOR; i++) {
-            root_state.reset_opponent_rng();
-            root_state.rng.PPTRNG = fast_seed();
-            queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(root_state, SELECT), core_count);
+            EmulationGame start = root_state;
+            start.start_from_root();
+            queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(std::move(start), SELECT), core_count);
         }
 
     }
@@ -1131,12 +1142,11 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         if (job.path.empty()) {
             uct.stats[threadIdx].root_backprops++;
 
-            root_state.reset_opponent_rng();
-            root_state.rng.PPTRNG = fast_seed();
-
             // reuse this job for a fresh select from the root;
-            // copy-assigning keeps the existing vector capacity
+            // copy-assigning keeps the existing vector capacity. the copy gets fresh randomness and
+            // its own draw of the opponent: workers never write the shared root_state
             job.state = root_state;
+            job.state.start_from_root();
             job.R = 0.0;
             job.extra_N = 0;
             job.history.clear();

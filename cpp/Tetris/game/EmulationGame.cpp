@@ -276,6 +276,14 @@ void EmulationGame::reset_opponent_rng() {
     }
 }
 
+void EmulationGame::start_from_root() {
+    rng.PPTRNG = fast_seed();
+    reset_opponent_rng();
+    if (markov_opponent) {
+        markov.resample_from_root();
+    }
+}
+
 void EmulationGame::reset_opponent(bool markov) {
     markov_opponent = markov;
     if (markov) {

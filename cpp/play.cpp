@@ -124,6 +124,8 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
 
     GameResult result;
     bool first = true;
+    // the simulated opponents have no board to encode, so the search's opponent starts fresh each move
+    Search::root_opponent = nullptr;
     const Search::FlushStats flush_start = Search::flush_stats;
 
     while (true) {
@@ -318,6 +320,7 @@ int main(int argc, const char** argv) {
             << ",\"lines\":" << game.lines
             // before the ramp scales it
             << ",\"opponent_attack\":" << (game.markov_opponent ? game.markov.total_damage : game.opponent.total_damage)
+            << ",\"opponent_deaths\":" << (game.markov_opponent ? game.markov.deaths : game.opponent.deaths)
             << ",\"sims_per_move\":" << result.simulations / moves
             << ",\"restarts_per_sim\":" << (double)result.restarts / std::max<uint64_t>(result.simulations, 1)
             << ",\"root_per_sim\":" << (double)result.root_backprops / std::max<uint64_t>(result.simulations, 1)

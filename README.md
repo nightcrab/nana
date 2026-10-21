@@ -40,23 +40,23 @@ Nana uses a special variant of MCTS that combines state abstraction with open-lo
 
 State abstraction allows Nana to combine search statistics on gamestates that look similar but differ superficially, while open-loop MCTS walks forward random simulations of the game without needing to know the underlying transition probabilities.
 
-The result of this is that Nana can optimize against simulated random outcomes in real time, which is part of the reason it needs to search so many nodes compared to traditional engines.
-
-### Gated Backpropagation
+### Backpropagation Pruning
 
 Nana's search parallelization is based on the optimized version of TDS-MCTS presented by Yang et al. 2020[[4]](#4), named MP-MCTS. By skipping redundant backpropagations, MP-MCTS significantly reduces root contention.
 
-To adapt MP-MCTS's optimizations to ISMCTS, Nana resamples the environment dynamics based on the action table and hands the rollout off to another worker if states diverge. This restores the statistical properties of sequential ISMCTS.
+To adapt the MP-MCTS optimization correctly to ISMCTS, Nana resamples the environment dynamics based on the action table, and hands off the job once the trajectory diverges. This ensures the search doesn't lose statistical power, while eliminating unnecessary communication on the shared prefix.
 
-### Markovian Opponent Modelling
+### Opponent Modelling
 
-To model garbage-trading dynamics and macro state, Nana uses an internal simulator that implements an Input-Output Hidden Markov Model (IOHMM). [[7]](#7) 
-
-The IOHMM models an opponent as a probability distribution over a fixed number of states, with transitions conditioned on incoming damage.
-
-Nana cannot see the IOHMM's internal state, and treats it as a hidden variable for ISMCTS to abstract over. This separation of search and modelling allows Nana to allocate focus between stacking and handling multi agent interactions. This is often referred to as the micro/macro split in Versus Tetris.
+To model garbage-trading dynamics and macro state, Nana uses an internal simulator that implements an Input-Output Hidden Markov Model (IOHMM). [[7]](#7) The IOHMM models the opponent as a probability distribution over macro states rather than a board that needs to be played out.
 
 The default opponent model is the 8-state IOHMM trained on Nana's own play. In principle, it could be retuned or replaced with a custom model supporting the same input-output structure.
+
+### Board Watching
+
+If provided, Nana feeds opponent board information directly into the IOHMM using a logistic encoder.
+
+Under TBP1 and protocols that don't support board watching, Nana uses the history of incoming garbage to reconstruct a belief about the opponent's boardstate.
 
 ## Scaling Experiments
 
@@ -101,23 +101,83 @@ To reproduce, run `scripts/strength_batches.sh` through `scripts/run_ec2_bench.s
 
 ## Usage
 
-To use, Nana needs to be built from its C++ source code using CMake, i.e.
+Nana is built from C++ source with CMake (3.22+) and a C++23 compiler (Clang, GCC or MSVC). The build uses `-march=native`, so build on the machine that will r.n it. mimalloc is fetched automatically on configure, and the `ShakTrisLib` game library is a git submodule:
 
 ```
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
+git clone --recurse-submodules <repo url>     # or: git submodule update --init
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ```
 
-It supports a standard JSON-based interface for bots playing Tetris-like games, known as the Tetris Bot Protocol: https://github.com/tetris-bot-protocol. This version is compiled to a ``tbp`` executable.
+On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Release` configuration (Ninja, clang-cl, `RelWithDebInfo`) that builds into `out/build/<config>/`. Always benchmark a Release build.
 
-There is also a standalone, graphical version of the bot that requires SDL2.
+To build a single executable, pass `--target`,Explanationke --build build --target tbp_teA Nana backend for the  written to `build/cpp/`.
 
-### Tuning
+| Executable | What it is |
+|---|---|
+| `tbp_tetris` | T Bot Protocol](https://github.com/tetris-bot-protocol) (JSON over stdin/stdout). Point a TBP frontend at it. |
+| `cfr_tetris` | Standalone graphical version. On Linux it needs X11, OpenGL and libpng. |
+| `nana_play` | Plays self-play games against the simulated opponent and reports attack per piece. Used by the tuner and the strength scripts. |
+| `nana_bench` | Fixed-position search benchmark with profiling counters (built with `NANA_BENCH`). |
+| `nana_speed` | The same benchmark without profiling; prints only simulations per second. |
+| `nana_msgbench` | Microbenchmark of  to run headlesst |
 
-Nana comes with some particle swarm based autotuning.
+CMake options (pass with `-D`):
 
-``tuner/`` tunes Nana's eval weights, PUCT constants, and rollout weights. 
+* `NANA_GUI=OFF` skips `cfr_tetris`. Use this on headless machines.
+* `NANA_MIMALLOC=OFF` uses the system allocator instead of mimalloc.
+* `CMAKE_CXX_FLAGS="-DNANA_MPMCTS=0"` builds TDS-UCT instead of the default MP-MCTS.
+
+### Running
+
+**TBP bot.** `tbp_tetris` reads and writes TBP messages on stdin/stdout. It searches with 3 threads by d$env:NANA_THREADS = 16; .\build\cpp\tbp_tetris.exe   # PowerShell
+6 ./build/cpp/tbp_tetris           # bash
+$env:NANA_THREADS = 16; .uild\cpp	bp_tetris.exe   # PowerShell
+```
+
+**Graphical version.** Run `cfr_tetris` with no arguments.
+
+**Self-play.** `nana_play` takes flags in `--name value` pairs, all optional:
+
+```
+./build/cpp/nana_play --threads 8 --games 20 --ms 100 --seed 1
+```
+
+| Flag | Meaning |
+|---|---|
+| `--threads N` | search threads |
+| `--games K` | number of games |
+| `--ms T` | thinking time per move |
+| `--sims N` | fixed simulations per move instead of a time limit (for reproducible runs, use with `--threads 1 --search-seed 1`) |
+| `--seed S`, `--search-seed 0\|1` | game seed; whether to seed the search deterministically |
+| `--max-pieces P`, `--ramp R` | game length and garbage ramp |
+| `--markov-env 0\|1` | play against the Markov opponent rather than the handcrafted one |
+| `--opponent-log FILE` | write opponent steps for training the Markov model |
+| `--garbage-scale X`, `--belief 0\|1` | garbage multiplier; opponent belief tracking |
+| `--cpu K` | pin to a logical cpu |
+| `--print-config` | print the active config JSON and exit |
+
+**Search benchmarks.** `nana_bench` and `nana_speed` take `<threads> <ms> <test 0|1>`, where the test picks one of two fixed positions:
+
+```
+./build/cpp/nana_speed 8 2000 0
+```
+
+`nana_msgbench [messages]` runs the queue benchmark, and `nana_msgbench scale [max_threads]` measures it across thread counts.
+
+**Environment variables.** Most executables read these at startup:
+
+* `NANA_CONFIG=path/to/config.json` loads eval and search weights (e.g. a tuner `release.json`). `nana_play --print-config` shows the format.
+* `NANA_RULES=tetrio` plays with TETR.IO S1 rules.
+* `NANA_MARKOV_OPPONENT=1` makes the search model the opponent with the Markov model.
+* Search tuning knobs such as `NANA_LOAD_FAC and `NANA_REWARD` are defined in `cpp/Tetris/bot/Search.cpp`.
+
+For multi-thread benchmarking on Linux/EC2, see `scripts/` (`speed_scaling.sh`, `strength_batches.sh`, `run_ec2_bench.sh`).
+ and rollout weights. 
+
+## Tuning
+
+Nana comes with a PSO-based autotuner. It tunes search hyperparameters and evaluation weights simultaneously.
 
 The tuner needs a pre-compiled Release build of ``nana_play`` and Python with numpy. It runs from the repository root:
 

@@ -4,6 +4,8 @@
 #include <string>
 
 #include "Search.hpp"
+#include "OpponentEncoder.hpp"
+#include "OpponentFilter.hpp"
 #include "Util/json.hpp"
 
 auto type_to_json(PieceType type) -> nlohmann::json {
@@ -132,6 +134,59 @@ auto rotation_to_json(RotationDirection dir) -> nlohmann::json {
     throw;
     return nullptr;
 }
+
+// the opponent as TBP2 shows it (TBP1 doesn't): its board, combo and back_to_back, for the encoder
+struct SeenOpponent {
+    bool have = false;
+    Board board{};
+    int combo = 0;
+    int b2b = 0;
+};
+
+static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
+    try {
+        if (!player.is_object() || !player.contains("board")) {
+            return false;
+        }
+        out.board = json_to_board(player["board"]);
+        out.combo = player.contains("combo") && player["combo"].is_number() ? player["combo"].get<int>() : 0;
+        out.b2b = 0;
+        if (player.contains("back_to_back")) {
+            const auto& v = player["back_to_back"];
+            out.b2b = v.is_boolean() ? (v.get<bool>() ? 1 : 0) : (v.is_number() ? v.get<int>() : 0);
+        }
+        out.have = true;
+        return true;
+    }
+    catch (const std::exception&) {
+        return false;
+    }
+}
+
+// what the search's root knows of the opponent: the filter over what we've seen of its attacks, times
+// the encoder's evidence from its latest board if we've seen one (TBP2). before the filter has seen a
+// turn (a game joined midway), the board alone
+static RootOpponent rootOpponent(const OpponentFilter& filter, const SeenOpponent& seen) {
+    std::array<float, markov::STATES> state;
+    std::array<float, markov::SINCE> since;
+    if (!seen.have) {
+        return filter.root();
+    }
+    bool empty = true;
+    for (auto column : seen.board.board) {
+        empty = empty && column == 0;
+    }
+    if (!filter.started()) {
+        RootOpponent out;
+        out.fresh = empty || !markov::encodeOpponent(seen.board, seen.combo, seen.b2b, out.state, out.since);
+        return out;
+    }
+    if (markov::opponentEvidence(seen.board, seen.combo, seen.b2b, state, since)) {
+        return filter.root(&state, &since);
+    }
+    return filter.root();
+}
+
 auto json_to_rotation(nlohmann::json json) -> RotationDirection {
     std::string str = json.get<std::string>();
     if (str == "north") {
@@ -209,6 +264,21 @@ int main() {
         int total_pieces = 0;
 
         EmulationGame game;
+
+        // what the search's root knows of the opponent: a filter over the attacks we see land (every
+        // TBP version), and its latest board when the client sends it (TBP2; the stadium only sends it
+        // on start, at the game's start and after every garbage)
+        OpponentFilter opponent_filter;
+        SeenOpponent seen_opponent;
+        RootOpponent root_opponent;
+        auto refreshRoot = [&] {
+            root_opponent = rootOpponent(opponent_filter, seen_opponent);
+            Search::root_opponent = &root_opponent;
+        };
+        // our last suggestion, and the state it was made from: a client that restarts us after garbage
+        // (the stadium) sends start instead of play, and we replay the move to see what landed
+        bool have_suggestion = false;
+        Move last_suggestion;
 
         nlohmann::json message;
 
@@ -290,6 +360,29 @@ int main() {
                 int combo;
                 CHECK_ERR(combo = player_1["combo"].get<int>());
 
+                // a start in the middle of a game is the client restarting us after our move, with
+                // garbage under the board: replay our suggestion to see what landed. if the board isn't
+                // ours plus garbage it's a new game
+                if (have_suggestion) {
+                    EmulationGame expected = game;
+                    const int attack_before = expected.attack;
+                    const int lines_before = expected.lines;
+                    expected.set_move(last_suggestion);
+                    expected.play_moves();
+                    const int landed = garbageRows(expected.game.board, board);
+                    if (landed >= 0) {
+                        const bool cleared = expected.lines > lines_before && landed == 0;
+                        opponent_filter.turn(expected.attack - attack_before, cleared, landed);
+                    }
+                    else {
+                        opponent_filter.reset();
+                    }
+                }
+                else {
+                    opponent_filter.reset();
+                }
+                have_suggestion = false;
+
                 // create new emulation game rooted at this state
                 game = EmulationGame();
 #ifdef TBP1
@@ -309,6 +402,8 @@ int main() {
                     Game game2;
                     game2.board = board2;
                     game.opponent = Opponent(game2);
+
+                    readOpponent(player_2, seen_opponent);
                 }
 #endif
 
@@ -347,6 +442,7 @@ int main() {
                     Search::endSearch();
                 }
 
+                refreshRoot();
                 if (!Search::initialised) {
                     Search::startSearch(game, CORE_COUNT);
                 }
@@ -366,6 +462,8 @@ int main() {
                 // end search and give the best move
                 Search::endSearch();
                 Move best_move = game.specific_move(Search::bestMove());
+                last_suggestion = best_move;
+                have_suggestion = !best_move.null_move;
 
                 // create suggestion message
                 message.clear();
@@ -379,6 +477,8 @@ int main() {
                 std::cout << message.dump() << std::endl;
             }
             else if (type == "play") {
+                // the opponents are beside the move, not in it
+                const nlohmann::json full = message;
                 // play the move
                 message = message["move"];
                 Move move;
@@ -399,16 +499,18 @@ int main() {
                     nlohmann::json player_2;
 
                     // tbp 2
-                    CHECK_ERR(player_2 = message["opponents"][0]);
-                    Board board2;
+                    if (full.contains("opponents") && full["opponents"].is_array() && !full["opponents"].empty()) {
+                        player_2 = full["opponents"][0];
+                        Board board2;
 
-                    CHECK_ERR(board2 = json_to_board(player_2["board"]));
-                    // there is more information that isnt just the board, such as hold, queue, combo, b2b
-                    // but the opponent constructor only needs the board so thats all im going to pull
+                        CHECK_ERR(board2 = json_to_board(player_2["board"]));
 
-                    Game game2;
-                    game2.board = board2;
-                    game.opponent = Opponent(game2);
+                        Game game2;
+                        game2.board = board2;
+                        game.opponent = Opponent(game2);
+
+                        readOpponent(player_2, seen_opponent);
+                    }
                 }
 #endif
 
@@ -429,8 +531,15 @@ int main() {
                     }
                 }
 
+                const int attack_before = game.attack;
+                const int lines_before = game.lines;
                 game.play_moves();
-                
+
+                // a play (not a restart) means no garbage landed on us this turn
+                opponent_filter.turn(game.attack - attack_before, game.lines > lines_before, 0);
+                have_suggestion = false;
+
+                refreshRoot();
                 Search::continueSearch(game);
             }
         }
