@@ -2,7 +2,24 @@
 #include "engine/Utility.hpp"
 
 #include "Util/fasthash.h"
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+
+EmulationGame::EmulationGame() {
+    static const bool tetrio = [] {
+        const char* rules = std::getenv("NANA_RULES");
+        return rules && std::strcmp(rules, "tetrio") == 0;
+    }();
+    if (tetrio) {
+        set_tetrio_rules();
+    }
+}
+
+void EmulationGame::set_tetrio_rules() {
+    game.mode = TetrioS1();
+    stadium_rules = true;
+}
 
 void EmulationGame::set_move(Move move) {
     this->move = move;
@@ -38,8 +55,16 @@ void EmulationGame::chance_move() {
         ramp_carry = scaled - garbage_amount;
     }
 
+    last_received = garbage_amount;
+
     if (garbage_amount > 0) {
-        buffered_garbage.insert(buffered_garbage.begin(), garbage_amount);
+        if (stadium_rules) {
+            // both players move at once: it meets our next piece's attack, and is tanked after it
+            garbage_meter.insert(garbage_meter.begin(), garbage_amount);
+        }
+        else {
+            buffered_garbage.insert(buffered_garbage.begin(), garbage_amount);
+        }
     }
 };
 
@@ -116,7 +141,18 @@ void EmulationGame::play_moves(){
     last_sent = damage;
 
     // combo block
-    if (cleared_lines == 0) {
+    if (cleared_lines == 0 && stadium_rules) {
+        // the whole meter at once, one hole
+        int total = 0;
+        for (int garbage : garbage_meter) {
+            total += garbage;
+        }
+        if (total > 0) {
+            game.add_garbage(total, rng.getRand(Board::width));
+        }
+        garbage_meter.clear();
+    }
+    else if (cleared_lines == 0) {
 
         int garbage_used = 0;
 
@@ -246,8 +282,6 @@ void EmulationGame::write_opponent_header(std::ostream& out) {
 
 void EmulationGame::write_opponent_step(std::ostream& out, uint64_t game_id) const {
     const double opp_attack = markov_opponent ? markov.last_attack : opponent.last_attack;
-    // chance_move leaves only what the opponent sent this piece in buffered_garbage, after the ramp
-    const int opp_sent = buffered_garbage.empty() ? 0 : buffered_garbage.front();
-    out << game_id << ',' << ramp_pieces << ',' << last_sent << ',' << opp_attack << ',' << opp_sent << ','
+    out << game_id << ',' << ramp_pieces << ',' << last_sent << ',' << opp_attack << ',' << last_received << ','
         << opponent_jeopardy() << ',' << (opponent_dead() ? 1 : 0) << '\n';
 }

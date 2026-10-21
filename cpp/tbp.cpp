@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 
@@ -194,7 +196,11 @@ auto json_to_spin(nlohmann::json json) -> spinType {
 // TBP entry point
 int main() {
     try {
-        constexpr int CORE_COUNT = 3;
+        // search threads; NANA_THREADS overrides, e.g. to run several bots on one machine
+        int CORE_COUNT = 3;
+        if (const char* text = std::getenv("NANA_THREADS")) {
+            CORE_COUNT = std::max(1, std::atoi(text));
+        }
 
         // send info state to the client
         std::vector<PieceType> queue;
@@ -216,6 +222,8 @@ int main() {
         message["name"] = "Nana";
         message["version"] = "0.1";
         message["author"] = "Shakkar + Awyzza";
+        // part of the TBP info message; clients like the stadium require it
+        message["features"] = nlohmann::json::array();
 
         // send just output to stdout
         std::cout << message.dump() << std::endl;
@@ -275,7 +283,9 @@ int main() {
                 CHECK_ERR(hold = json_to_type(player_1["hold"]));
 
                 int back_to_back;
-                CHECK_ERR(back_to_back = player_1["back_to_back"].get<bool>() ? 1 : 0);
+                // TBP sends a bool; some clients (the stadium) send the b2b count
+                CHECK_ERR(back_to_back = player_1["back_to_back"].is_boolean() ? (player_1["back_to_back"].get<bool>() ? 1 : 0)
+                                                                              : player_1["back_to_back"].get<int>());
 
                 int combo;
                 CHECK_ERR(combo = player_1["combo"].get<int>());
@@ -329,7 +339,7 @@ int main() {
                 else {
                     game.game.hold = hold;
                 }
-                game.combo = combo;
+                game.game.combo = combo;
                 game.game.b2b = back_to_back;
 
                 // end previous search this can happen if damage was sent and immediately after the game is over

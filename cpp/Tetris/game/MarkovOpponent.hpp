@@ -42,10 +42,25 @@ struct Params {
     std::array<float, ATTACKS> attack_value;
     // jeopardy bucket b holds a meter in [jeopardy_limits[b - 1], jeopardy_limits[b])
     std::array<float, JEOPARDY - 1> jeopardy_limits;
+    // death_value[state][jeopardy][since]: the value of the opponent's death from here, either P(it dies
+    // within its next `horizon` pieces) or E[discount^(pieces until it dies)],
+    // given the state of its last piece and the jeopardy and since buckets before its next. fitted
+    // from games, so it averages over how the other player really attacked
+    std::array<std::array<std::array<float, SINCE>, JEOPARDY>, STATES> death_value;
+    // 0 when discounted
+    int horizon;
+    // 0 for a fixed horizon
+    float discount;
+    // fitted on stadium games: a piece that clears no lines tanks the whole meter when the other
+    // player's attack of the same turn arrives, so jeopardy is what's left of the meter after that.
+    // otherwise (nana_play logs), tank 8 lines on a piece that sends nothing
+    bool stadium_rules;
 };
 
 // the fitted parameters, with each distribution stored as a CDF for sampling
 const Params& params();
+// death_value for an opponent that hasn't drawn its state yet: averaged over the initial distribution
+float fresh_death_value(int jeopardy, int since);
 }
 
 class MarkovOpponent {
@@ -104,7 +119,7 @@ public:
             meter -= (float)cancelled;
             attack -= cancelled;
         }
-        else {
+        else if (!p.stadium_rules) {
             // tank
             meter -= std::min(meter, markov::GARBAGE_CAP);
         }
@@ -116,6 +131,11 @@ public:
     void receiveAttack(double amount) {
         received += (float)amount;
         meter += (float)amount;
+        // stadium rules: its last piece cleared no lines (we only see that it sent nothing), so it
+        // tanks the whole meter this turn
+        if (markov::params().stadium_rules && last_attack <= 0) {
+            meter = 0;
+        }
     }
 
     int jeopardy_bucket() const {
@@ -125,6 +145,17 @@ public:
             bucket++;
         }
         return bucket;
+    }
+
+    // the value of the opponent's death from here (see Params::death_value); 1 if it just died
+    float death_value() const {
+        if (dead) {
+            return 1.0f;
+        }
+        if (fresh) {
+            return markov::fresh_death_value(jeopardy_bucket(), since);
+        }
+        return markov::params().death_value[state][jeopardy_bucket()][since];
     }
 
     // jeopardy: the garbage in the meter, not yet cancelled or tanked

@@ -46,7 +46,7 @@ The result of this is that Nana can optimize against simulated random outcomes i
 
 Nana's search parallelization is based on the optimized version of TDS-MCTS presented by Yang et al. 2020[[4]](#4), named MP-MCTS. By skipping redundant backpropagations, MP-MCTS significantly reduces root contention.
 
-To adapt MP-MCTS's optimizations to ISMCTS, Nana uses the MP-MCTS history table to compute a simulator replay that hands the rollout off to another worker if sampled dynamics diverge. This restores the statistical properties of sequential ISMCTS.
+To adapt MP-MCTS's optimizations to ISMCTS, Nana resamples the environment dynamics based on the action table and hands the rollout off to another worker if states diverge. This restores the statistical properties of sequential ISMCTS.
 
 ### Markovian Opponent Modelling
 

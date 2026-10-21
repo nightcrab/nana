@@ -17,6 +17,10 @@
 // simulates a versus game with a highly simplified opponent model
 class EmulationGame {
    public:
+    // NANA_RULES=tetrio plays TETR.IO rules (set_tetrio_rules); otherwise Botris damage and the
+    // original garbage rules
+    EmulationGame();
+
     Game game;
 
     std::vector<int> buffered_garbage;
@@ -38,6 +42,13 @@ class EmulationGame {
     MarkovOpponent markov;
     bool markov_opponent = false;
 
+    // the stadium's garbage rules (Universal-Shaktris-Stadium's VersusGame): the opponent's attack
+    // reaches the meter the same turn instead of a turn later, and a piece that clears no lines
+    // tanks the whole meter at once (one hole), not 8 lines
+    bool stadium_rules = false;
+    // TETR.IO damage (TetrioS1, the same table as the stadium's TetrioStats) and stadium_rules
+    void set_tetrio_rules();
+
     // survival-mode garbage ramp: the opponent's garbage is scaled by
     // 1 + ramp_pieces / garbage_ramp (0 = off). the search plays the same ramp
     int garbage_ramp = 0;
@@ -55,6 +66,8 @@ class EmulationGame {
 
     // damage sent to the opponent by the last move, after cancelling, for logging
     int last_sent = 0;
+    // damage the opponent sent in the last chance_move, after the ramp, for logging
+    int last_received = 0;
 
     bool game_over = false;
 
