@@ -69,6 +69,9 @@ class EmulationGame {
     int ramp_pieces = 0;
     // fraction of a line owed from scaling, so the ramp is exact without using the rng
     float ramp_carry = 0;
+    // the opponent's garbage times this (1 = as sent), before the ramp. tuner/ eases it for
+    // searches too weak to survive full pressure; the search plays the same scale
+    float garbage_scale = 1;
 
     int pieces = 0;
     int lines = 0;

@@ -13,6 +13,8 @@ add_subdirectory("Tetris/game/ShakTrisLib")
 set(TETRIS_SOURCES
 	"Tetris/bot/Eval.cpp"
 	"Tetris/bot/Eval.hpp"
+	"Tetris/bot/Config.cpp"
+	"Tetris/bot/Config.hpp"
 	"Tetris/game/EmulationGame.cpp"
 	"Tetris/game/EmulationGame.hpp"
 	"Tetris/game/Opponent.cpp"

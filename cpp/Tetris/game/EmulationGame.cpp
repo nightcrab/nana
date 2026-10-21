@@ -50,6 +50,12 @@ void EmulationGame::chance_move() {
 
     garbage_amount = markov_opponent ? (int)markov.play() : (int)opponent.play();
 
+    if (garbage_scale != 1 && garbage_amount > 0) {
+        float scaled = garbage_amount * garbage_scale + ramp_carry;
+        garbage_amount = (int)scaled;
+        ramp_carry = scaled - garbage_amount;
+    }
+
     if (garbage_ramp > 0 && garbage_amount > 0) {
         float scaled = garbage_amount * (1.0f + (float)ramp_pieces / garbage_ramp) + ramp_carry;
         garbage_amount = (int)scaled;
@@ -280,6 +286,11 @@ void EmulationGame::reset_opponent(bool markov) {
     }
     else {
         opponent = Opponent();
+        // Opponent() seeds itself from random_device and draws its queue from that: reseed from
+        // fast_seed so a seeded search (fast_seed_reset) replays exactly
+        opponent.rng.PPTRNG = fast_seed();
+        opponent.nextI = opponent.rng.getRand(7);
+        opponent.nextSpinPiece = opponent.rng.getRand(7);
     }
 }
 

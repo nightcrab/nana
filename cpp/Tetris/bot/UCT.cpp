@@ -1,4 +1,5 @@
 #include "UCT.hpp"
+#include "Config.hpp"
 #include "Util/MPSC.hpp"
 #include "Util/Distribution.hpp"
 #include "Eval.hpp"
@@ -103,9 +104,9 @@ UCTNode::UCTNode(const EmulationGame &state) {
 
 	sort_des(prior);
 
+	static const NanaConfig& c = config();
 	for (int rank = 1; rank <= prior.size(); rank++) {
-		float prob = 1.0 / quick_sqrt(rank);
-		prior[rank - 1].probability = prob;
+		prior[rank - 1].probability = c.priorWeight(rank);
 	}
 
 	prior = normalise(prior);
@@ -181,10 +182,11 @@ size_t UCTNode::select_uct(int depth) {
 	at deeper parts of the tree.
 */
 float UCTNode::c_puct(float node_N, int depth) {
-	constexpr float c_init = 1.25;
-	constexpr float c_base = 19652;
+	static const NanaConfig& c = config();
+	const float c_init = (float)c.c_init;
+	const float c_base = (float)c.c_base;
 
-	float D = 1 + depth/3;
+	float D = 1 + depth / c.depth_step;
 
 	return ln((node_N + c_base + 1.0) / c_base) + c_init * D;
 }

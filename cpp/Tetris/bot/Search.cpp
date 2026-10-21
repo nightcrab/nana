@@ -1,4 +1,5 @@
 #include "Search.hpp"
+#include "Config.hpp"
 #include <cstring>
 
 #include <bit>
@@ -46,6 +47,24 @@ EmulationGame Search::root_state;
 std::mutex min_work_mutex;
 std::condition_variable min_work_cv;
 std::atomic_bool min_work_bool;
+
+uint64_t Search::simulation_limit = 0;
+static std::mutex budget_mutex;
+static std::condition_variable budget_cv;
+static std::atomic_bool budget_reached;
+
+static uint64_t simulationsSoFar() {
+    uint64_t total = 0;
+    for (const WorkerStatistics& s : Search::uct.stats) {
+        total += s.rollouts;
+    }
+    return total;
+}
+
+bool Search::waitForSimulations(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(budget_mutex);
+    return budget_cv.wait_for(lock, timeout, [] { return budget_reached.load(); });
+}
 
 std::vector<std::unique_ptr<mpsc<Msg>>> Search::queues;
 std::vector<int> core_indices;
@@ -280,6 +299,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     searching = true;
     // reset stop bool for min wait time
     min_work_bool = false;
+    budget_reached = false;
     // reset the thread stopper
     thread_stopper = std::stop_source();
 
@@ -349,6 +369,7 @@ void Search::continueSearch(EmulationGame state) {
     searching = true;
     // reset stop bool for min wait time
     min_work_bool = false;
+    budget_reached = false;
     // reset the thread stopper
     thread_stopper = std::stop_source();
 
@@ -365,6 +386,15 @@ void Search::continueSearch(EmulationGame state) {
 
     if (!uct.nodeExists(state.hash())) {
         uct.insertNode(UCTNode(state));
+    }
+    else if (uct.getNode(state.hash()).actionCount() == 0) {
+        // node hashes ignore garbage rows, so the tree may hold a node for another state with this
+        // hash that had no legal placement. kept as the root, the search would think we're lost and
+        // its jobs would end at the root: the real root's moves replace it
+        UCTNode fresh(state);
+        if (fresh.actionCount() > 0) {
+            uct.getNode(state.hash()) = std::move(fresh);
+        }
     }
 
     for (WorkerStatistics& stat : uct.stats) {
@@ -514,6 +544,7 @@ void Search::endSearch() {
 
     // reset stop bool for min wait time
     min_work_bool = false;
+    budget_reached = false;
     // reset the thread stopper
     thread_stopper = std::stop_source();
 
@@ -1335,6 +1366,21 @@ void Search::search(std::stop_token stop, const int threadIdx) {
             return;
         }
 
+        if (simulation_limit != 0 && simulationsSoFar() >= simulation_limit) {
+            // endSearch waits for a finished simulation, which a tiny budget may not have yet
+            {
+                std::scoped_lock lock(min_work_mutex);
+                min_work_bool = true;
+            }
+            min_work_cv.notify_one();
+            {
+                std::scoped_lock lock(budget_mutex);
+                budget_reached = true;
+            }
+            budget_cv.notify_all();
+            return;
+        }
+
         uint64_t t0 = 0;
 #ifdef NANA_BENCH
         t0 = __rdtsc();
@@ -1397,6 +1443,7 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
     float reward = 0;
 
     uct.stats[threadIdx].nodes++;
+    uct.stats[threadIdx].rollouts++;
 
     if (state.game_over) {
         return -0.0;
@@ -1419,12 +1466,9 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
         return 0.0;
     }
 
-    if constexpr (search_style == NANA) {
-        float r = state.true_app() / 3 + max_eval / 2;
-        reward = std::max(reward, r);
-    }
-    if constexpr (search_style == CC) {
-        float r = state.true_app() / 3 + max_eval / 2;
+    static const NanaConfig& c = config();
+    {
+        float r = (float)c.app_weight * state.true_app() + (float)c.eval_weight * max_eval;
         reward = std::max(reward, r);
     }
 

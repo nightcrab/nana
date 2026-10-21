@@ -256,3 +256,18 @@ int cacheGroupOfCore(int index) {
     }
     return t.l3_group[index % t.order.size()];
 }
+
+bool restrictProcessToCpu(int cpu) {
+    if (cpu < 0 || cpu >= 64) {
+        return false;
+    }
+#ifdef _WIN32
+    return SetProcessAffinityMask(GetCurrentProcess(), DWORD_PTR(1) << cpu) != 0;
+#else
+    // only the main thread exists yet, and the threads it starts inherit its mask
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    return sched_setaffinity(0, sizeof(set), &set) == 0;
+#endif
+}

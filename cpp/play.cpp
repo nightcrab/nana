@@ -5,16 +5,26 @@
 //
 // usage: nana_play [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
 //                  [--markov-env 0|1] [--opponent-log FILE]
+//                  [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]
 //
 // prints one JSON line per game to stdout and a summary to stderr.
 // --markov-env 1 plays the games against MarkovOpponent instead of the handcrafted Opponent (the
 // search's model is set separately, by NANA_MARKOV_OPPONENT). --opponent-log writes what passed
 // between the bot and the opponent each piece, to fit MarkovOpponent with
 // scripts/train_markov_opponent.py.
+// --sims N searches each move for N simulations instead of --ms milliseconds. with --threads 1 and
+// --search-seed 1 (the search's randomness seeded from the game seed) a game then replays exactly,
+// so tuner/ can compare configs on identical games. --cpu K runs the process on logical cpu K only,
+// for running games side by side. --print-config prints the NANA_CONFIG in effect as JSON and exits.
+// --garbage-scale X multiplies the opponent's garbage (0.5 = half, 0 = none), for the search too.
 // on Linux, run several at once on separate chiplets with e.g. taskset -c 8-15.
 
 #include "EmulationGame.hpp"
 #include "Search.hpp"
+#include "UCT.hpp"
+#include "Config.hpp"
+#include "Util/Affinity.hpp"
+#include "Util/FastSeed.hpp"
 #include "engine/Utility.hpp"
 
 #include <chrono>
@@ -42,6 +52,12 @@ struct Options {
     int max_pieces = 2000;
     bool markov_env = false;
     std::string opponent_log;
+    // simulations per move instead of ms (0 = use ms)
+    uint64_t sims = 0;
+    bool search_seed = false;
+    int cpu = -1;
+    bool print_config = false;
+    float garbage_scale = 1;
 };
 
 static uint32_t seedFor(uint64_t game_seed, uint64_t stream) {
@@ -55,6 +71,7 @@ static uint32_t seedFor(uint64_t game_seed, uint64_t stream) {
 static EmulationGame newGame(uint64_t game_seed, const Options& options) {
     EmulationGame game;
     game.garbage_ramp = options.ramp;
+    game.garbage_scale = options.garbage_scale;
 
     game.rng.PPTRNG = seedFor(game_seed, 0);
     game.rng.makebag();
@@ -121,6 +138,13 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
             break;
         }
 
+        // with no legal placement the search can't run a simulation (its jobs end at the root), so a
+        // simulation budget would wait out its timeout: it's lost, as when the search finds no move
+        if (options.sims > 0 && UCTNode(game).actionCount() == 0) {
+            game.game_over = true;
+            continue;
+        }
+
         // the budget is wall time per move, including starting and stopping the workers
         auto start = clock::now();
         if (first) {
@@ -132,7 +156,21 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
         }
         auto started = clock::now();
         auto deadline = start + std::chrono::milliseconds(options.ms);
-        std::this_thread::sleep_until(deadline);
+        if (options.sims > 0) {
+            if (!Search::waitForSimulations(std::chrono::seconds(120))) {
+                uint64_t rollouts = 0;
+                for (const WorkerStatistics& s : Search::uct.stats) {
+                    rollouts += s.rollouts;
+                }
+                std::cerr << "warning: a search didn't reach " << options.sims << " simulations in 120 s (piece "
+                    << game.ramp_pieces << ", " << UCTNode(game).actionCount() << " moves at the root, "
+                    << rollouts << " rollouts)" << std::endl;
+            }
+            deadline = started;
+        }
+        else {
+            std::this_thread::sleep_until(deadline);
+        }
         auto woke = clock::now();
         Search::endSearch();
         Move move = Search::bestMove();
@@ -180,6 +218,10 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
 static bool parse(int argc, const char** argv, Options& options) {
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
+        if (arg == "--print-config") {
+            options.print_config = true;
+            continue;
+        }
         if (i + 1 >= argc) {
             return false;
         }
@@ -195,6 +237,13 @@ static bool parse(int argc, const char** argv, Options& options) {
         else if (arg == "--ramp") options.ramp = (int)value;
         else if (arg == "--max-pieces") options.max_pieces = (int)value;
         else if (arg == "--markov-env") options.markov_env = value != 0;
+        else if (arg == "--sims") options.sims = (uint64_t)value;
+        else if (arg == "--search-seed") options.search_seed = value != 0;
+        else if (arg == "--cpu") options.cpu = (int)value;
+        else if (arg == "--garbage-scale") {
+            options.garbage_scale = std::stof(argv[i]);
+            if (options.garbage_scale < 0) return false;
+        }
         else return false;
     }
     return options.threads > 0 && options.games > 0 && options.ms > 0;
@@ -210,9 +259,20 @@ int main(int argc, const char** argv) {
     catch (const std::exception&) {
         std::cerr << "usage: " << argv[0]
             << " [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]"
-            << " [--markov-env 0|1] [--opponent-log FILE]" << std::endl;
+            << " [--markov-env 0|1] [--opponent-log FILE] [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]"
+            << std::endl;
         return 1;
     }
+
+    if (options.print_config) {
+        std::cout << configJson(config()) << std::endl;
+        return 0;
+    }
+    if (options.cpu >= 0 && !restrictProcessToCpu(options.cpu)) {
+        std::cerr << "can't restrict the process to cpu " << options.cpu << std::endl;
+        return 1;
+    }
+    Search::simulation_limit = options.sims;
 
 #ifdef _WIN32
     timeBeginPeriod(1);
@@ -235,6 +295,8 @@ int main(int argc, const char** argv) {
 
     for (int i = 0; i < options.games; i++) {
         uint64_t game_seed = options.seed + i;
+        // before the game's state exists: constructing it draws seeds too
+        fast_seed_reset(options.search_seed ? (uint64_t)seedFor(game_seed, 2) | 1 : 0);
         EmulationGame game = newGame(game_seed, options);
         GameResult result = playGame(game, options, game_seed, opponent_log ? &opponent_log : nullptr);
 

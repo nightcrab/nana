@@ -62,7 +62,7 @@ The default opponent model is the 8-state IOHMM trained on Nana's own play. In p
 
 We benchmarked simulations per second on a 32-core AMD EPYC 9R45 (SMT disabled), at every thread count from 1 to 32 on two positions. 
 
-The engine achieves throughput efficiency of 80% on the first 8 cores, stablizing at around 60% on 32 cores. The loss in efficiency is largely attributable to NUMA overhead. Reducing cross-chiplet communication remains an open problem.
+The engine achieves throughput efficiency of 80% on the first 8 cores, stabilizing at around 60% on 32 cores. The loss in efficiency is largely attributable to NUMA overhead. Reducing cross-chiplet communication remains an open problem.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/scaling-sims-dark.png">
@@ -80,7 +80,7 @@ To reproduce, run `scripts/speed_scaling.sh` on the machine (or through `scripts
 
 We also measured end-to-end strength scaling by comparing more threads vs. more thinking time.  
 
-Every configuration played 300 games of APM survival, and was scored by its attack per piece over the first 50 pieces (a bot that dies early sends nothing for the pieces it didn't play). 
+Every configuration played 300 games of APM survival, and was scored by its attack per piece over the first 50 pieces.
 
 Interestingly, over the regime we tested, a single thread given 80 to 2560 ms per move gained a consistent 6% APP per doubling of think time.
 
@@ -112,6 +112,32 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 It supports a standard JSON-based interface for bots playing Tetris-like games, known as the Tetris Bot Protocol: https://github.com/tetris-bot-protocol. This version is compiled to a ``tbp`` executable.
 
 There is also a standalone, graphical version of the bot that requires SDL2.
+
+### Autotuning
+
+Nana comes with some particle swarm based autotuning.
+
+``tuner/`` tunes Nana's eval weights, PUCT constants, and rollout weights. 
+
+The tuner needs a pre-compiled Release build of ``nana_play`` and Python with numpy. It runs from the repository root:
+
+```
+# check the setup first: a few minutes end to end
+python -m tuner start smoke --nana out/build/<build>/cpp/nana_play.exe --cpus 0,2,4,6,8,10,12,14 --schedule tuner/schedules/smoke.json --particles 8
+
+# tune using a gradual ramp-up.
+python -m tuner start eval1 --nana out/build/<build>/cpp/nana_play.exe --cpus 0,2,4,6,8,10,12,14
+
+# fit the ramp to a time budget. the default is 168 hours.
+python -m tuner start eval1 --nana out/build/<build>/cpp/nana_play.exe --cpus 0,2,4,6,8,10,12,14 --total-hours 48
+
+python -m tuner status eval1            # where the run is, from another terminal
+python -m tuner resume eval1            # after Ctrl-C or a reboot (--total-hours / --time-scale to change the timeline)
+python -m tuner restart-stage eval1 2 --from release
+python -m tuner add-params eval1 tuner/spaces/search.json
+```
+
+Give ``--cpus`` one logical cpu per physical core and keep the machine otherwise idle. The result is ``tuner/runs/<name>/release.json``, a config file Nana loads with ``NANA_CONFIG=path/to/release.json``; it only changes when a candidate beats it in a paired test. See ``tuner/README.md`` for how it works, the health checks and the run's files.
 
 ## References
 

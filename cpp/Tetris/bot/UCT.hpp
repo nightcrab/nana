@@ -1,4 +1,5 @@
 #pragma once
+#include "Util/FastSeed.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -249,6 +250,8 @@ using Msg = std::unique_ptr<Job>;
 class WorkerStatistics {
 public:
     uint64_t nodes = 0;
+    // rollouts run, terminal ones included: one per simulation (Search::simulation_limit counts these)
+    uint64_t rollouts = 0;
     uint64_t deepest_node = 0;
     uint64_t backprop_messages = 0;
     // expansions of a node we already had (two rollouts raced for the same new leaf)
@@ -315,9 +318,9 @@ class UCT {
         this->rng = std::vector<RNG>(workers);
         this->stats = std::vector<WorkerStatistics>(workers);
 
-        auto devrng = std::random_device();
+        // fast_seed, so a seeded (fast_seed_reset) search is reproducible
         for (auto& thread_rng : this->rng) {
-            thread_rng.PPTRNG = devrng();
+            thread_rng.PPTRNG = fast_seed();
         }
     }
     ~UCT() = default;

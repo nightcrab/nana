@@ -1,0 +1,76 @@
+{
+ "_comment": "A week on 8 cores: cheap stages first so a gated release exists within about 20 h (the gate at the end of s512), then long refinement at higher budgets. Hours are active tuning time per stage; gates and health checks add a little. garbage_scale eases the opponent's garbage so weak searches survive long enough to show differences.",
+ "pso": {
+  "inertia": 0.6,
+  "cognitive": 1.5,
+  "social": 1.5,
+  "vmax": 0.2
+ },
+ "gate": {
+  "sims": 512,
+  "garbage_scale": 0.6,
+  "horizon": 100,
+  "env": "hmm",
+  "delta": 0.02,
+  "alpha": 0.05,
+  "beta": 0.05,
+  "max_games": 1600
+ },
+ "gate_every_hours": 12,
+ "holdout": {
+  "games": 32,
+  "every": 20
+ },
+ "stages": [
+  {
+   "name": "s32",
+   "sims": 32,
+   "garbage_scale": 0.25,
+   "horizon": 100,
+   "env": "hmm",
+   "hours": 3,
+   "games_per_eval": 16,
+   "spread": 0.15
+  },
+  {
+   "name": "s128",
+   "sims": 128,
+   "garbage_scale": 0.4,
+   "horizon": 100,
+   "env": "hmm",
+   "hours": 5,
+   "games_per_eval": 16,
+   "spread": 0.1
+  },
+  {
+   "name": "s512",
+   "sims": 512,
+   "garbage_scale": 0.6,
+   "horizon": 100,
+   "env": "hmm",
+   "hours": 11,
+   "games_per_eval": 16,
+   "spread": 0.08
+  },
+  {
+   "name": "s2048",
+   "sims": 2048,
+   "garbage_scale": 0.8,
+   "horizon": 100,
+   "env": "hmm",
+   "hours": 45,
+   "games_per_eval": 12,
+   "spread": 0.06
+  },
+  {
+   "name": "s8192",
+   "sims": 8192,
+   "garbage_scale": 1.0,
+   "horizon": 100,
+   "env": "hmm",
+   "hours": 60,
+   "games_per_eval": 8,
+   "spread": 0.05
+  }
+ ]
+}

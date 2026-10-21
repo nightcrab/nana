@@ -1,4 +1,5 @@
 #include "Eval.hpp"
+#include "Config.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -214,97 +215,70 @@ int Eval::get_row_transitions(const Board& board) {
     return transitions;
 }
 
-namespace eval_constants {
-    [[maybe_unused]] constexpr auto top_half = -130.0;
-    [[maybe_unused]] constexpr auto top_quarter = -499.0;
-    [[maybe_unused]] constexpr auto low = -50.0;
-    [[maybe_unused]] constexpr auto cavity_cells = -176.0;
-    [[maybe_unused]] constexpr auto cavity_cells_sq = -6.0;
-    [[maybe_unused]] constexpr auto overhangs = -47.0;
-    [[maybe_unused]] constexpr auto overhangs_sq = -9.0;
-    [[maybe_unused]] constexpr auto covered_cells = -26.0;
-    [[maybe_unused]] constexpr auto covered_cells_sq = 1.0;
-    [[maybe_unused]] constexpr auto bumpiness = -7.0;
-    [[maybe_unused]] constexpr auto bumpiness_sq = -28.0;
-    [[maybe_unused]] constexpr auto height = -46.0;
-    [[maybe_unused]] constexpr float well_columns[10] = { 31, 16, -41, 37, 49, 30, 56, 48, -27, 22 };
-    [[maybe_unused]] constexpr float clears[5] = { 0, -1700, -100, -50, 490 };
-    [[maybe_unused]] constexpr float tspins[4] = { 0, 126, 434, 220 };
-    [[maybe_unused]] constexpr float perfect_clear = 200.0;
-    [[maybe_unused]] constexpr float wasted_t = -52.0;
-    [[maybe_unused]] constexpr float tsd_shape = 180.0;
-    [[maybe_unused]] constexpr float well_depth = 91.0; // todo
-    [[maybe_unused]] constexpr float max_well_depth = 17.0; // todo
-    [[maybe_unused]] constexpr float row_transitions = -5.0;
-    [[maybe_unused]] constexpr float donuts = -10.0;
-    [[maybe_unused]] constexpr float v_shape = 50.0;
-    [[maybe_unused]] constexpr float s_shape = 80.0;
-    [[maybe_unused]] constexpr float l_shape = 80.0;
-    [[maybe_unused]] constexpr float l2_shape = 80.0;
-    [[maybe_unused]] constexpr float counting = 50.0;
-}
+// the weights live in NanaConfig (Config.hpp), so tuner/ can set them
 
 double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
 
-    using namespace eval_constants;
+    // read once: the config never changes after it's loaded
+    static const NanaConfig& c = config();
 
     double score = 0.0;
 
     std::pair<int, int> values;
 
     if (is_top_half(board))
-        score += top_half;
+        score += c.top_half;
 
     if (is_top_quarter(board))
-        score += top_quarter;
+        score += c.top_quarter;
 
     if (is_low(board))
-        score += low;
+        score += c.low;
 
     if (is_perfect_clear(board))
-        score += perfect_clear;
+        score += c.perfect_clear;
 
 
     values = cavities_overhangs(board);
 
-    score += values.first * cavity_cells;
+    score += values.first * c.cavity_cells;
 
-    score += values.first * values.first * cavity_cells_sq;
+    score += values.first * values.first * c.cavity_cells_sq;
 
-    score += values.second * overhangs;
+    score += values.second * c.overhangs;
 
-    score += values.second * values.second * overhangs_sq;
+    score += values.second * values.second * c.overhangs_sq;
 
     values = height_features(board);
 
-    score += values.second * height;
+    score += values.second * c.height;
 
     if (ct4(board)) {
-        score += counting;
+        score += c.counting;
     }
 
     values = n_covered_cells(board);
 
-    score += values.first * covered_cells;
-    score += values.second * covered_cells_sq;
+    score += values.first * c.covered_cells;
+    score += values.second * c.covered_cells_sq;
 
     values = get_bumpiness(board);
 
-    score += values.first * bumpiness;
-    score += values.second * bumpiness_sq;
+    score += values.first * c.bumpiness;
+    score += values.second * c.bumpiness_sq;
 
-    score += well_columns[well_position(board)];
-    score += clears[lines];
+    score += c.well_columns[well_position(board)];
+    score += c.clears[lines];
 
-    score += get_row_transitions(board) * row_transitions;
+    score += get_row_transitions(board) * c.row_transitions;
 
     // tspin is set for any piece's spin, so an I piece can spin four lines: the table stops at three
-    if (tspin && lines < (int)std::size(tspins)) {
-        score += tspins[lines];
+    if (tspin && lines < (int)std::size(c.tspins)) {
+        score += c.tspins[lines];
     }
 
     if (waste_t) {
-        score += wasted_t;
+        score += c.wasted_t;
     }
 
     return (score + 10000) / 10000;

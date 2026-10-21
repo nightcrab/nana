@@ -1,0 +1,200 @@
+[
+ {
+  "name": "top_half",
+  "default": -130.0,
+  "low": -260.0,
+  "high": 0.0
+ },
+ {
+  "name": "top_quarter",
+  "default": -499.0,
+  "low": -998.0,
+  "high": 0.0
+ },
+ {
+  "name": "low",
+  "default": -50.0,
+  "low": -100.0,
+  "high": 0.0
+ },
+ {
+  "name": "cavity_cells",
+  "default": -176.0,
+  "low": -352.0,
+  "high": 0.0
+ },
+ {
+  "name": "cavity_cells_sq",
+  "default": -6.0,
+  "low": -26.0,
+  "high": 14.0
+ },
+ {
+  "name": "overhangs",
+  "default": -47.0,
+  "low": -94.0,
+  "high": 0.0
+ },
+ {
+  "name": "overhangs_sq",
+  "default": -9.0,
+  "low": -29.0,
+  "high": 11.0
+ },
+ {
+  "name": "covered_cells",
+  "default": -26.0,
+  "low": -52.0,
+  "high": 0.0
+ },
+ {
+  "name": "covered_cells_sq",
+  "default": 1.0,
+  "low": -19.0,
+  "high": 21.0
+ },
+ {
+  "name": "bumpiness",
+  "default": -7.0,
+  "low": -27.0,
+  "high": 13.0
+ },
+ {
+  "name": "bumpiness_sq",
+  "default": -28.0,
+  "low": -56.0,
+  "high": 0.0
+ },
+ {
+  "name": "height",
+  "default": -46.0,
+  "low": -92.0,
+  "high": 0.0
+ },
+ {
+  "name": "row_transitions",
+  "default": -5.0,
+  "low": -25.0,
+  "high": 15.0
+ },
+ {
+  "name": "counting",
+  "default": 50.0,
+  "low": 0.0,
+  "high": 100.0
+ },
+ {
+  "name": "perfect_clear",
+  "default": 200.0,
+  "low": 0.0,
+  "high": 400.0
+ },
+ {
+  "name": "wasted_t",
+  "default": -52.0,
+  "low": -104.0,
+  "high": 0.0
+ },
+ {
+  "name": "well_columns[0]",
+  "default": 31.0,
+  "low": 0.0,
+  "high": 62.0
+ },
+ {
+  "name": "well_columns[1]",
+  "default": 16.0,
+  "low": -4.0,
+  "high": 36.0
+ },
+ {
+  "name": "well_columns[2]",
+  "default": -41.0,
+  "low": -82.0,
+  "high": 0.0
+ },
+ {
+  "name": "well_columns[3]",
+  "default": 37.0,
+  "low": 0.0,
+  "high": 74.0
+ },
+ {
+  "name": "well_columns[4]",
+  "default": 49.0,
+  "low": 0.0,
+  "high": 98.0
+ },
+ {
+  "name": "well_columns[5]",
+  "default": 30.0,
+  "low": 0.0,
+  "high": 60.0
+ },
+ {
+  "name": "well_columns[6]",
+  "default": 56.0,
+  "low": 0.0,
+  "high": 112.0
+ },
+ {
+  "name": "well_columns[7]",
+  "default": 48.0,
+  "low": 0.0,
+  "high": 96.0
+ },
+ {
+  "name": "well_columns[8]",
+  "default": -27.0,
+  "low": -54.0,
+  "high": 0.0
+ },
+ {
+  "name": "well_columns[9]",
+  "default": 22.0,
+  "low": 0.0,
+  "high": 44.0
+ },
+ {
+  "name": "clears[1]",
+  "default": -1700.0,
+  "low": -3400.0,
+  "high": 0.0
+ },
+ {
+  "name": "clears[2]",
+  "default": -100.0,
+  "low": -200.0,
+  "high": 0.0
+ },
+ {
+  "name": "clears[3]",
+  "default": -50.0,
+  "low": -100.0,
+  "high": 0.0
+ },
+ {
+  "name": "clears[4]",
+  "default": 490.0,
+  "low": 0.0,
+  "high": 980.0
+ },
+ {
+  "name": "tspins[1]",
+  "default": 126.0,
+  "low": 0.0,
+  "high": 252.0
+ },
+ {
+  "name": "tspins[2]",
+  "default": 434.0,
+  "low": 0.0,
+  "high": 868.0
+ },
+ {
+  "name": "tspins[3]",
+  "default": 220.0,
+  "low": 0.0,
+  "high": 440.0
+ }
+]

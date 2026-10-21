@@ -17,3 +17,8 @@ int physicalCoreCount();
 // chiplet on AMD parts. moving data between L3 groups is much slower than within one.
 // 0 for every index if the topology can't be read.
 int cacheGroupOfCore(int index);
+
+// restrict the whole process to one logical cpu, before any search thread starts (threads inherit
+// it, and pinThreadToCore only picks cpus the process may use). for running several single-thread
+// games side by side, as tuner/ does. false if the OS refused
+bool restrictProcessToCpu(int cpu);

@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <algorithm>
 #include <unordered_map>
 #include <vector>
@@ -52,6 +53,13 @@ namespace Search {
     void continueSearch(EmulationGame state);
 
     void endSearch();
+
+    // stop the search's workers once this many simulations have run (0 = no limit). a worker checks
+    // between jobs, so with one thread a search runs exactly this many, and with fast_seed_reset a
+    // game replays exactly (tuner/ relies on this)
+    extern uint64_t simulation_limit;
+    // wait until the search reaches simulation_limit, or for timeout; false on timeout
+    bool waitForSimulations(std::chrono::milliseconds timeout);
 
     void maybeInsertNode(UCTNode node, const int threadIdx);
 
