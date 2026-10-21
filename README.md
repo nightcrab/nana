@@ -113,7 +113,7 @@ It supports a standard JSON-based interface for bots playing Tetris-like games, 
 
 There is also a standalone, graphical version of the bot that requires SDL2.
 
-### Autotuning
+### Tuning
 
 Nana comes with some particle swarm based autotuning.
 
@@ -137,7 +137,7 @@ python -m tuner restart-stage eval1 2 --from release
 python -m tuner add-params eval1 tuner/spaces/search.json
 ```
 
-Give ``--cpus`` one logical cpu per physical core and keep the machine otherwise idle. The result is ``tuner/runs/<name>/release.json``, a config file Nana loads with ``NANA_CONFIG=path/to/release.json``; it only changes when a candidate beats it in a paired test. See ``tuner/README.md`` for how it works, the health checks and the run's files.
+Give ``--cpus`` one logical cpu per physical core and keep the machine otherwise idle. The result is ``tuner/runs/<name>/release.json``, a config file Nana loads with ``NANA_CONFIG=path/to/release.json``. See ``tuner/README.md`` for how it works.
 
 ## References
 
