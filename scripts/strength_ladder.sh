@@ -110,6 +110,9 @@ for key in "${!bins[@]}"; do
     [[ $key == v* ]] && [ ! -x "${bins[$key]}" ] && { echo "missing binary for variant ${key#v}: ${bins[$key]}" >&2; exit 1; }
 done
 
+# the APP benchmark measures our own attack: score rollouts by APP and eval only, not the opponent's death
+export NANA_REWARD=${NANA_REWARD:-app}
+
 out="results/$(hostname)-strength-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out/parts"
 log() { echo "$*" | tee -a "$out/machine.txt"; }

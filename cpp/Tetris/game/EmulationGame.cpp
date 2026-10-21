@@ -2,6 +2,7 @@
 #include "engine/Utility.hpp"
 
 #include "Util/fasthash.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -56,6 +57,12 @@ void EmulationGame::chance_move() {
     }
 
     last_received = garbage_amount;
+
+    const float death = markov_opponent ? (markov.expected_death ? markov.last_death_prob : (markov.dead ? 1.0f : 0.0f))
+                                        : (opponent.dead ? 1.0f : 0.0f);
+    kill_weight *= kill_discount;
+    kill_value += kill_survival * death * kill_weight;
+    kill_survival *= 1.0f - death;
 
     if (garbage_amount > 0) {
         if (stadium_rules) {
@@ -274,6 +281,20 @@ void EmulationGame::reset_opponent(bool markov) {
     else {
         opponent = Opponent();
     }
+}
+
+void EmulationGame::reset_kill(float discount, bool expected) {
+    kill_value = 0;
+    kill_survival = 1;
+    kill_weight = 1;
+    kill_discount = discount;
+    markov.expected_death = expected && markov_opponent;
+}
+
+float EmulationGame::expected_kill() const {
+    // death_value is in the same discount from the next piece on
+    const float ahead = markov_opponent ? markov.death_value() : 0.0f;
+    return std::clamp(kill_value + kill_survival * kill_weight * ahead, 0.0f, 1.0f);
 }
 
 void EmulationGame::write_opponent_header(std::ostream& out) {

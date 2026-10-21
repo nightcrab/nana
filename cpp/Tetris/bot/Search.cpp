@@ -1,4 +1,5 @@
 #include "Search.hpp"
+#include <cstring>
 
 #include <bit>
 #include <cmath>
@@ -196,6 +197,45 @@ static void loadTuning() {
     tuning.steal_topk = std::clamp(tuning.steal_topk, 1, MAX_STEAL_TOPK);
 }
 
+// what a rollout is worth. kill (the default): with r our own score (APP and eval, squashed into
+// [0, 1) by x / (x + scale)) and K the expected discounted kill of the opponent (along the path,
+// then the HMM's death_value from the leaf), the value is K' + (1 - K') r with K' = (1 - lambda) K:
+// a kill is worth 1, less lambda of the way back to r. app: APP and eval only, the opponent's death
+// ignored, for the APP strength benchmarks. set from the environment when a search starts:
+// NANA_REWARD=kill|app, NANA_REWARD_SCALE, NANA_KILL_LAMBDA, NANA_KILL_DISCOUNT (for the handcrafted
+// opponent; the HMM uses its fitted discount)
+struct RewardTuning {
+    bool app_only = false;
+    float scale = 0.25f;
+    float lambda = 0.0f;
+    float discount = 0.9f;
+};
+
+static RewardTuning reward_tuning;
+
+static void loadRewardTuning() {
+    reward_tuning = RewardTuning();
+    if (const char* text = std::getenv("NANA_REWARD")) {
+        reward_tuning.app_only = std::strcmp(text, "app") == 0;
+    }
+    auto read = [](const char* name, float& value) {
+        if (const char* text = std::getenv(name)) {
+            value = (float)std::atof(text);
+        }
+    };
+    read("NANA_REWARD_SCALE", reward_tuning.scale);
+    read("NANA_KILL_LAMBDA", reward_tuning.lambda);
+    read("NANA_KILL_DISCOUNT", reward_tuning.discount);
+}
+
+// count the opponent's death from the search root, in the discount the reward uses
+static void resetKill(EmulationGame& root) {
+    loadRewardTuning();
+    const float fitted = markov::params().discount;
+    const float discount = root.markov_opponent && fitted > 0 ? fitted : reward_tuning.discount;
+    root.reset_kill(discount, !reward_tuning.app_only);
+}
+
 // NANA_MARKOV_OPPONENT=1: the search models the opponent with MarkovOpponent instead of the
 // handcrafted Opponent, whichever the game being played uses. read when a search starts
 static bool markovSearch() {
@@ -250,6 +290,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     if (root_state.markov_opponent != markovSearch()) {
         root_state.reset_opponent(markovSearch());
     }
+    resetKill(root_state);
 
     time = 0;
 
@@ -320,6 +361,7 @@ void Search::continueSearch(EmulationGame state) {
     root_state.pieces = 0;
     root_state.lines = 2;
     root_state.reset_opponent(markovSearch());
+    resetKill(root_state);
 
     if (!uct.nodeExists(state.hash())) {
         uct.insertNode(UCTNode(state));
@@ -1386,17 +1428,19 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
         reward = std::max(reward, r);
     }
 
+    if (reward_tuning.app_only) {
+        return reward;
+    }
+
+    // a spike the opponent hasn't tanked yet
     if (state.opponent_jeopardy() > 15) {
         reward += state.opponent_jeopardy() / 20;
     }
 
-    reward += state.opponent_deaths() / 3;
-
-    if (state.opponent_dead()) {
-        // gottem
-        reward = 1;
-    }
-    return reward;
+    const float x = std::max(reward, 0.0f);
+    const float r = x / (x + reward_tuning.scale);
+    const float kill = (1.0f - reward_tuning.lambda) * state.expected_kill();
+    return kill + (1.0f - kill) * r;
 }
 
 Move Search::bestMove() {

@@ -77,6 +77,12 @@ public:
     // attack this piece before cancelling, for logging
     double last_attack = 0;
 
+    // the search sets this: instead of sampling its death, each piece returns the probability it
+    // died (last_death_prob) and plays on as if it survived, so the search can count the kill as an
+    // expectation rather than a rare sampled event
+    bool expected_death = false;
+    float last_death_prob = 0;
+
     // Advances internal state and returns outgoing damage this turn
     double play() {
         const markov::Params& p = markov::params();
@@ -90,15 +96,16 @@ public:
         const int action = std::min<int>((int)received, markov::ACTIONS - 1);
         received = 0;
 
-        if (fresh) {
-            state = sample(p.initial);
-            fresh = false;
+        const auto& row = fresh ? p.initial : p.transition[action][jeopardy_bucket()][since][state];
+        fresh = false;
+        int emission;
+        if (expected_death) {
+            emission = play_surviving(p, row);
         }
         else {
-            state = sample(p.transition[action][jeopardy_bucket()][since][state]);
+            state = sample(row);
+            emission = sample(p.emission[state]);
         }
-
-        const int emission = sample(p.emission[state]);
         // any attack bin but 0 is an attack; a death starts it rebuilding too
         since = emission == 0 ? (uint8_t)std::min(since + 1, markov::SINCE - 1) : 0;
         if (emission == markov::DEATH) {
@@ -182,12 +189,38 @@ private:
     }
 
     template <size_t N>
-    int sample(const std::array<float, N>& cdf) {
-        const float u = uniform();
+    int sample(const std::array<float, N>& cdf, float scale = 1.0f) {
+        const float u = uniform() * scale;
         int i = 0;
         while (i < (int)N - 1 && u >= cdf[i]) {
             i++;
         }
         return i;
+    }
+
+    // expected_death: sets last_death_prob to P(it dies this piece) and state to a draw of its next
+    // state given that it doesn't, and returns an emission drawn from that state without death
+    int play_surviving(const markov::Params& p, const std::array<float, markov::STATES>& row) {
+        std::array<float, markov::STATES> survive;
+        float death = 0;
+        float total = 0;
+        float previous = 0;
+        for (int j = 0; j < markov::STATES; j++) {
+            const float to = row[j] - previous;
+            previous = row[j];
+            // death is the last emission, so its probability is what the attacks leave
+            const float alive = p.emission[j][markov::DEATH - 1];
+            death += to * (1.0f - alive);
+            total += to * alive;
+            survive[j] = total;
+        }
+        last_death_prob = death;
+        if (total <= 0) {
+            // it dies from every state; play on from any
+            state = sample(row);
+            return 0;
+        }
+        state = sample(survive, total);
+        return sample(p.emission[state], p.emission[state][markov::DEATH - 1]);
     }
 };

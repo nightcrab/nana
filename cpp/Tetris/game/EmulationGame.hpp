@@ -49,6 +49,19 @@ class EmulationGame {
     // TETR.IO damage (TetrioS1, the same table as the stadium's TetrioStats) and stadium_rules
     void set_tetrio_rules();
 
+    // the opponent's death along the search path, for the search's reward: kill_value is
+    // sum over its pieces t of P(alive before t) P(dies at t) discount^t, kill_survival P(alive now)
+    // and kill_weight discount^(pieces so far). the HMM gives P(dies at t) exactly (expected_death);
+    // the handcrafted opponent's is 0 or 1
+    float kill_value = 0;
+    float kill_survival = 1;
+    float kill_weight = 1;
+    float kill_discount = 1;
+    // start counting from here; expected: the HMM plays on as if it survived and reports the odds
+    void reset_kill(float discount, bool expected);
+    // the expected discounted kill, from the path and the HMM's death_value from here on
+    float expected_kill() const;
+
     // survival-mode garbage ramp: the opponent's garbage is scaled by
     // 1 + ramp_pieces / garbage_ramp (0 = off). the search plays the same ramp
     int garbage_ramp = 0;
