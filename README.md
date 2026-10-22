@@ -113,66 +113,27 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 
 To build a single executable, pass `--target`,Explanationke --build build --target tbp_teA Nana backend for the  written to `build/cpp/`.
 
-| Executable | What it is |
+| Executable | Description |
 |---|---|
-| `tbp_tetris` | T Bot Protocol](https://github.com/tetris-bot-protocol) (JSON over stdin/stdout). Point a TBP frontend at it. |
+| `tbp_tetris` | Backend for [TBP](https://github.com/tetris-bot-protocol) (JSON over stdin/stdout). |
 | `cfr_tetris` | Standalone graphical version. On Linux it needs X11, OpenGL and libpng. |
 | `nana_play` | Plays self-play games against the simulated opponent and reports attack per piece. Used by the tuner and the strength scripts. |
 | `nana_bench` | Fixed-position search benchmark with profiling counters (built with `NANA_BENCH`). |
-| `nana_speed` | The same benchmark without profiling; prints only simulations per second. |
+| `nana_speed` | Measures simulations per second. |
 | `nana_msgbench` | Microbenchmark of  to run headlesst |
 
 CMake options (pass with `-D`):
 
-* `NANA_GUI=OFF` skips `cfr_tetris`. Use this on headless machines.
+* `NANA_GUI=OFF` skips `cfr_tetris` to run headless.
 * `NANA_MIMALLOC=OFF` uses the system allocator instead of mimalloc.
 * `CMAKE_CXX_FLAGS="-DNANA_MPMCTS=0"` builds TDS-UCT instead of the default MP-MCTS.
-
-### Running
-
-**TBP bot.** `tbp_tetris` reads and writes TBP messages on stdin/stdout. It searches with 3 threads by d$env:NANA_THREADS = 16; .\build\cpp\tbp_tetris.exe   # PowerShell
-6 ./build/cpp/tbp_tetris           # bash
-$env:NANA_THREADS = 16; .uild\cpp	bp_tetris.exe   # PowerShell
-```
-
-**Graphical version.** Run `cfr_tetris` with no arguments.
-
-**Self-play.** `nana_play` takes flags in `--name value` pairs, all optional:
-
-```
-./build/cpp/nana_play --threads 8 --games 20 --ms 100 --seed 1
-```
-
-| Flag | Meaning |
-|---|---|
-| `--threads N` | search threads |
-| `--games K` | number of games |
-| `--ms T` | thinking time per move |
-| `--sims N` | fixed simulations per move instead of a time limit (for reproducible runs, use with `--threads 1 --search-seed 1`) |
-| `--seed S`, `--search-seed 0\|1` | game seed; whether to seed the search deterministically |
-| `--max-pieces P`, `--ramp R` | game length and garbage ramp |
-| `--markov-env 0\|1` | play against the Markov opponent rather than the handcrafted one |
-| `--opponent-log FILE` | write opponent steps for training the Markov model |
-| `--garbage-scale X`, `--belief 0\|1` | garbage multiplier; opponent belief tracking |
-| `--cpu K` | pin to a logical cpu |
-| `--print-config` | print the active config JSON and exit |
-
-**Search benchmarks.** `nana_bench` and `nana_speed` take `<threads> <ms> <test 0|1>`, where the test picks one of two fixed positions:
-
-```
-./build/cpp/nana_speed 8 2000 0
-```
-
-`nana_msgbench [messages]` runs the queue benchmark, and `nana_msgbench scale [max_threads]` measures it across thread counts.
-
-**Environment variables.** Most executables read these at startup:
 
 * `NANA_CONFIG=path/to/config.json` loads eval and search weights (e.g. a tuner `release.json`). `nana_play --print-config` shows the format.
 * `NANA_RULES=tetrio` plays with TETR.IO S1 rules.
 * `NANA_MARKOV_OPPONENT=1` makes the search model the opponent with the Markov model.
 * Search tuning knobs such as `NANA_LOAD_FAC and `NANA_REWARD` are defined in `cpp/Tetris/bot/Search.cpp`.
 
-For multi-thread benchmarking on Linux/EC2, see `scripts/` (`speed_scaling.sh`, `strength_batches.sh`, `run_ec2_bench.sh`).
+For multi-thread benchmarking on Linux, see `scripts/` (`speed_scaling.sh`, `strength_batches.sh`, `run_ec2_bench.sh`).
  and rollout weights. 
 
 ## Tuning
