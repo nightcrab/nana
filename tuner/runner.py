@@ -11,6 +11,7 @@ import os
 import queue
 import subprocess
 import threading
+import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 
@@ -65,6 +66,8 @@ class Runner:
         self.procs = set()
         # called as progress(games done, games asked) while play waits, about twice a second
         self.progress = None
+        # (seconds, games) for every finished nana_emulate process, for calibration
+        self.chunk_times = []
 
     def config_path(self, config):
         """configs are content-addressed, so a file is written once and never changes"""
@@ -98,11 +101,13 @@ class Runner:
             cmd = [self.nana, "--threads", "1", "--cpu", str(cpu), "--search-seed", "1", "--games", str(games),
                    "--seed", str(seed0)] + stage.args()
             for attempt in range(2):
+                started = time.monotonic()
                 returncode, stdout, stderr = self._spawn(cmd, self._env(config_path, stage))
                 results = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
                 if returncode == 0 and len(results) == games:
                     with self.lock:
                         self.games_played += games
+                        self.chunk_times.append((time.monotonic() - started, games))
                     return results
                 with self.lock:
                     self.failures += 1

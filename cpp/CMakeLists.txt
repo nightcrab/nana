@@ -1,4 +1,4 @@
-﻿# CMakeList.txt : CMake project for cfr_tetris, include source and define
+﻿# CMakeList.txt : CMake project for nana, include source and define
 # project specific logic here.
 #
 
@@ -54,9 +54,9 @@ if(NANA_MIMALLOC)
     link_libraries(mimalloc-static)
 endif()
 
-# the graphical cfr_tetris needs X11, OpenGL and libpng on Linux;
+# the graphical nana_interactive needs X11, OpenGL and libpng on Linux;
 # turn it off to build only the bots and benches on a headless machine
-option(NANA_GUI "Build the graphical cfr_tetris" ON)
+option(NANA_GUI "Build the graphical nana_interactive" ON)
 
 if(NANA_GUI AND UNIX AND NOT APPLE)
     find_package(X11 REQUIRED)
@@ -69,7 +69,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
 
 # Add source to this project's executable.
 if(NANA_GUI)
-    add_executable (cfr_tetris "cfr_tetris.cpp" "cfr_tetris.h" ${TETRIS_SOURCES})
+    add_executable (nana_interactive "interactive.cpp" ${TETRIS_SOURCES})
 endif()
 add_executable (tbp_tetris "tbp.cpp" ${TETRIS_SOURCES})
 add_executable (nana_bench "bench.cpp" ${TETRIS_SOURCES})
@@ -82,13 +82,13 @@ add_executable (nana_emulate "emulate.cpp" ${TETRIS_SOURCES})
 target_compile_definitions(tbp_tetris PRIVATE TBP TBP2)
 
 if(NANA_GUI AND UNIX AND NOT APPLE)
-    target_include_directories(cfr_tetris PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIRS} ${PNG_INCLUDE_DIR})
+    target_include_directories(nana_interactive PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIRS} ${PNG_INCLUDE_DIR})
 
-    target_link_libraries(cfr_tetris ${X11_LIBRARIES} ${OPENGL_LIBRARIES} ${PNG_LIBRARY})
+    target_link_libraries(nana_interactive ${X11_LIBRARIES} ${OPENGL_LIBRARIES} ${PNG_LIBRARY})
 endif()
 
 if(NANA_GUI)
-    target_link_libraries(cfr_tetris ShakTris)
+    target_link_libraries(nana_interactive ShakTris)
 endif()
 target_link_libraries(tbp_tetris ShakTris)
 target_link_libraries(nana_bench ShakTris)
@@ -99,7 +99,7 @@ target_link_libraries(nana_emulate ShakTris)
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   if(NANA_GUI)
-    set_property(TARGET cfr_tetris PROPERTY CXX_STANDARD 23)
+    set_property(TARGET nana_interactive PROPERTY CXX_STANDARD 23)
   endif()
   set_property(TARGET tbp_tetris PROPERTY CXX_STANDARD 23)
   set_property(TARGET nana_bench PROPERTY CXX_STANDARD 23)

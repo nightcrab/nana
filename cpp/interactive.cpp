@@ -1,6 +1,6 @@
-﻿// cfr_tetris.cpp : Defines the entry point for the application.
+// interactive.cpp : steps through the bot in a window and shows its search statistics
 //
-#include "cfr_tetris.h"
+#include <iostream>
 
 #include "EmulationGame.hpp"
 #include "engine/Board.hpp"

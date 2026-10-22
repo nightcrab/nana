@@ -114,7 +114,7 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 | Executable | Description |
 |---|---|
 | `tbp_tetris` | Backend for [TBP](https://github.com/tetris-bot-protocol) (JSON over stdin/stdout). |
-| `cfr_tetris` | Standalone graphical version. On Linux it needs X11, OpenGL and libpng. |
+| `nana_interactive` | Steps through the bot in a window and shows its search statistics. On Linux it needs X11, OpenGL and libpng. |
 | `nana_emulate` | Plays emulated games (`EmulationGame`) against the HMM opponent model and reports attack per piece. Used by the tuner and the strength scripts. |
 | `nana_bench` | Fixed-position search benchmark with profiling counters (built with `NANA_BENCH`). |
 | `nana_speed` | Measures simulations per second. |
@@ -122,7 +122,7 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 
 CMake options (pass with `-D`):
 
-* `NANA_GUI=OFF` skips `cfr_tetris` to run headless.
+* `NANA_GUI=OFF` skips `nana_interactive` to run headless.
 * `NANA_MIMALLOC=OFF` uses the system allocator instead of mimalloc.
 * `CMAKE_CXX_FLAGS="-DNANA_MPMCTS=0"` builds TDS-UCT instead of the default MP-MCTS.
 

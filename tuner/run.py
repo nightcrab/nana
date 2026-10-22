@@ -243,30 +243,36 @@ class Run:
     # ---- calibration and the plan
 
     def time_games(self, sims):
-        """Core-seconds per game at this many sims: two waves of games over the cpus, with the
-        swarm's starting configs, so the games are as long as the run's will be at the start."""
+        """Core-seconds per game at this many sims: the mean time of games with the swarm's starting
+        configs, so they're as long as the run's will be at the start. Each game is timed on its own:
+        game lengths vary a lot (most die early), and a batch's wall time follows its longest game."""
         self.activity(f"timing games at {sims} sims")
         stage = self.make_stage(sims)
-        k = 2 * len(self.runner.cpus)
+        k = max(16, 2 * len(self.runner.cpus))
         requests = [(("cal", i), self.config(self.pso.x[i % self.pso.n]), stage, CALIBRATION_SEEDS + i, 1)
                     for i in range(k)]
-        started = time.monotonic()
+        self.runner.chunk_times = []
         self.runner.play(requests)
-        wall = time.monotonic() - started
-        return wall * len(self.runner.cpus) / k
+        return sum(t for t, _ in self.runner.chunk_times) / sum(g for _, g in self.runner.chunk_times)
 
     def projection(self, core_seconds):
         """Hours for the whole run at this cost per game: the iterations (the first scores only the
-        particles, later ones their bests too), the baseline and holdouts, and the gate at its limit."""
+        particles, later ones their bests too), the baseline and holdouts, and the gate at its limit.
+        Every batch of games also ends with a tail of about one process's games (chunk), while the
+        last processes finish and the other cpus wait."""
         s = self.settings
-        per_game = core_seconds / len(self.runner.cpus)
+        cpus = len(self.runner.cpus)
+        per_game = core_seconds / cpus
+        tail = s.get("chunk", 4) * core_seconds
         p, g, n = s["particles"], s["games_per_eval"], s["iterations"]
-        iteration = 2 * p * g * per_game
-        tune = p * g * per_game + (n - 1) * iteration
+        iteration = 2 * p * g * per_game + tail
+        tune = p * g * per_game + tail + (n - 1) * iteration
         every = s["holdout"]["every"]
         holdouts = n // every + (1 if n % every else 0)
-        checks = (holdouts + 1) * s["holdout"]["games"] * per_game
-        gate = 2 * s["gate"]["max_games"] * per_game
+        checks = (holdouts + 1) * (s["holdout"]["games"] * per_game + tail)
+        # the gate plays both configs in batches of 4 games per cpu each
+        gate_batches = math.ceil(s["gate"]["max_games"] / (4 * cpus))
+        gate = 2 * s["gate"]["max_games"] * per_game + gate_batches * tail
         hours = {"iteration": iteration, "tune": tune, "checks": checks, "gate": gate}
         hours = {k: v / 3600 for k, v in hours.items()}
         hours["total"] = hours["tune"] + hours["checks"] + hours["gate"]
