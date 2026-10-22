@@ -101,7 +101,7 @@ To reproduce, run `scripts/strength_batches.sh` through `scripts/run_ec2_bench.s
 
 ## Usage
 
-Nana is built from C++ source with CMake (3.22+) and a C++23 compiler (Clang, GCC or MSVC). The build uses `-march=native`, so build on the machine that will run it. mimalloc is fetched automatically on configure, and the `ShakTrisLib` game library is a git submodule:
+Nana is built from C++ source with CMake (3.22+) and a C++23 compiler (Clang, GCC or MSVC). By default the build uses `-march=native`, so build on the machine that will run it (see [Portable builds](#portable-builds) for binaries that run elsewhere). mimalloc is fetched automatically on configure, and the `ShakTrisLib` game library is a git submodule:
 
 ```
 git clone --recurse-submodules <repo url>     # or: git submodule update --init
@@ -125,6 +125,21 @@ CMake options (pass with `-D`):
 * `NANA_GUI=OFF` skips `nana_interactive` to run headless.
 * `NANA_MIMALLOC=OFF` uses the system allocator instead of mimalloc.
 * `CMAKE_CXX_FLAGS="-DNANA_MPMCTS=0"` builds TDS-UCT instead of the default MP-MCTS.
+* `NANA_MARCH=<level>` sets the `-march` of every executable except a launcher-built `tbp_tetris` (default `native`).
+* `NANA_VARIANTS="<level>;<level>;..."` builds `tbp_tetris` for several ISA levels (see below).
+
+### Portable builds
+
+`NANA_VARIANTS` builds the engine once per listed ISA level, as `tbp_tetris-<level>`, and makes `tbp_tetris` a small launcher. The launcher reads CPUID, runs the best level the CPU supports, and passes it stdin, stdout and its arguments, so TBP clients still see one bot. A release build targets the benchmark server (Zen 5), AVX2 machines, and any x86-64:
+
+```
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNANA_VARIANTS="znver5;x86-64-v3;x86-64"
+cmake --build build --target tbp_tetris -j
+```
+
+Ship `tbp_tetris` together with every `tbp_tetris-<level>` from the same directory. The launcher knows `znver5`, `znver4`, `x86-64-v4`, `x86-64-v3`, `x86-64-v2` and `x86-64`. `tbp_tetris --list-variants` shows which levels the CPU runs and what it lacks for the rest, and `NANA_VARIANT=<level>` forces one.
+
+Nana also builds as 32-bit x86, provided SSE2 is enabled: MSVC's 8-byte atomics need it. On Windows, use clang-cl from an x86 developer prompt with `-m32` added to the default flags and `-DNANA_MARCH=pentium4`. At a fixed simulation count it plays the same games as the 64-bit build, in about twice the time per move.
 
 Nana reads some environment variables:
 

@@ -7,7 +7,11 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris/game)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris/bot)
 
-add_subdirectory("Tetris/game/ShakTrisLib")
+# only for its source list: the engine cores below compile ShakTris themselves, once per ISA level
+add_subdirectory("Tetris/game/ShakTrisLib" EXCLUDE_FROM_ALL)
+get_target_property(SHAKTRIS_DIR ShakTris SOURCE_DIR)
+get_target_property(SHAKTRIS_SOURCES ShakTris SOURCES)
+list(TRANSFORM SHAKTRIS_SOURCES PREPEND "${SHAKTRIS_DIR}/")
 
 
 set(TETRIS_SOURCES
@@ -29,10 +33,9 @@ set(TETRIS_SOURCES
 	"Util/Allocator.cpp"
 	"Util/Distribution.cpp"
 	"Util/fasthash.cpp"
-
-	"icon.rc"
 )
- 
+set(NANA_ICON "icon.rc")
+
 
 # mimalloc for operator new/delete. glibc malloc grows per-thread heaps with mprotect,
 # which serialises on the process' mmap lock: it cost ~25% at 32 threads on Linux
@@ -65,45 +68,86 @@ if(NANA_GUI AND UNIX AND NOT APPLE)
 endif()
 
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+# Nana is built for an ISA level picked by -march (native, x86-64, x86-64-v3, znver5, ...).
+# NANA_MARCH is the level of the benches, the emulator and the interactive build.
+# NANA_VARIANTS builds tbp_tetris once per listed level, as tbp_tetris-<level>, and makes tbp_tetris
+# a launcher that runs the best one the CPU supports (launcher.cpp). For releases, e.g.
+# -DNANA_VARIANTS="znver5;x86-64-v3;x86-64"
+set(NANA_MARCH "native" CACHE STRING "-march for the benches, emulator and interactive build")
+set(NANA_VARIANTS "" CACHE STRING "ISA levels to build tbp_tetris for, behind a launcher")
+# the levels launcher.cpp can detect
+set(NANA_KNOWN_VARIANTS znver5 znver4 x86-64-v4 x86-64-v3 x86-64-v2 x86-64)
 
-# Add source to this project's executable.
+# the compile options for an ISA level
+function(nana_arch_flags out march)
+    if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        # cl.exe has no -march, only the nearest /arch
+        if(march MATCHES "^(x86-64-v4|znver[45])$")
+            set(${out} "/arch:AVX512" PARENT_SCOPE)
+        elseif(march MATCHES "^(native|x86-64-v3)$")
+            set(${out} "/arch:AVX2" PARENT_SCOPE)
+        elseif(march STREQUAL "x86-64-v2")
+            set(${out} "/arch:SSE4.2" PARENT_SCOPE)
+        else()
+            set(${out} "" PARENT_SCOPE)
+        endif()
+    else()
+        set(${out} "-march=${march}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Nana's and ShakTris' sources for one ISA level, linked into each executable that uses them
+function(nana_add_core name march)
+    add_library(${name} OBJECT ${TETRIS_SOURCES} ${SHAKTRIS_SOURCES})
+    nana_arch_flags(flags ${march})
+    # public: the executable's own source is built for the same level
+    target_compile_options(${name} PUBLIC ${flags})
+    target_include_directories(${name} PUBLIC ${SHAKTRIS_DIR})
+    set_property(TARGET ${name} PROPERTY CXX_STANDARD 23)
+endfunction()
+
+function(nana_add_executable name core)
+    add_executable(${name} ${ARGN} ${NANA_ICON})
+    target_link_libraries(${name} ${core})
+    set_property(TARGET ${name} PROPERTY CXX_STANDARD 23)
+endfunction()
+
+nana_add_core(nana_core ${NANA_MARCH})
+nana_add_core(nana_core_bench ${NANA_MARCH})
+target_compile_definitions(nana_core_bench PUBLIC NANA_BENCH)
+
 if(NANA_GUI)
-    add_executable (nana_interactive "interactive.cpp" ${TETRIS_SOURCES})
+    nana_add_executable(nana_interactive nana_core "interactive.cpp")
 endif()
-add_executable (tbp_tetris "tbp.cpp" ${TETRIS_SOURCES})
-add_executable (nana_bench "bench.cpp" ${TETRIS_SOURCES})
-target_compile_definitions(nana_bench PRIVATE NANA_BENCH)
+nana_add_executable(nana_bench nana_core_bench "bench.cpp")
 # the same bench without the NANA_BENCH profiling; prints only simulations / second
-add_executable (nana_speed "bench.cpp" ${TETRIS_SOURCES})
-add_executable (nana_msgbench "msgbench.cpp" ${TETRIS_SOURCES})
-add_executable (nana_emulate "emulate.cpp" ${TETRIS_SOURCES})
+nana_add_executable(nana_speed nana_core "bench.cpp")
+nana_add_executable(nana_msgbench nana_core "msgbench.cpp")
+nana_add_executable(nana_emulate nana_core "emulate.cpp")
 
-target_compile_definitions(tbp_tetris PRIVATE TBP TBP2)
+if(NANA_VARIANTS)
+    foreach(variant IN LISTS NANA_VARIANTS)
+        if(NOT variant IN_LIST NANA_KNOWN_VARIANTS)
+            message(FATAL_ERROR "NANA_VARIANTS: the launcher can't detect ${variant}; use some of ${NANA_KNOWN_VARIANTS}")
+        endif()
+        nana_add_core(nana_core_${variant} ${variant})
+        nana_add_executable(tbp_tetris-${variant} nana_core_${variant} "tbp.cpp")
+        target_compile_definitions(tbp_tetris-${variant} PRIVATE TBP TBP2)
+    endforeach()
+
+    # built for the compiler's default level, so it runs anywhere
+    add_executable(tbp_tetris "launcher.cpp" ${NANA_ICON})
+    list(JOIN NANA_VARIANTS "," variants)
+    target_compile_definitions(tbp_tetris PRIVATE "NANA_VARIANTS=\"${variants}\"")
+    list(TRANSFORM NANA_VARIANTS PREPEND "tbp_tetris-" OUTPUT_VARIABLE variant_targets)
+    add_dependencies(tbp_tetris ${variant_targets})
+    set_property(TARGET tbp_tetris PROPERTY CXX_STANDARD 23)
+else()
+    nana_add_executable(tbp_tetris nana_core "tbp.cpp")
+    target_compile_definitions(tbp_tetris PRIVATE TBP TBP2)
+endif()
 
 if(NANA_GUI AND UNIX AND NOT APPLE)
     target_include_directories(nana_interactive PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIRS} ${PNG_INCLUDE_DIR})
-
     target_link_libraries(nana_interactive ${X11_LIBRARIES} ${OPENGL_LIBRARIES} ${PNG_LIBRARY})
-endif()
-
-if(NANA_GUI)
-    target_link_libraries(nana_interactive ShakTris)
-endif()
-target_link_libraries(tbp_tetris ShakTris)
-target_link_libraries(nana_bench ShakTris)
-target_link_libraries(nana_speed ShakTris)
-target_link_libraries(nana_msgbench ShakTris)
-target_link_libraries(nana_emulate ShakTris)
-
-
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  if(NANA_GUI)
-    set_property(TARGET nana_interactive PROPERTY CXX_STANDARD 23)
-  endif()
-  set_property(TARGET tbp_tetris PROPERTY CXX_STANDARD 23)
-  set_property(TARGET nana_bench PROPERTY CXX_STANDARD 23)
-  set_property(TARGET nana_speed PROPERTY CXX_STANDARD 23)
-  set_property(TARGET nana_msgbench PROPERTY CXX_STANDARD 23)
-  set_property(TARGET nana_emulate PROPERTY CXX_STANDARD 23)
 endif()
