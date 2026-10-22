@@ -111,8 +111,6 @@ cmake --build build -j
 
 On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Release` configuration (Ninja, clang-cl, `RelWithDebInfo`) that builds into `out/build/<config>/`. Always benchmark a Release build.
 
-To build a single executable, pass `--target`,Explanationke --build build --target tbp_teA Nana backend for the  written to `build/cpp/`.
-
 | Executable | Description |
 |---|---|
 | `tbp_tetris` | Backend for [TBP](https://github.com/tetris-bot-protocol) (JSON over stdin/stdout). |
