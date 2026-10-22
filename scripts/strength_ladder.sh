@@ -92,19 +92,19 @@ if [ "${BUILD:-1}" = 1 ]; then
         [ "$lf" = 6 ] && (( ${#mults[@]} == 0 && ${#variants[@]} > 0 )) && continue
         cmake -S . -B "build-strength-lf$lf" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF \
             -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1 -DNANA_LOAD_FACTOR=$lf $extra_flags" > /dev/null
-        cmake --build "build-strength-lf$lf" --target nana_play -j "$cpus" > /dev/null
+        cmake --build "build-strength-lf$lf" --target nana_emulate -j "$cpus" > /dev/null
     done
     for v in "${variants[@]}"; do
         cmake -S . -B "build-strength-v$v" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF             -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1 -DNANA_LOAD_FACTOR=6 $(variant_flags "$v")" > /dev/null
-        cmake --build "build-strength-v$v" --target nana_play -j "$cpus" > /dev/null
+        cmake --build "build-strength-v$v" --target nana_emulate -j "$cpus" > /dev/null
     done
 fi
 # a task names its binary by key: 6 and 1 are the plain builds by load factor, v<name> a variant
-declare -A bins=([6]=${BIN_LF6:-$PWD/build-strength-lf6/cpp/nana_play} [1]=${BIN_LF1:-$PWD/build-strength-lf1/cpp/nana_play})
+declare -A bins=([6]=${BIN_LF6:-$PWD/build-strength-lf6/cpp/nana_emulate} [1]=${BIN_LF1:-$PWD/build-strength-lf1/cpp/nana_emulate})
 # with BUILD=0 (later batches of strength_batches.sh) a variant reuses its earlier build, unless
 # BIN_LF6 is set, which then stands in for every variant (a plumbing check off Linux)
 for v in "${variants[@]}"; do
-    bins[v$v]=${BIN_LF6:-$PWD/build-strength-v$v/cpp/nana_play}
+    bins[v$v]=${BIN_LF6:-$PWD/build-strength-v$v/cpp/nana_emulate}
 done
 for key in "${!bins[@]}"; do
     [[ $key == v* ]] && [ ! -x "${bins[$key]}" ] && { echo "missing binary for variant ${key#v}: ${bins[$key]}" >&2; exit 1; }

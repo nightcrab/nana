@@ -77,7 +77,7 @@ target_compile_definitions(nana_bench PRIVATE NANA_BENCH)
 # the same bench without the NANA_BENCH profiling; prints only simulations / second
 add_executable (nana_speed "bench.cpp" ${TETRIS_SOURCES})
 add_executable (nana_msgbench "msgbench.cpp" ${TETRIS_SOURCES})
-add_executable (nana_play "play.cpp" ${TETRIS_SOURCES})
+add_executable (nana_emulate "emulate.cpp" ${TETRIS_SOURCES})
 
 target_compile_definitions(tbp_tetris PRIVATE TBP TBP2)
 
@@ -94,7 +94,7 @@ target_link_libraries(tbp_tetris ShakTris)
 target_link_libraries(nana_bench ShakTris)
 target_link_libraries(nana_speed ShakTris)
 target_link_libraries(nana_msgbench ShakTris)
-target_link_libraries(nana_play ShakTris)
+target_link_libraries(nana_emulate ShakTris)
 
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
@@ -105,5 +105,5 @@ if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET nana_bench PROPERTY CXX_STANDARD 23)
   set_property(TARGET nana_speed PROPERTY CXX_STANDARD 23)
   set_property(TARGET nana_msgbench PROPERTY CXX_STANDARD 23)
-  set_property(TARGET nana_play PROPERTY CXX_STANDARD 23)
+  set_property(TARGET nana_emulate PROPERTY CXX_STANDARD 23)
 endif()

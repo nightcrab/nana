@@ -1,6 +1,6 @@
-"""Plays seeded games of nana_play, one single-thread game process per cpu, and scores them.
+"""Plays seeded games of nana_emulate, one single-thread game process per cpu, and scores them.
 
-Every game is deterministic given (config, stage, seed): nana_play --threads 1 --sims N
+Every game is deterministic given (config, stage, seed): nana_emulate --threads 1 --sims N
 --search-seed 1 replays exactly, so configs compared on the same seeds see the same pieces,
 garbage and opponent (common random numbers).
 """
@@ -11,7 +11,7 @@ import os
 import queue
 import subprocess
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 
 class Stage:
@@ -48,7 +48,7 @@ class RunnerError(RuntimeError):
 
 class Runner:
     def __init__(self, nana, cpus, workdir, chunk=4, timeout=3600):
-        self.nana = nana
+        self.nana = os.path.abspath(nana)
         self.cpus = list(cpus)
         self.config_dir = os.path.join(workdir, "configs")
         os.makedirs(self.config_dir, exist_ok=True)
@@ -60,6 +60,11 @@ class Runner:
         self.games_played = 0
         self.failures = 0
         self.lock = threading.Lock()
+        # Ctrl-C: stop launching games and kill the running ones (they'd otherwise be retried as failures)
+        self.stopping = threading.Event()
+        self.procs = set()
+        # called as progress(games done, games asked) while play waits, about twice a second
+        self.progress = None
 
     def config_path(self, config):
         """configs are content-addressed, so a file is written once and never changes"""
@@ -80,11 +85,11 @@ class Runner:
         return env
 
     def print_config(self, config):
-        """The config nana actually loads for this file (nana_play --print-config)."""
+        """The config nana actually loads for this file (nana_emulate --print-config)."""
         out = subprocess.run([self.nana, "--print-config"], env=self._env(self.config_path(config), Stage(
             {"name": "check", "sims": 1})), capture_output=True, text=True, timeout=60)
         if out.returncode != 0:
-            raise RunnerError(f"nana_play --print-config failed: {out.stderr.strip()}")
+            raise RunnerError(f"nana_emulate --print-config failed: {out.stderr.strip()}")
         return json.loads(out.stdout)
 
     def _run_chunk(self, config_path, stage, seed0, games):
@@ -93,18 +98,48 @@ class Runner:
             cmd = [self.nana, "--threads", "1", "--cpu", str(cpu), "--search-seed", "1", "--games", str(games),
                    "--seed", str(seed0)] + stage.args()
             for attempt in range(2):
-                out = subprocess.run(cmd, env=self._env(config_path, stage), capture_output=True, text=True,
-                                     timeout=self.timeout)
-                results = [json.loads(line) for line in out.stdout.splitlines() if line.startswith("{")]
-                if out.returncode == 0 and len(results) == games:
+                returncode, stdout, stderr = self._spawn(cmd, self._env(config_path, stage))
+                results = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
+                if returncode == 0 and len(results) == games:
                     with self.lock:
                         self.games_played += games
                     return results
                 with self.lock:
                     self.failures += 1
-            raise RunnerError(f"nana_play failed twice (exit {out.returncode}): {' '.join(cmd)}\n{out.stderr[-2000:]}")
+            raise RunnerError(f"nana_emulate failed twice (exit {returncode}): {' '.join(cmd)}\n{stderr[-2000:]}")
         finally:
             self.free.put(cpu)
+
+    def _spawn(self, cmd, env):
+        if self.stopping.is_set():
+            raise KeyboardInterrupt
+        proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        with self.lock:
+            self.procs.add(proc)
+            stopping = self.stopping.is_set()
+        if stopping:
+            proc.kill()
+        try:
+            stdout, stderr = proc.communicate(timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+        finally:
+            with self.lock:
+                self.procs.discard(proc)
+        if self.stopping.is_set():
+            raise KeyboardInterrupt
+        return proc.returncode, stdout, stderr
+
+    def stop(self):
+        with self.lock:
+            self.stopping.set()
+            procs = list(self.procs)
+        for proc in procs:
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
     def play(self, requests):
         """requests: [(key, config, stage, seed0, games)]. Returns {key: [game result per seed, in seed
@@ -116,12 +151,27 @@ class Runner:
                 n = min(self.chunk, games - start)
                 tasks.append((key, start, path, stage, seed0 + start, n))
         results = {key: [None] * games for key, _, _, _, games in requests}
-        with ThreadPoolExecutor(max_workers=len(self.cpus)) as pool:
-            futures = [(key, start, pool.submit(self._run_chunk, path, stage, seed, n))
-                       for key, start, path, stage, seed, n in tasks]
-            for key, start, future in futures:
-                for i, game in enumerate(future.result()):
-                    results[key][start + i] = game
+        total, done = sum(games for *_, games in requests), 0
+        pool = ThreadPoolExecutor(max_workers=len(self.cpus))
+        try:
+            pending = {pool.submit(self._run_chunk, path, stage, seed, n): (key, start)
+                       for key, start, path, stage, seed, n in tasks}
+            while pending:
+                # wait in short steps: on Windows an untimed wait doesn't wake up for Ctrl-C
+                finished, _ = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    key, start = pending.pop(future)
+                    chunk = future.result()
+                    for i, game in enumerate(chunk):
+                        results[key][start + i] = game
+                    done += len(chunk)
+                if self.progress:
+                    self.progress(done, total)
+        except KeyboardInterrupt:
+            self.stop()
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        pool.shutdown()
         return results
 
     def scores(self, requests):

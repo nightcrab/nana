@@ -1,21 +1,23 @@
 # nana's autotuner
 
 Tunes nana's constants (eval weights, PUCT, the rollout score) by playing seeded games and running
-particle swarm optimisation on the result. It's built to run unattended for days and be useful from
-the first day:
+particle swarm optimisation on the result. You give it a time budget; it measures how long games take
+on this machine and tunes at the largest search budget that fits.
 
-- **a ramp**: cheap stages first (few simulations per move, eased opponent garbage), each warm-started
-  from the last stage's best, up to budgets near real play;
-- **releases**: `release.json` only changes when a candidate beats it in a sequential test on paired
-  games, so whatever it holds is at least as good as the defaults, at any time;
-- **checkpoints**: every iteration; resume after a crash or reboot, or restart the ramp at any stage;
-- **health checks**: catch a run that isn't measuring anything before it wastes a week.
+- **one budget knob**: `--budget-hours` picks the sims count, and the plan is printed before any
+  tuning starts;
+- **a fixed number of iterations** (15 by default), whatever the swarm does;
+- **explore, then exploit**: the swarm starts widely scattered around the defaults and its inertia
+  falls over the run, so it settles at the end;
+- **a release gate**: `release.json` only changes when the tuned best beats the defaults in a
+  sequential test on paired games;
+- **checkpoints** every iteration, and **health checks** that catch a run that isn't measuring anything.
 
 ## Quick start
 
 ```
-# nana_play built in Release (see notes/ for the build); numpy installed
-python -m tuner start eval1 --nana out/build/markov/cpp/nana_play.exe --cpus 0,2,4,6,8,10,12,14
+# nana_emulate built in Release; numpy installed
+python -m tuner start eval1 --nana out/build/<build>/cpp/nana_emulate.exe --cpus 0,2,4,6,8,10,12,14 --budget-hours 8
 python -m tuner status eval1          # from another terminal, any time
 # Ctrl-C (or a reboot) stops it; then
 python -m tuner resume eval1
@@ -24,96 +26,81 @@ python -m tuner resume eval1
 Use one logical cpu per physical core (`--cpus`): each game runs single-threaded, pinned to its cpu,
 and two games sharing a core would slow each other unevenly. Keep the machine otherwise idle.
 
-Check a setup first with the smoke schedule, a few minutes end to end:
+To see what a budget buys without tuning, add `--plan-only`: it calibrates, prints the plan and
+stops; `resume` then tunes. To check a setup end to end in a minute or two:
 
 ```
-python -m tuner start smoke --nana ... --cpus ... --schedule tuner/schedules/smoke.json --particles 8
+python -m tuner start smoke --nana ... --cpus ... --sims 64 --iterations 3 --particles 4 --games 4 --gate-games 16
 ```
+
+## What a run does
+
+1. **Health checks** (also on every resume), at 32 sims: nana loads exactly the configs written
+   (`--print-config`), the same seeds replay the same games, and a deliberately broken eval (height
+   penalties flipped) scores clearly worse.
+2. **Calibration**: two waves of games over the cpus at each sims count of a ladder (256, 512, ...,
+   131072), with the swarm's starting configs. From the seconds per game it projects the whole run,
+   and picks the largest sims count that fits what's left of the budget. It stops climbing as soon as
+   a rung won't fit (or clearly won't, at twice the last rung's cost). `--sims N` skips the choice.
+   The measurements and the plan go to `plan.json`.
+3. **Tuning**: `--iterations` PSO iterations at that sims count. A holdout (the best against the
+   defaults on fixed seeds) every `--holdout-every` iterations and after the last.
+4. **The gate**: the best against the release (the defaults) on fresh paired seeds, until an SPRT
+   decides or `--gate-games` pairs are played. Only an accepted candidate becomes `release.json`.
+
+The plan counts the gate at its limit, so most runs finish early. Games get longer as the swarm
+improves (it survives longer), so iterations late in a run can take longer than calibration said;
+`status` re-projects from the latest iterations.
 
 ## What a game is, and the fitness
 
-`nana_play --threads 1 --sims N --search-seed 1` plays a game that replays exactly for a given
+`nana_emulate --threads 1 --sims N --search-seed 1` plays a game that replays exactly for a given
 seed and config, so every config in an iteration plays the same seeds (common random numbers) and
 luck in the pieces mostly cancels in comparisons. Games use TETR.IO rules (`NANA_RULES=tetrio`),
-the APP-only reward (`NANA_REWARD=app`), and by default the opponent HMM fitted on nana's stadium
-games as the opponent (`env: hmm`), with the search modelling the same HMM.
+the APP-only reward (`NANA_REWARD=app`), and the opponent HMM fitted on nana's stadium games as the
+opponent, with the search modelling the same HMM.
 
 Fitness is attack per piece over a fixed horizon (100 pieces): pieces lost by dying early score no
 attack, so survival is part of the score.
 
+The opponent's garbage is eased at small budgets, so a weak search survives long enough for the
+fitness to say something: x0.25 at 32 sims, x0.6 at 512, x0.8 at 2048, x1.0 from 8192 up
+(interpolated in log2 of the sims).
+
 Configs reach nana through `NANA_CONFIG` (`cpp/Tetris/bot/Config.hpp`): a JSON file overriding any
-default. nana rejects unknown keys, and `nana_play --print-config` shows what it loaded.
+default. nana rejects unknown keys, and `nana_emulate --print-config` shows what it loaded.
 
-## The ramp (`tuner/schedules/week.json`)
+## Options
 
-| stage | sims/move | garbage | hours |
-|---|---|---|---|
-| s32 | 32 | x0.25 | 3 |
-| s128 | 128 | x0.4 | 5 |
-| s512 | 512 | x0.6 | 11 |
-| s2048 | 2048 | x0.8 | 45 |
-| s8192 | 8192 | x1.0 | 60 |
+| option | default | |
+|---|---|---|
+| `--budget-hours H` / `--sims N` | (one is required) | the time budget, or a fixed sims count |
+| `--iterations` | 15 | PSO iterations |
+| `--particles` | 24 | swarm size; an iteration costs about 2 x particles x games games |
+| `--games` | 16 | games per evaluation: more is less noise and slower iterations |
+| `--spread` | 0.3 | the starting swarm's spread around the defaults (unit-cube units per parameter) |
+| `--gate-games` | 400 | the gate's limit on paired games |
+| `--holdout-every` | 5 | iterations between holdouts |
+| `--space` | `spaces/eval.json` | parameter space files (repeat to combine) |
+| `-v`, `--verbose` | off | print everything; otherwise the console shows the plan, an ETA per iteration, each kind of warning once, and the result (`log.txt` always has everything) |
+| `--overwrite` | off | replace a run of the same name without asking (`start` asks when it can) |
 
-To fit the ramp to another budget, scale its timeline: every stage's hours and the gate interval
-stretch or squeeze together, so the ramp keeps its shape.
+Ctrl-C stops a run at once: the running games are killed and the last finished iteration is kept, so
+`resume` loses at most one iteration.
 
-```
-python -m tuner start eval1 ... --total-hours 48      # the week in two days
-python -m tuner start eval1 ... --time-scale 2        # twice as long everywhere
-python -m tuner resume eval1 --total-hours 240        # change a running run's remaining stages
-```
+The inertia falls linearly from 0.9 to 0.4 over the iterations; the other PSO settings are 1.5, 1.5
+and a speed limit of 0.2 (in `DEFAULTS`, `tuner/run.py`).
 
-Squeezing doesn't make iterations cheaper, so a short timeline gives the high-budget stages few
-iterations (at 48 h, s8192 gets about 23 h). The first gate moves with the scale: at `--total-hours
-48` it comes after about 7 h.
+## Health warnings
 
-`garbage_scale` eases the opponent's garbage: at full pressure a 32-simulation search dies in ~20
-pieces whatever its eval, and the fitness says nothing. The first release gate comes at the end of
-s512, about 20 hours in. Hours are tuning time; gates and checks add some.
+Every iteration, in `status.txt` and the log:
 
-Each stage keeps the swarm from the previous one, re-scattered around its best (`spread`). If a
-stage over-specialised (its best doesn't hold up at the next budget), restart from an earlier best.
-
-## Releases
-
-At the end of every stage, and every `gate_every_hours`, the swarm's best plays the current release
-on fresh paired seeds at the gate's budget (`gate` in the schedule; once the ramp passes it, the
-stage's own) until an SPRT decides: H1 = better by `delta` (2% of the release's fitness), at
-alpha = beta = 0.05, at most `max_games` pairs. Only an accepted candidate becomes the release.
-`gates.jsonl` keeps every gate.
-
-`release.json` is a complete NANA_CONFIG file: `NANA_CONFIG=tuner/runs/NAME/release.json` runs nana
-with it (tbp_tetris included).
-
-## Health checks
-
-Before tuning (and on every resume), stopping the run on failure:
-
-- **plumbing**: nana loads exactly the values written (`--print-config`);
-- **determinism**: the same seeds replay the same games;
-- **canary**: a deliberately broken eval (height penalties flipped) scores clearly worse.
-
-Every iteration, warnings in `status.txt` and the log:
-
-- **signal**: the swarm's scores barely differ beyond one evaluation's noise: raise `games_per_eval`;
+- **signal**: the swarm's scores barely differ beyond one evaluation's noise: raise `--games`;
 - **winner's curse**: the best's fresh scores keep falling below its average;
 - **collapse**: the swarm has converged;
 - **bounds**: most bests sit on a parameter's limit: widen it, or look for an exploit;
 - **behaviour**: the best dies much more often than the defaults (APP bought with risk);
-- **holdout**: every `holdout.every` iterations the best plays fixed held-out seeds against the
-  defaults; beating the defaults on tuning seeds but not on held-out ones means overfitting.
-
-## Restarts and changes
-
-```
-python -m tuner restart-stage NAME K [--from release|best|CONFIG.json]
-python -m tuner add-params NAME tuner/spaces/search.json
-python -m tuner check NAME              # health checks only
-```
-
-`restart-stage` reruns the ramp from stage K (0-based), the swarm scattered around the chosen
-config; the release is kept. `add-params` adds parameters (new ones start at their defaults), e.g.
-the PUCT and rollout weights once the eval has settled.
+- **holdout**: beating the defaults on tuning seeds but not on held-out ones means overfitting.
 
 ## Parameter spaces (`tuner/spaces/`)
 
@@ -125,16 +112,17 @@ A space is a JSON list of `{"name", "default", "low", "high"}` with optional `"l
 in log space) and `"integer": true`; `name[i]` is one element of an array key.
 
 Tuning `eval_weight` together with the eval weights is partly redundant (the eval's overall scale
-and its weight in the rollout score trade off), so `search.json` is meant for later.
+and its weight in the rollout score trade off).
 
 ## A run's files (`tuner/runs/NAME/`)
 
 | file | |
 |---|---|
-| `run.json` | settings: nana_play, cpus, space, schedule |
-| `state.json` | checkpoint (optimiser, seeds, release, baselines), written atomically every iteration |
+| `run.json` | settings: nana_emulate, cpus, space, options |
+| `state.json` | checkpoint (optimiser, seeds, plan, release, baseline), written atomically every iteration |
+| `plan.json` | calibration: seconds per game at each sims count tried, and the plan |
 | `evals.jsonl` | every iteration: scores, the best and its values, warnings |
-| `gates.jsonl` | every gate and its evidence |
+| `gates.jsonl` | the gate and its evidence |
 | `release.json` | the released config (NANA_CONFIG file) |
 | `best.json` | the swarm's current best (not gated) |
 | `status.txt` | where the run is, rewritten every iteration |
@@ -143,7 +131,7 @@ and its weight in the rollout score trade off), so `search.json` is meant for la
 
 ## How the PSO copes with noise
 
-A config's score is a mean over 16 seeded games, so two evaluations of one config differ. Each
+A config's score is a mean over seeded games, so two evaluations of one config differ. Each
 iteration plays one fresh block of seeds and evaluates on it both every particle's position and its
 personal best: a position replaces its personal best only if it beats it on the same seeds, and a
 personal best's score is the running mean of all its evaluations. The global best is the personal
@@ -152,7 +140,9 @@ games of plain PSO and stops the swarm chasing lucky evaluations.
 
 ## Caveats
 
-- Gains at tiny budgets can be specialisation: the ramp and the gates at higher budgets are the guard.
+- The tuning budget is usually far below real play (about 100k sims). Eval weights should mostly
+  transfer; search constants (`search.json`) may not.
 - The fitness is APP, not wins. Stadium win rate is the final test of a release.
 - The `hmm` opponent models nana at 1 pps; regenerate it (scripts/train_markov_opponent.py) when nana
   changes a lot.
+- The ramp-based tuner this replaced (stages from 32 to 8192 sims) is in git history.

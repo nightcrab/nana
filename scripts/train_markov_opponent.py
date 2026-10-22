@@ -15,7 +15,7 @@ After a death the next piece draws z from the initial distribution.
 The factored logits keep slices for rare (action, jeopardy, since) inputs close to the pooled
 transition matrix; U, V and X are L2-regularised towards 0 for the same reason.
 
-Data: CSVs written by nana_play --opponent-log (columns game, piece, sent, opp_attack, opp_sent,
+Data: CSVs written by nana_emulate --opponent-log (columns game, piece, sent, opp_attack, opp_sent,
 opp_meter, opp_dead), or SQLite databases (.db) written by Universal-Shaktris-Stadium's stadium_cli.
 For stadium games each player is a sequence: its input is the other player's attack the turn before,
 its emission its own attack, and jeopardy its logged meter (the stadium's garbage rules differ from
@@ -745,7 +745,7 @@ def main():
     games = load_any(args.logs, tuple(int(p) for p in args.players.split(",")))
     print(f"{len(games.ids)} games, {games.steps()} pieces, {int(games.dead[games.mask].sum())} opponent deaths")
 
-    # the meter before each piece: logged by the stadium, replayed for nana_play logs. the replay must
+    # the meter before each piece: logged by the stadium, replayed for nana_emulate logs. the replay must
     # reproduce the opponent's meter, or the jeopardy buckets mean something else at run time
     meter, meter_after = replay_meter(games)
     logged = ~np.isnan(games.meter_before)
@@ -797,7 +797,7 @@ def main():
     source = ", ".join(os.path.basename(p) for p in args.logs)
     stadium = [p.endswith(".db") for p in args.logs]
     if any(stadium) and not all(stadium):
-        print("warning: mixing stadium games with nana_play logs; the model will use stadium rules", file=sys.stderr)
+        print("warning: mixing stadium games with nana_emulate logs; the model will use stadium rules", file=sys.stderr)
     write_header(args.out, model.initial, model.transition(), model.emission, attack_value, limits,
                  table, args.horizon, args.discount, source, any(stadium))
     print(f"wrote {args.out}")

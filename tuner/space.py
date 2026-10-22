@@ -86,7 +86,7 @@ class Space:
         return [p.to_unit(values.get(p.name, p.default)) for p in self.params]
 
     def config(self, values, base=None):
-        """A NANA_CONFIG dict: `base` (a full config, e.g. from nana_play --print-config) with these
+        """A NANA_CONFIG dict: `base` (a full config, e.g. from nana_emulate --print-config) with these
         values written over it. Array elements are written into a copy of the base array."""
         out = json.loads(json.dumps(base)) if base else {}
         for p in self.params:

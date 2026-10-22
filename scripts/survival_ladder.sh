@@ -5,10 +5,10 @@
 #   threads  workers per game (default 8, one chiplet on the 32-core EC2 box)
 #   games    games per (build, think time), on seeds 0..games-1 (default 100)
 #   ms_list  think times per move, comma separated (default 10,25,50,100)
-#   ramp     nana_play --ramp: pieces until incoming garbage doubles (default 0 = off)
-#   chunk    games per nana_play run (default 10)
+#   ramp     nana_emulate --ramp: pieces until incoming garbage doubles (default 0 = off)
+#   chunk    games per nana_emulate run (default 10)
 #
-# Builds nana_play twice (NANA_MPMCTS=0 and 1, headless, Release). Runs nproc / threads
+# Builds nana_emulate twice (NANA_MPMCTS=0 and 1, headless, Release). Runs nproc / threads
 # games at once, each pinned with taskset to its own block of cpus; that assumes no SMT
 # and that consecutive cpus share an L3 (true on AWS c7a). Both builds play the same
 # seeds, interleaved, so drift hits both equally and they can be compared seed by seed.
@@ -35,9 +35,9 @@ git submodule update --init --recursive
 for mode in 0 1; do
     cmake -S . -B "build-play-mp$mode" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF \
         -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=$mode" > /dev/null
-    cmake --build "build-play-mp$mode" --target nana_play -j "$(nproc)" > /dev/null
+    cmake --build "build-play-mp$mode" --target nana_emulate -j "$(nproc)" > /dev/null
 done
-declare -A bins=([tds]=build-play-mp0/cpp/nana_play [mp]=build-play-mp1/cpp/nana_play)
+declare -A bins=([tds]=build-play-mp0/cpp/nana_emulate [mp]=build-play-mp1/cpp/nana_emulate)
 
 out="results/$(hostname)-$(date +%Y%m%d-%H%M%S)-survival"
 mkdir -p "$out/parts"

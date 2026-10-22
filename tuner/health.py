@@ -1,7 +1,7 @@
 """Checks that a tuning run is actually measuring something.
 
 Hard checks (run before tuning, and after every resume) stop the run:
-  plumbing     nana loads exactly the config the tuner wrote (nana_play --print-config), so a key
+  plumbing     nana loads exactly the config the tuner wrote (nana_emulate --print-config), so a key
                nana doesn't read, or a file it can't find, is caught before a week is spent on it
   determinism  the same config on the same seeds plays the same games; without this the paired
                comparisons are noise

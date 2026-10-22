@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarise nana_play survival runs.
+"""Summarise nana_emulate survival runs.
 
     survival_summary.py RUN.jsonl [RUN.jsonl ...]
         mean survival per run, with a bootstrap 95% interval

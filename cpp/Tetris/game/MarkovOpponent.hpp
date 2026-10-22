@@ -53,7 +53,7 @@ struct Params {
     float discount;
     // fitted on stadium games: a piece that clears no lines tanks the whole meter when the other
     // player's attack of the same turn arrives, so jeopardy is what's left of the meter after that.
-    // otherwise (nana_play logs), tank 8 lines on a piece that sends nothing
+    // otherwise (nana_emulate logs), tank 8 lines on a piece that sends nothing
     bool stadium_rules;
 };
 

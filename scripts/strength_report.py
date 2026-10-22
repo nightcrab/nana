@@ -7,7 +7,7 @@ curve, and where each parallel config lands on it.
 Several DIRs (reruns on fresh seed ranges) are pooled per config; a seed played twice keeps
 the later run.
 
-Every game runs for a fixed horizon H (nana_play --max-pieces) or until the bot dies.
+Every game runs for a fixed horizon H (nana_emulate --max-pieces) or until the bot dies.
 Headline metric, APP@H: attack / H, so pieces lost to an early death count as sending
 nothing. Attack includes lines that cancelled incoming garbage, as in standard APP; true APP@H
 counts only garbage actually sent, which is what the search's reward uses. Also reported:

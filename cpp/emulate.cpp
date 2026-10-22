@@ -3,7 +3,7 @@
 // from the search itself (pieces, garbage holes and the opponent come from the game's seed),
 // so two configs played on the same seeds can be compared game by game.
 //
-// usage: nana_play [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
+// usage: nana_emulate [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
 //                  [--markov-env 0|1] [--opponent-log FILE]
 //                  [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]
 //

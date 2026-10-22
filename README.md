@@ -115,7 +115,7 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 |---|---|
 | `tbp_tetris` | Backend for [TBP](https://github.com/tetris-bot-protocol) (JSON over stdin/stdout). |
 | `cfr_tetris` | Standalone graphical version. On Linux it needs X11, OpenGL and libpng. |
-| `nana_play` | Plays self-play games against the simulated opponent and reports attack per piece. Used by the tuner and the strength scripts. |
+| `nana_emulate` | Plays emulated games (`EmulationGame`) against the HMM opponent model and reports attack per piece. Used by the tuner and the strength scripts. |
 | `nana_bench` | Fixed-position search benchmark with profiling counters (built with `NANA_BENCH`). |
 | `nana_speed` | Measures simulations per second. |
 | `nana_msgbench` | Microbenchmark for message passing. |
@@ -128,7 +128,7 @@ CMake options (pass with `-D`):
 
 Nana reads some environment variables:
 
-* `NANA_CONFIG=path/to/config.json` loads eval and search weights (e.g. a tuner `release.json`). `nana_play --print-config` shows the format.
+* `NANA_CONFIG=path/to/config.json` loads eval and search weights (e.g. a tuner `release.json`). `nana_emulate --print-config` shows the format.
 * `NANA_RULES=tetrio` plays with TETR.IO S1 rules.
 * `NANA_MARKOV_OPPONENT=1` makes the search model the opponent with the Markov model.
 * Search tuning knobs such as `NANA_LOAD_FAC` and `NANA_REWARD` are defined in `cpp/Tetris/bot/Search.cpp`.
@@ -137,22 +137,20 @@ Nana reads some environment variables:
 
 Nana comes with a PSO-based autotuner. It tunes search hyperparameters and evaluation weights simultaneously.
 
-The tuner needs a pre-compiled Release build of ``nana_play`` and Python with numpy. It runs from the repository root:
+The tuner needs a pre-compiled Release build of ``nana_emulate`` and Python with numpy. It runs from the repository root:
 
 ```
-# check the setup first: a few minutes end to end
-python -m tuner start smoke --nana out/build/<build>/cpp/nana_play.exe --cpus 0,2,4,6,8,10,12,14 --schedule tuner/schedules/smoke.json --particles 8
+# check the setup first: a minute or two end to end
+python -m tuner start smoke --nana out/build/<build>/cpp/nana_emulate.exe --cpus 0,2,4,6,8,10,12,14 --sims 64 --iterations 3 --particles 4 --games 4 --gate-games 16
 
-# tune using a gradual ramp-up.
-python -m tuner start eval1 --nana out/build/<build>/cpp/nana_play.exe --cpus 0,2,4,6,8,10,12,14
+# tune within a time budget: the tuner measures game times and picks the largest sims count that fits
+python -m tuner start eval1 --nana out/build/<build>/cpp/nana_emulate.exe --cpus 0,2,4,6,8,10,12,14 --budget-hours 8
 
-# fit the ramp to a time budget. the default is 168 hours.
-python -m tuner start eval1 --nana out/build/<build>/cpp/nana_play.exe --cpus 0,2,4,6,8,10,12,14 --total-hours 48
+# see what a budget buys without tuning (resume then tunes)
+python -m tuner start eval1 --nana ... --cpus ... --budget-hours 8 --plan-only
 
 python -m tuner status eval1            # where the run is, from another terminal
-python -m tuner resume eval1            # after Ctrl-C or a reboot (--total-hours / --time-scale to change the timeline)
-python -m tuner restart-stage eval1 2 --from release
-python -m tuner add-params eval1 tuner/spaces/search.json
+python -m tuner resume eval1            # after Ctrl-C or a reboot
 ```
 
 Give ``--cpus`` one logical cpu per physical core and keep the machine otherwise idle. The result is ``tuner/runs/<name>/release.json``, a config file Nana loads with ``NANA_CONFIG=path/to/release.json``. See ``tuner/README.md`` for how it works.
