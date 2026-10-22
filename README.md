@@ -101,7 +101,7 @@ To reproduce, run `scripts/strength_batches.sh` through `scripts/run_ec2_bench.s
 
 ## Usage
 
-Nana is built from C++ source with CMake (3.22+) and a C++23 compiler (Clang, GCC or MSVC). The build uses `-march=native`, so build on the machine that will r.n it. mimalloc is fetched automatically on configure, and the `ShakTrisLib` game library is a git submodule:
+Nana is built from C++ source with CMake (3.22+) and a C++23 compiler (Clang, GCC or MSVC). The build uses `-march=native`, so build on the machine that will run it. mimalloc is fetched automatically on configure, and the `ShakTrisLib` game library is a git submodule:
 
 ```
 git clone --recurse-submodules <repo url>     # or: git submodule update --init
@@ -118,7 +118,7 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 | `nana_play` | Plays self-play games against the simulated opponent and reports attack per piece. Used by the tuner and the strength scripts. |
 | `nana_bench` | Fixed-position search benchmark with profiling counters (built with `NANA_BENCH`). |
 | `nana_speed` | Measures simulations per second. |
-| `nana_msgbench` | Microbenchmark of  to run headlesst |
+| `nana_msgbench` | Microbenchmark for message passing. |
 
 CMake options (pass with `-D`):
 
@@ -126,13 +126,12 @@ CMake options (pass with `-D`):
 * `NANA_MIMALLOC=OFF` uses the system allocator instead of mimalloc.
 * `CMAKE_CXX_FLAGS="-DNANA_MPMCTS=0"` builds TDS-UCT instead of the default MP-MCTS.
 
+Nana reads some environment variables:
+
 * `NANA_CONFIG=path/to/config.json` loads eval and search weights (e.g. a tuner `release.json`). `nana_play --print-config` shows the format.
 * `NANA_RULES=tetrio` plays with TETR.IO S1 rules.
 * `NANA_MARKOV_OPPONENT=1` makes the search model the opponent with the Markov model.
-* Search tuning knobs such as `NANA_LOAD_FAC and `NANA_REWARD` are defined in `cpp/Tetris/bot/Search.cpp`.
-
-For multi-thread benchmarking on Linux, see `scripts/` (`speed_scaling.sh`, `strength_batches.sh`, `run_ec2_bench.sh`).
- and rollout weights. 
+* Search tuning knobs such as `NANA_LOAD_FAC` and `NANA_REWARD` are defined in `cpp/Tetris/bot/Search.cpp`.
 
 ## Tuning
 
