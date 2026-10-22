@@ -41,6 +41,7 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("c_base", c.c_base);
     visit("depth_step", c.depth_step);
     visit("prior_exponent", c.prior_exponent);
+    visit("decay", c.decay);
     visit("app_weight", c.app_weight);
     visit("eval_weight", c.eval_weight);
 }
@@ -69,6 +70,9 @@ void finish(NanaConfig& c) {
     }
     if (!(c.c_base > 0)) {
         fail("c_base must be positive");
+    }
+    if (!(c.decay > 0 && c.decay <= 1)) {
+        fail("decay must be in (0, 1]");
     }
     for (int r = 1; r <= NanaConfig::PRIOR_TABLE; r++) {
         c.prior_weight[r - 1] = (float)std::pow((double)r, -c.prior_exponent);

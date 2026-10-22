@@ -36,11 +36,42 @@ static float quick_sqrt(const float x)
 	return x * u.x * (1.5f - xhalf * u.x * u.x);// Newton step, repeating increases accuracy 
 }
 
-void EdgeStats::addN() {
-	N = N * 0.9999 + 1;
+static double decay() {
+	static const double d = config().decay;
+	return d;
 }
-void EdgeStats::addReward(float reward) {
-	R = R * 0.9999 + reward;
+
+void EdgeStats::addN() {
+	N = N * decay() + 1;
+}
+void forgetReturns(float& R, float& M, float sum, int count) {
+	// count returns at their mean, one step each: M decays as N does, and the i-th return gets
+	// step (1 + beta) / (M + beta), i^beta weights. with beta = 0 this is R = R * 0.9999 + r
+	constexpr float beta = (float)NANA_FORGET_BETA;
+	float Q = M > 0 ? R / M : 0.0f;
+	const float r = count > 0 ? sum / count : 0.0f;
+	const double d = decay();
+	for (int i = 0; i < count; i++) {
+		M = M * d + 1;
+		Q += (1 + beta) / (M + beta) * (r - Q);
+	}
+	R = Q * M;
+}
+
+void EdgeStats::addReward(float reward, [[maybe_unused]] int count) {
+#if NANA_FORGET
+	forgetReturns(R, M, reward, count);
+#else
+	R = R * decay() + reward;
+#endif
+}
+
+void EdgeStats::addCarried(float reward, [[maybe_unused]] int count) {
+#if NANA_FORGET
+	forgetReturns(R, M, reward, count);
+#else
+	R += reward;
+#endif
 }
 
 // Q, the average return
@@ -53,6 +84,9 @@ void UCTNode::updateTime(size_t i, int newtime) {
 		EdgeStats& edge = stats(i);
 		edge.N = edge.N / 5;
 		edge.R = edge.R / 5;
+#if NANA_FORGET
+		edge.M = edge.M / 5;
+#endif
 		time(i) = newtime;
 	}
 }
@@ -303,6 +337,9 @@ HistoryRow UCTNode::historyRow(uint32_t hash, size_t chosen_id, int depth) const
 	row.node_N = N;
 	row.depth = depth;
 	row.edges[0] = { chosen.R, chosen.N, chosen.prior };
+#if NANA_FORGET
+	row.chosen_M = chosen.M;
+#endif
 	row.count = 1;
 
 	// keep the strongest siblings; the rest are unlikely to overtake before we're back

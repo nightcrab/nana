@@ -11,3 +11,6 @@
 /results/
 /ec2-results/
 /notes/
+/tuner_bin/
+/tuner_*.log
+/tuner_*.err

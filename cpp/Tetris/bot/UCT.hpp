@@ -18,14 +18,34 @@
 
 class UCT;
 
+// polynomial forgetting: an edge's returns are weighted i^beta by arrival order (beta = 1: linear),
+// on top of the 0.9999 decay, so samples from the subtree's early, flatter policy count less.
+// the edge keeps R = Q * M, M its (decayed) count of returns, so R / N still reads as Q with
+// virtual visits counted as zero. NANA_FORGET_BETA=0 is the plain decayed mean, through the same code
+#ifndef NANA_FORGET
+#define NANA_FORGET 0
+#endif
+#ifndef NANA_FORGET_BETA
+#define NANA_FORGET_BETA 1
+#endif
+
+// add count returns summing to sum to R (= Q * M), M counting returns
+void forgetReturns(float& R, float& M, float sum, int count);
+
 // an edge's search statistics: everything selection reads. kept in their own array per node,
 // apart from the rest of the edge (ColdAction), so a select scans 12 bytes per edge
 struct EdgeStats {
     float R = 0;
     float N = 0;
     float prior = 1;
+#if NANA_FORGET
+    float M = 0;
+#endif
 
-    void addReward(float reward);
+    // count returns summing to reward, from a backprop
+    void addReward(float reward, int count);
+    // the same, carried up by a flush (no decay without NANA_FORGET, as before)
+    void addCarried(float reward, int count);
     void addN();
     float Q() const;
 };
@@ -81,6 +101,10 @@ struct HistoryRow {
     // edges[0] is the chosen edge, the rest are its strongest siblings
     uint32_t count = 0;
     HistoryEdge edges[1 + HISTORY_COMPETITORS];
+#if NANA_FORGET
+    // the chosen edge's M, so returns added to edges[0] are weighted as the edge will weight them
+    float chosen_M = 0;
+#endif
 
     // would the node still pick the chosen edge?
     bool stillChosen() const;
@@ -100,6 +124,8 @@ class UCTNode {
     // with transpositions that may be a different path than the one they came from
     float R_buffer = 0.0;
     int N_buffer = 0;
+    // how many returns R_buffer sums
+    int M_buffer = 0;
 
     // the parent and edge this node was last selected from (NANA_FLUSH_AT_END only), so parked
     // buffers can be walked up to the root once a search ends; with transpositions, the latest
@@ -226,6 +252,8 @@ class Job {
     // BACKPROP: visits on top of the one already counted on the way down,
     // drained from nodes where simulations restarted
     int extra_N = 0;
+    // BACKPROP / FLUSH: how many returns R sums
+    int M = 0;
 
     // stamped on every send, so receivers keep a picture of everyone's load (work units)
     uint16_t sender = UINT16_MAX;

@@ -44,7 +44,7 @@ State abstraction allows Nana to combine search statistics on gamestates that lo
 
 Nana's search parallelization is based on the optimized version of TDS-MCTS presented by Yang et al. 2020[[4]](#4), named MP-MCTS. By skipping redundant backpropagations, MP-MCTS significantly reduces root contention.
 
-To adapt the MP-MCTS optimization correctly to ISMCTS, Nana resamples the environment dynamics based on the action table, and hands off the job once the trajectory diverges. This ensures the search doesn't lose statistical power, while eliminating unnecessary communication on the shared prefix.
+To adapt the MP-MCTS optimization correctly to ISMCTS, Nana resamples the environment dynamics based on the action table, and hands off the job once the trajectory diverges. This ensures the search doesn't degrade statistically, while eliminating unnecessary communication on the shared prefix.
 
 ### Opponent Modelling
 

@@ -488,6 +488,7 @@ static void flushParked(bool apply) {
     for (UCTNode* node : parked) {
         const float N = (float)node->N_buffer;
         const float R = node->R_buffer;
+        const int M = node->M_buffer;
         UCTNode* child = node;
         for (size_t step = 0; step < MAX_PATH_DEPTH; step++) {
             const uint32_t parent_hash = child->parent_hash;
@@ -500,7 +501,7 @@ static void flushParked(bool apply) {
                 break;
             }
             if (apply) {
-                parent.stats(action).R += R;
+                parent.stats(action).addCarried(R, M);
                 parent.stats(action).N += N;
                 parent.N += (int)N;
             }
@@ -514,6 +515,7 @@ static void flushParked(bool apply) {
         if (apply) {
             node->N_buffer = 0;
             node->R_buffer = 0;
+            node->M_buffer = 0;
         }
     }
 
@@ -886,7 +888,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         uct.stats[threadIdx].flushes++;
         UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
         EdgeStats& edge = node.stats(job.path.back().actionID);
-        edge.R += job.R;
+        edge.addCarried(job.R, job.M);
         edge.N += job.extra_N;
         node.N += job.extra_N;
         if (job.path.size() == 1) {
@@ -897,14 +899,17 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             if (node.id != replay_root_hash) {
                 node.R_buffer += job.R;
                 node.N_buffer += job.extra_N + 1;
+                node.M_buffer += job.M;
             }
             return;
         }
         // this node is being left too: its own parked results belong to the edge above
         job.R += node.R_buffer;
         job.extra_N += node.N_buffer;
+        job.M += node.M_buffer;
         node.R_buffer = 0;
         node.N_buffer = 0;
+        node.M_buffer = 0;
         job.path.pop_back();
         send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
         return;
@@ -952,6 +957,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         uint32_t parentIdx = uct.getOwner(job.path.back().hash);
 
         job.R = reward;
+        job.M = 1;
         job.extra_N = 0;
         job.depth = job.state.pieces;
         job.type = BACKPROP;
@@ -986,6 +992,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             // reuse this job as the backprop job and send it back to our parent
             job.R = reward;
+            job.M = 1;
             job.extra_N = 0;
             job.depth = state.pieces;
             job.type = BACKPROP;
@@ -1067,6 +1074,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     row.node_N = node.N;
                     row.depth = depth;
                     row.edges[0] = { edge.R, edge.N, edge.prior };
+#if NANA_FORGET
+                    row.chosen_M = edge.M;
+#endif
                     job.history.push_back(row);
                 }
                 else {
@@ -1121,7 +1131,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         // Undo Virtual Loss by adding R
         if constexpr (search_style == NANA) {
 
-            edge.addReward(reward);
+            edge.addReward(reward, job.M);
 
         }
         if constexpr (search_style == CC) {
@@ -1149,6 +1159,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.state.start_from_root();
             job.R = 0.0;
             job.extra_N = 0;
+            job.M = 0;
             job.history.clear();
             job.moves.clear();
             job.snapshots.clear();
@@ -1185,7 +1196,11 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         bool still_chosen = true;
         for (HistoryRow& row : rows) {
+#if NANA_FORGET
+            forgetReturns(row.edges[0].R, row.chosen_M, reward, job.M);
+#else
             row.edges[0].R += reward;
+#endif
             row.edges[0].N += job.extra_N;
             row.node_N += job.extra_N;
             still_chosen = still_chosen && row.stillChosen();
@@ -1215,6 +1230,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             // the restarted simulation, which the ancestors haven't counted
             node.R_buffer += reward;
             node.N_buffer += job.extra_N + 1;
+            node.M_buffer += job.M;
 
             // the restarted simulation is also a visit through every ancestor in the history,
             // otherwise their Q never moves and we'd restart here forever
@@ -1250,6 +1266,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     // parking here and send this result, with what's parked, up to depth left - 1
                     node.R_buffer -= reward;
                     node.N_buffer -= job.extra_N + 1;
+                    node.M_buffer -= job.M;
                     uct.stats[threadIdx].restarts--;
                     uct.stats[threadIdx].restart_depth -= depth;
                     uct.stats[threadIdx].replay_diverged++;
@@ -1258,8 +1275,10 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     Msg flush = std::make_unique<Job>(FLUSH);
                     flush->R = reward + node.R_buffer;
                     flush->extra_N = job.extra_N + node.N_buffer;
+                    flush->M = job.M + node.M_buffer;
                     node.R_buffer = 0;
                     node.N_buffer = 0;
+                    node.M_buffer = 0;
                     flush->path.assign(job.path.begin() + (left - 1), job.path.end());
                     send(threadIdx, uct.getOwner(flush->path.back().hash), std::move(flush));
 
@@ -1273,6 +1292,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     job.history = rows;
                     job.R = 0.0;
                     job.extra_N = 0;
+                    job.M = 0;
                     job.type = SELECT;
                     send(threadIdx, uct.getOwner(job.state.hash()), std::move(msg));
                     return;
@@ -1281,6 +1301,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 job.history = rows;
                 job.R = 0.0;
                 job.extra_N = 0;
+                job.M = 0;
                 job.type = SELECT;
                 send(threadIdx, threadIdx, std::move(msg));
                 return;
@@ -1293,6 +1314,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.history = rows;
             job.R = 0.0;
             job.extra_N = 0;
+            job.M = 0;
             job.type = SELECT;
 
             // we own this node, so the select starts with us
@@ -1307,8 +1329,10 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         // carry up anything parked here
         job.R = reward + node.R_buffer;
         job.extra_N += node.N_buffer;
+        job.M += node.M_buffer;
         node.R_buffer = 0;
         node.N_buffer = 0;
+        node.M_buffer = 0;
 
         send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
     }
