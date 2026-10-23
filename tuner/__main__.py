@@ -80,6 +80,7 @@ def main():
     start.add_argument("--holdout-every", type=int, help="iterations between holdouts (default 5)")
     start.add_argument("--chunk", type=int, help="games per nana_emulate process (default 4)")
     start.add_argument("--seed", type=int, help="the optimiser's seed (default 1)")
+    start.add_argument("--rules", choices=["tetrio", "botris"], help="the ruleset games are played with (default tetrio)")
     start.add_argument("--plan-only", action="store_true", help="calibrate, print the plan and stop; resume tunes")
     start.add_argument("-v", "--verbose", action="store_true", help="print everything (log.txt always has it)")
     start.add_argument("--overwrite", action="store_true", help="replace a run of the same name without asking")
@@ -100,7 +101,7 @@ def main():
             cpus = [int(c) for c in args.cpus.split(",")]
             spaces = args.space or [os.path.join(HERE, "spaces", "eval.json")]
             options = {k: getattr(args, k) for k in ("budget_hours", "sims", "iterations", "particles", "games_per_eval",
-                                                     "spread", "gate_games", "holdout_every", "chunk", "seed")}
+                                                     "spread", "gate_games", "holdout_every", "chunk", "seed", "rules")}
             if not os.path.isfile(args.nana):
                 raise SystemExit(f"no nana_emulate at {args.nana}")
             clear_existing(directory, args.overwrite)

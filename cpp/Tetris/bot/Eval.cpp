@@ -272,7 +272,7 @@ double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
 
     score += get_row_transitions(board) * c.row_transitions;
 
-    // tspin is set for any piece's spin, so an I piece can spin four lines: the table stops at three
+    // Botris rewards any piece's spin, including four-line I-spins: the table stops at three
     if (tspin && lines < (int)std::size(c.tspins)) {
         score += c.tspins[lines];
     }
@@ -289,7 +289,8 @@ double Eval::eval_CC(Game game, Move move) {
     int lines = game.board.clearLines();
     spinType spin = move.piece.spin;
     bool tspin = false;
-    if (spin == spinType::normal) {
+    if (spin == spinType::normal &&
+        (move.piece.type == PieceType::T || !std::holds_alternative<TetrioS1>(game.mode))) {
         tspin = true;
     }
 

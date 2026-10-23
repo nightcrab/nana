@@ -1,4 +1,5 @@
 #include "Affinity.hpp"
+#include "Tetris/bot/Config.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -226,7 +227,8 @@ const Topology& topology() {
     static const Topology topology = [] {
         Topology t = readTopology();
         t.l3_group = readL3Groups(t.order);
-        const char* layout = std::getenv("NANA_PIN_LAYOUT");
+        const auto* c = tbpConfig();
+        const char* layout = c ? c->pin_layout.c_str() : std::getenv("NANA_PIN_LAYOUT");
         if (layout && std::strcmp(layout, "spread") == 0) {
             spreadAcrossL3(t);
         }

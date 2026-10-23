@@ -309,6 +309,7 @@ int main(int argc, const char** argv) {
 
         int moves = std::max(result.pieces, 1);
         std::cout << "{\"seed\":" << game_seed
+            << ",\"rules\":\"" << EmulationGame::rules() << "\""
             << ",\"threads\":" << options.threads
             << ",\"ms\":" << options.ms
             << ",\"ramp\":" << options.ramp
@@ -340,7 +341,7 @@ int main(int argc, const char** argv) {
 
     // with cut-off games, pieces / deaths is the maximum-likelihood mean survival
     // (exponential lifetimes); without any it is just the mean
-    std::cerr << "games " << options.games << ", died " << deaths
+    std::cerr << EmulationGame::rules() << " rules, games " << options.games << ", died " << deaths
         << ", mean pieces " << (double)total_pieces / options.games
         << ", pieces per death " << (deaths ? (double)total_pieces / deaths : 0.0)
         << ", sims/move " << (total_pieces ? total_simulations / total_pieces : 0)

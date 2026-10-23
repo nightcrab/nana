@@ -137,16 +137,35 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNANA_VARIANTS="znver5;x86-64-v3
 cmake --build build --target tbp_tetris -j
 ```
 
-Ship `tbp_tetris` together with every `tbp_tetris-<level>` from the same directory. The launcher knows `znver5`, `znver4`, `x86-64-v4`, `x86-64-v3`, `x86-64-v2` and `x86-64`. `tbp_tetris --list-variants` shows which levels the CPU runs and what it lacks for the rest, and `NANA_VARIANT=<level>` forces one.
+Ship `tbp_tetris` together with every `tbp_tetris-<level>` from the same directory. The launcher knows `znver5`, `znver4`, `x86-64-v4`, `x86-64-v3`, `x86-64-v2` and `x86-64`. `tbp_tetris --list-variants` shows which levels the CPU runs and what it lacks for the rest, and `"variant": "<level>"` in `nana.json` forces one.
 
 Nana also builds as 32-bit x86, provided SSE2 is enabled: MSVC's 8-byte atomics need it. On Windows, use clang-cl from an x86 developer prompt with `-m32` added to the default flags and `-DNANA_MARCH=pentium4`. At a fixed simulation count it plays the same games as the 64-bit build, in about twice the time per move.
 
-Nana reads some environment variables:
+`tbp_tetris` reads `nana.json` beside the executable, regardless of the working directory.
+Copy [nana.example.json](nana.example.json) there as `nana.json` and edit it:
 
-* `NANA_CONFIG=path/to/config.json` loads eval and search weights (e.g. a tuner `release.json`). `nana_emulate --print-config` shows the format.
-* `NANA_RULES=tetrio` plays with TETR.IO S1 rules.
-* `NANA_MARKOV_OPPONENT=1` makes the search model the opponent with the Markov model.
-* Search tuning knobs such as `NANA_LOAD_FAC` and `NANA_REWARD` are defined in `cpp/Tetris/bot/Search.cpp`.
+```json
+{
+  "rules": "tetrio",
+  "threads": 3,
+  "markov_opponent": true,
+  "reward": "kill",
+  "pin_layout": "compact"
+}
+```
+
+Omitted settings keep their defaults; a missing file uses all defaults. Unknown keys, invalid values,
+and unreadable files are errors. Restart the bot after editing. The same file accepts evaluation
+weights and search settings from `cpp/Tetris/bot/Config.hpp`. In launcher builds, `variant` selects
+an ISA variant (an empty string chooses automatically). TBP uses JSON instead of runtime environment
+settings.
+
+`nana_emulate` and benchmarks keep their existing overrides, including the tuner's configuration:
+
+* `NANA_CONFIG=path/to/config.json` loads evaluation and search weights. `nana_emulate --print-config` shows the format.
+* `NANA_RULES=botris` selects Botris instead of the default TETR.IO S1 rules.
+* `NANA_MARKOV_OPPONENT=1` models the opponent with the Markov model.
+* Other runtime overrides, such as `NANA_REWARD` and `NANA_PIN_LAYOUT`, continue to work for these tools.
 
 ## Tuning
 
@@ -168,7 +187,7 @@ python -m tuner status eval1            # where the run is, from another termina
 python -m tuner resume eval1            # after Ctrl-C or a reboot
 ```
 
-Give ``--cpus`` one logical cpu per physical core and keep the machine otherwise idle. The result is ``tuner/runs/<name>/release.json``, a config file Nana loads with ``NANA_CONFIG=path/to/release.json``. See ``tuner/README.md`` for how it works.
+Give ``--cpus`` one logical cpu per physical core and keep the machine otherwise idle. The result is ``tuner/runs/<name>/release.json``, a config file Nana loads with ``NANA_CONFIG=path/to/release.json``; for TBP, copy its weights into ``nana.json``. See ``tuner/README.md`` for how it works.
 
 ## References
 

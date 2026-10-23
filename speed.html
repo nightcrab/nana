@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nana thread scaling: simulations / second</title>
+<style>
+.viz-root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --border: rgba(11,11,11,0.10);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --border: rgba(255,255,255,0.10);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+}
+body { margin: 0; }
+.viz-root { background: var(--surface-1); color: var(--text-primary); min-height: 100vh;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px 32px; box-sizing: border-box; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+.sub { color: var(--text-secondary); margin: 0 0 16px; }
+.legend { display: flex; gap: 20px; align-items: center; color: var(--text-secondary); margin: 0 0 8px; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.dash { width: 16px; border-top: 2px dashed var(--muted); display: inline-block; }
+.chart { position: relative; max-width: 960px; }
+.chart h2 { font-size: 15px; font-weight: 600; margin: 16px 0 2px; }
+.chart p { color: var(--text-secondary); margin: 0 0 4px; font-size: 13px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { fill: var(--muted); font-size: 12px; }
+svg .label { fill: var(--text-primary); font-weight: 600; }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12); border-radius: 6px; padding: 8px 10px; font-size: 13px;
+  white-space: nowrap; display: none; color: var(--text-primary); }
+.tip .k { color: var(--text-secondary); }
+.tip i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+details { max-width: 960px; margin-top: 20px; color: var(--text-secondary); }
+table { border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 8px; color: var(--text-primary); }
+th, td { padding: 3px 12px; text-align: right; border-bottom: 1px solid var(--grid); }
+th { color: var(--text-secondary); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<h1>nana thread scaling: simulations / second</h1>
+<p class="sub" id="sub"></p>
+<div class="legend" id="legend"></div>
+<div class="chart" id="c-sims"><h2>Simulations / second</h2><p>Median of reps; whiskers span min–max. Dashed: linear scaling from the 1-thread median.</p></div>
+<div class="chart" id="c-eff"><h2>Parallel efficiency</h2><p>Speedup over the 1-thread median, divided by threads.</p></div>
+<details><summary>Table view</summary><div id="table"></div></details>
+</div>
+<script>
+const { series, chiplet, machine } = {"series":[{"test":"0","base":79965.6,"points":[{"n":1,"med":79965.6,"min":73677.2,"max":80014.1,"reps":5,"speedup":1,"eff":1},{"n":2,"med":146336,"min":142160,"max":155305,"reps":5,"speedup":1.8299868943645767,"eff":0.9149934471822884},{"n":3,"med":208257,"min":201453,"max":223408,"reps":5,"speedup":2.6043323629160535,"eff":0.8681107876386845},{"n":4,"med":264898,"min":252959,"max":285404,"reps":5,"speedup":3.3126494392588812,"eff":0.8281623598147203},{"n":5,"med":324994,"min":318017,"max":340058,"reps":5,"speedup":4.0641725942155125,"eff":0.8128345188431025},{"n":6,"med":391182,"min":387619,"max":402583,"reps":5,"speedup":4.891878507758336,"eff":0.8153130846263893},{"n":7,"med":439888,"min":421226,"max":448087,"reps":5,"speedup":5.500965415128505,"eff":0.785852202161215},{"n":8,"med":504387,"min":492566,"max":516068,"reps":5,"speedup":6.307549746390948,"eff":0.7884437182988685},{"n":9,"med":520159,"min":512631,"max":521720,"reps":5,"speedup":6.504784557359664,"eff":0.7227538397066293},{"n":10,"med":573948,"min":571060,"max":576027,"reps":5,"speedup":7.177436297607971,"eff":0.7177436297607971},{"n":11,"med":594644,"min":591473,"max":629473,"reps":5,"speedup":7.436247586462178,"eff":0.676022507860198},{"n":12,"med":646405,"min":637567,"max":690300,"reps":5,"speedup":8.083538421521254,"eff":0.6736282017934379},{"n":13,"med":727201,"min":691962,"max":741016,"reps":5,"speedup":9.09392288684134,"eff":0.6995325297570262},{"n":14,"med":767562,"min":709826,"max":792497,"reps":5,"speedup":9.598652420540832,"eff":0.6856180300386309},{"n":15,"med":797772,"min":772475,"max":814284,"reps":5,"speedup":9.97643986914373,"eff":0.6650959912762487},{"n":16,"med":859414,"min":826842,"max":873051,"reps":5,"speedup":10.747296337425093,"eff":0.6717060210890683},{"n":17,"med":910446,"min":860229,"max":916124,"reps":5,"speedup":11.385470752423542,"eff":0.6697335736719731},{"n":18,"med":924670,"min":891382,"max":956668,"reps":5,"speedup":11.563347239312904,"eff":0.642408179961828},{"n":19,"med":976956,"min":942011,"max":998344,"reps":5,"speedup":12.217203397460906,"eff":0.6430107051295214},{"n":20,"med":998723,"min":957039,"max":1024230,"reps":5,"speedup":12.489407945416529,"eff":0.6244703972708264},{"n":21,"med":1059380,"min":1026190,"max":1097460,"reps":5,"speedup":13.24794661704533,"eff":0.6308546008116823},{"n":22,"med":1100830,"min":1078290,"max":1117850,"reps":5,"speedup":13.766294506637854,"eff":0.6257406593926297},{"n":23,"med":1140780,"min":1111110,"max":1157340,"reps":5,"speedup":14.265884330262011,"eff":0.6202558404461744},{"n":24,"med":1171400,"min":1146010,"max":1204910,"reps":5,"speedup":14.648798983562932,"eff":0.6103666243151221},{"n":25,"med":1215540,"min":1160900,"max":1247460,"reps":5,"speedup":15.200786338125393,"eff":0.6080314535250158},{"n":26,"med":1222300,"min":1214810,"max":1307650,"reps":5,"speedup":15.285322688756164,"eff":0.5878970264906217},{"n":27,"med":1320390,"min":1285980,"max":1333610,"reps":5,"speedup":16.511975149314203,"eff":0.6115546351597853},{"n":28,"med":1357010,"min":1306260,"max":1397040,"reps":5,"speedup":16.96992206648859,"eff":0.6060686452317353},{"n":29,"med":1368960,"min":1301230,"max":1420240,"reps":5,"speedup":17.11936132536991,"eff":0.5903228043231002},{"n":30,"med":1440520,"min":1389100,"max":1464750,"reps":5,"speedup":18.014246125834106,"eff":0.6004748708611368},{"n":31,"med":1488710,"min":1411990,"max":1522700,"reps":5,"speedup":18.61688025851116,"eff":0.6005445244681019},{"n":32,"med":1536700,"min":1472590,"max":1553920,"reps":5,"speedup":19.21701331572576,"eff":0.60053166611643}]},{"test":"1","base":81141.1,"points":[{"n":1,"med":81141.1,"min":78061.2,"max":84967.6,"reps":5,"speedup":1,"eff":1},{"n":2,"med":153298,"min":147356,"max":155693,"reps":5,"speedup":1.8892768276496128,"eff":0.9446384138248064},{"n":3,"med":216712,"min":209422,"max":224986,"reps":5,"speedup":2.6708043149525946,"eff":0.8902681049841982},{"n":4,"med":278984,"min":278461,"max":288181,"reps":5,"speedup":3.4382575538167464,"eff":0.8595643884541866},{"n":5,"med":346223,"min":336452,"max":349622,"reps":5,"speedup":4.266925146442431,"eff":0.8533850292884863},{"n":6,"med":399314,"min":357083,"max":409169,"reps":5,"speedup":4.921229808321553,"eff":0.8202049680535922},{"n":7,"med":457500,"min":452277,"max":469217,"reps":5,"speedup":5.63832632291157,"eff":0.8054751889873671},{"n":8,"med":499950,"min":463271,"max":515502,"reps":5,"speedup":6.161489060414512,"eff":0.770186132551814},{"n":9,"med":531253,"min":522095,"max":536225,"reps":5,"speedup":6.547273823007083,"eff":0.7274748692230092},{"n":10,"med":559670,"min":553284,"max":578647,"reps":5,"speedup":6.897490913975777,"eff":0.6897490913975777},{"n":11,"med":611742,"min":595959,"max":634032,"reps":5,"speedup":7.539237205312721,"eff":0.6853852004829746},{"n":12,"med":650910,"min":629398,"max":693925,"reps":5,"speedup":8.021951883817202,"eff":0.6684959903181001},{"n":13,"med":723010,"min":695374,"max":737500,"reps":5,"speedup":8.910527463886982,"eff":0.6854251895297678},{"n":14,"med":742519,"min":712729,"max":787782,"reps":5,"speedup":9.15096048734858,"eff":0.653640034810613},{"n":15,"med":802028,"min":759959,"max":860407,"reps":5,"speedup":9.88436193248551,"eff":0.6589574621657006},{"n":16,"med":848456,"min":823266,"max":870278,"reps":5,"speedup":10.456550379524064,"eff":0.653534398720254},{"n":17,"med":909683,"min":840802,"max":939228,"reps":5,"speedup":11.211124818371946,"eff":0.6594779304924674},{"n":18,"med":907088,"min":886647,"max":976829,"reps":5,"speedup":11.17914349201576,"eff":0.6210635273342089},{"n":19,"med":957170,"min":933153,"max":1006780,"reps":5,"speedup":11.796364604374354,"eff":0.6208612949670712},{"n":20,"med":1011250,"min":995885,"max":1074480,"reps":5,"speedup":12.462857910479398,"eff":0.62314289552397},{"n":21,"med":1083950,"min":1033590,"max":1128560,"reps":5,"speedup":13.358828016874309,"eff":0.6361346674702052},{"n":22,"med":1137480,"min":1079360,"max":1174640,"reps":5,"speedup":14.018543007181316,"eff":0.6372065003264235},{"n":23,"med":1160660,"min":1090110,"max":1184870,"reps":5,"speedup":14.304218207542169,"eff":0.621922530762703},{"n":24,"med":1157980,"min":1132500,"max":1184510,"reps":5,"speedup":14.271189323289923,"eff":0.5946328884704134},{"n":25,"med":1195510,"min":1179830,"max":1341020,"reps":5,"speedup":14.7337169449268,"eff":0.589348677797072},{"n":26,"med":1277520,"min":1205520,"max":1322590,"reps":5,"speedup":15.744425451466642,"eff":0.6055548250564093},{"n":27,"med":1324460,"min":1218490,"max":1347780,"reps":5,"speedup":16.32292389430264,"eff":0.6045527368260237},{"n":28,"med":1366460,"min":1360440,"max":1410360,"reps":5,"speedup":16.840540737061733,"eff":0.6014478834664905},{"n":29,"med":1371970,"min":1348800,"max":1531430,"reps":5,"speedup":16.908447137147512,"eff":0.5830499012809487},{"n":30,"med":1467970,"min":1433400,"max":1506140,"reps":5,"speedup":18.091571349168298,"eff":0.60305237830561},{"n":31,"med":1467050,"min":1391790,"max":1558020,"reps":5,"speedup":18.080233075469767,"eff":0.5832333250151538},{"n":32,"med":1542050,"min":1418530,"max":1600340,"reps":5,"speedup":19.00454886611101,"eff":0.593892152065969}]}],"chiplet":8,"machine":"AMD EPYC 9R45 · 5 reps × 3000 ms per run · commit fabd181 optimize action layout (+5%)"};
+const colors = ["var(--series-1)", "var(--series-2)"];
+const names = series.map(s => "test " + s.test);
+document.getElementById("sub").textContent = machine;
+const only = { "#sims": "c-sims", "#eff": "c-eff" }[location.hash];
+if (only) {
+  for (const id of ["c-sims", "c-eff"]) if (id !== only) document.getElementById(id).remove();
+  document.querySelector("details").remove();
+}
+document.getElementById("legend").innerHTML =
+  series.map((s, i) => '<span><i class="swatch" style="background:' + colors[i] + '"></i>' + names[i] + '</span>').join("") +
+  (document.getElementById("c-sims") ? '<span><i class="dash"></i>linear from 1 thread</span>' : "");
+
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, parent) => {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+const maxN = Math.max(...series.flatMap(s => s.points.map(p => p.n)));
+const fmtK = v => v === 0 ? "0" : v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : Math.round(v / 1e3) + "k";
+
+function chart(host, { height, yMin, yMax, yTicks, yFmt, value, range, ideal, endLabel }) {
+  if (!host) return;  // hidden by #sims / #eff
+  const W = 960, H = height, m = { l: 64, r: 96, t: 12, b: 36 };
+  const svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img" }, host);
+  const x = n => m.l + (n - 0.5) / maxN * (W - m.l - m.r);
+  const y = v => m.t + (1 - (v - yMin) / (yMax - yMin)) * (H - m.t - m.b);
+  for (const t of yTicks) {
+    el("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    el("text", { x: m.l - 8, y: y(t) + 4, "text-anchor": "end" }, svg).textContent = yFmt(t);
+  }
+  for (const n of [1, ...Array.from({ length: Math.floor(maxN / 4) }, (_, i) => 4 * (i + 1))]) {
+    el("text", { x: x(n), y: H - m.b + 18, "text-anchor": "middle" }, svg).textContent = n;
+  }
+  el("text", { x: (m.l + W - m.r) / 2, y: H - 2, "text-anchor": "middle" }, svg).textContent = "threads";
+  if (chiplet > 0) {
+    for (let b = chiplet; b < maxN; b += chiplet) {
+      el("line", { x1: x(b + 0.5), x2: x(b + 0.5), y1: m.t, y2: H - m.b, stroke: "var(--muted)",
+        "stroke-width": 1, "stroke-dasharray": "1 3" }, svg);
+      el("text", { x: x(b + 0.5) + 4, y: m.t + 10 }, svg).textContent = "L3 group " + (b / chiplet + 1);
+    }
+  }
+  if (ideal) {
+    series.forEach(s => {
+      el("line", { x1: x(1), y1: y(ideal(s, 1)), x2: x(maxN), y2: y(ideal(s, maxN)), stroke: "var(--muted)",
+        "stroke-width": 1.5, "stroke-dasharray": "5 4" }, svg);
+    });
+  }
+  const off = [-0.14, 0.14];
+  series.forEach((s, i) => {
+    if (range) {
+      for (const p of s.points) {
+        const [lo, hi] = range(p);
+        el("line", { x1: x(p.n) + off[i], x2: x(p.n) + off[i], y1: y(lo), y2: y(hi), stroke: colors[i],
+          "stroke-width": 1.5, "stroke-opacity": 0.45, "stroke-linecap": "round" }, svg);
+      }
+    }
+    el("path", { d: s.points.map((p, k) => (k ? "L" : "M") + x(p.n) + " " + y(value(p))).join(""), fill: "none",
+      stroke: colors[i], "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+  });
+  // direct labels at the right end, nudged apart if they'd collide
+  const ends = series.map((s, i) => ({ i, p: s.points[s.points.length - 1] }))
+    .map(e => ({ ...e, ly: y(value(e.p)) })).sort((a, b) => a.ly - b.ly);
+  for (let k = 1; k < ends.length; k++) ends[k].ly = Math.max(ends[k].ly, ends[k - 1].ly + 15);
+  for (const e of ends) {
+    const t = el("text", { x: x(e.p.n) + 10, y: e.ly + 4, class: "label" }, svg);
+    t.textContent = endLabel(e.p);
+    el("tspan", { fill: "var(--text-secondary)", "font-weight": 400 }, t).textContent = " " + names[e.i];
+  }
+  // hover: crosshair snapped to the nearest thread count, all series in one tooltip
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--muted)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const dots = series.map((s, i) => el("circle", { r: 4.5, fill: colors[i], stroke: "var(--surface-1)",
+    "stroke-width": 2, visibility: "hidden" }, svg));
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  host.appendChild(tip);
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const sx = (ev.clientX - r.left) * W / r.width;
+    const n = Math.min(maxN, Math.max(1, Math.round((sx - m.l) / (W - m.l - m.r) * maxN + 0.5)));
+    cross.setAttribute("x1", x(n)); cross.setAttribute("x2", x(n)); cross.setAttribute("visibility", "visible");
+    let rows = "<div><b>" + n + " thread" + (n > 1 ? "s" : "") + "</b></div>";
+    series.forEach((s, i) => {
+      const p = s.points.find(q => q.n === n);
+      if (!p) { dots[i].setAttribute("visibility", "hidden"); return; }
+      dots[i].setAttribute("cx", x(n)); dots[i].setAttribute("cy", y(value(p))); dots[i].setAttribute("visibility", "visible");
+      rows += '<div><i style="background:' + colors[i] + '"></i>' + names[i] + ': <b>' + fmtK(p.med) + '</b> sims/s' +
+        ' <span class="k">(' + fmtK(p.min) + '–' + fmtK(p.max) + ')</span> · ' + p.speedup.toFixed(2) + '× · ' +
+        Math.round(100 * p.eff) + '%</div>';
+    });
+    tip.innerHTML = rows;
+    tip.style.display = "block";
+    const px = x(n) * r.width / W;
+    tip.style.left = (px > r.width * 0.6 ? px - tip.offsetWidth - 12 : px + 12) + "px";
+    tip.style.top = (svg.offsetTop + 16) + "px";
+  });
+  hit.addEventListener("pointerleave", () => {
+    tip.style.display = "none"; cross.setAttribute("visibility", "hidden");
+    dots.forEach(d => d.setAttribute("visibility", "hidden"));
+  });
+}
+
+const peak = Math.max(...series.flatMap(s => s.points.map(p => Math.max(p.max, s.base * p.n))));
+const step = peak > 2e6 ? 500e3 : peak > 1e6 ? 250e3 : 100e3;
+const yMax = Math.ceil(peak / step) * step;
+chart(document.getElementById("c-sims"), {
+  height: 420, yMin: 0, yMax, yTicks: Array.from({ length: yMax / step + 1 }, (_, i) => i * step), yFmt: fmtK,
+  value: p => p.med, range: p => [p.min, p.max], ideal: (s, n) => s.base * n,
+  endLabel: p => fmtK(p.med) + " (" + p.speedup.toFixed(1) + "×)",
+});
+const effMin = Math.min(50, Math.floor(Math.min(...series.flatMap(s => s.points.map(p => 100 * p.eff))) / 10) * 10);
+chart(document.getElementById("c-eff"), {
+  height: 260, yMin: effMin / 100, yMax: 1, yTicks: Array.from({ length: (100 - effMin) / 10 + 1 }, (_, i) => (effMin + 10 * i) / 100),
+  yFmt: v => Math.round(100 * v) + "%", value: p => p.eff, endLabel: p => Math.round(100 * p.eff) + "%",
+});
+
+let t = "<table><tr><th>threads</th>" + series.map(s => "<th>test " + s.test + " sims/s</th><th>min–max</th><th>speedup</th><th>eff</th>").join("") + "</tr>";
+for (const p0 of series[0].points) {
+  t += "<tr><td>" + p0.n + "</td>";
+  for (const s of series) {
+    const p = s.points.find(q => q.n === p0.n);
+    t += p ? "<td>" + fmtK(p.med) + "</td><td>" + fmtK(p.min) + "–" + fmtK(p.max) + "</td><td>" + p.speedup.toFixed(2) + "×</td><td>" + Math.round(100 * p.eff) + "%</td>" : "<td></td><td></td><td></td><td></td>";
+  }
+  t += "</tr>";
+}
+document.getElementById("table").innerHTML = t + "</table>";
+</script>
+</body>
+</html>

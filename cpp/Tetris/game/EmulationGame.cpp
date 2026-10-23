@@ -1,4 +1,5 @@
 #include "EmulationGame.hpp"
+#include "Config.hpp"
 #include "engine/Utility.hpp"
 
 #include "Util/fasthash.h"
@@ -7,12 +8,24 @@
 #include <cstring>
 #include <iostream>
 
-EmulationGame::EmulationGame() {
-    static const bool tetrio = [] {
+const char* EmulationGame::rules() {
+    if (const auto* c = tbpConfig()) return c->rules.c_str();
+    static const char* const name = [] {
         const char* rules = std::getenv("NANA_RULES");
-        return rules && std::strcmp(rules, "tetrio") == 0;
+        if (!rules || !*rules || std::strcmp(rules, "tetrio") == 0) {
+            return "tetrio";
+        }
+        if (std::strcmp(rules, "botris") == 0) {
+            return "botris";
+        }
+        std::cerr << "NANA_RULES=" << rules << " isn't a ruleset (tetrio or botris)" << std::endl;
+        std::exit(1);
     }();
-    if (tetrio) {
+    return name;
+}
+
+EmulationGame::EmulationGame(bool apply_rules) {
+    if (apply_rules && std::strcmp(rules(), "tetrio") == 0) {
         set_tetrio_rules();
     }
 }
@@ -100,7 +113,11 @@ void EmulationGame::play_moves(){
 
     // but we need to keep track of combo and b2b because cancelling
 
+    // TETR.IO rewards only T-spins; move generation also flags other pieces' spins.
     spinType spin = move.piece.spin;
+    if (std::holds_alternative<TetrioS1>(game.mode) && move.piece.type != PieceType::T) {
+        spin = spinType::null;
+    }
     if (!move.null_move) {
         game.place_piece(move.piece);
         pieces += 1;

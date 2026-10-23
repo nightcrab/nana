@@ -7,7 +7,7 @@
 #
 # env:
 #   STADIUMS   stadiums to run at once (default: cpus / (2 * threads per bot))
-#   MARKOV     NANA_MARKOV_OPPONENT for the bots: 1 = search with the HMM opponent (default 1)
+#   MARKOV     markov_opponent in the TBP JSON for the bots: 1 = search with the HMM opponent (default 1)
 #
 # Run it on EC2 with scripts/run_ec2_bench.sh:
 #   WORKTREE=1 SCRIPT=stadium_collect.sh MAX_MINUTES=150 scripts/run_ec2_bench.sh <host> <key> master 120 1 1
@@ -29,6 +29,15 @@ git submodule update --init --recursive
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF > /dev/null
 cmake --build build --target tbp_tetris -j "$cpus" > /dev/null
 bot="$root/build/cpp/tbp_tetris"
+# All stadium bots use the same settings; TBP reads these beside its executable.
+python3 - "$root/build/cpp/nana.json" "$threads" "$markov" <<'EOF'
+import json, os, sys
+path = sys.argv[1]
+settings = json.load(open(path)) if os.path.exists(path) else {}
+settings.update(threads=int(sys.argv[2]), markov_opponent=bool(int(sys.argv[3])), rules="tetrio")
+with open(path, "w") as file:
+    json.dump(settings, file)
+EOF
 
 echo "building stadium_cli"
 rm -rf stadium
@@ -67,8 +76,8 @@ minutes $minutes
 pps $pps
 threads per bot $threads
 stadiums $stadiums
-NANA_MARKOV_OPPONENT $markov
-NANA_RULES tetrio (the stadium plays TETR.IO damage whatever -game_type says)
+markov_opponent $markov
+rules tetrio (the stadium plays TETR.IO damage whatever -game_type says)
 nana commit $(git rev-parse HEAD) (plus uploaded worktree changes)
 EOF
 cat "$out/config.txt"
@@ -86,7 +95,6 @@ run_stadium() {
         local lo=$(( first + (side - 1) * threads ))
         cat > "$dir/bot$side.sh" <<EOF
 #!/bin/sh
-export NANA_THREADS=$threads NANA_MARKOV_OPPONENT=$markov NANA_RULES=tetrio
 exec taskset -c $lo-$(( lo + threads - 1 )) "$bot"
 EOF
         chmod +x "$dir/bot$side.sh"

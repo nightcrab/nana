@@ -26,6 +26,8 @@ class Stage:
         # hmm: the game plays the opponent HMM (MarkovOpponent, fitted on nana's stadium games) and
         # the search models it; handcrafted: the old Opponent for both
         self.env = spec.get("env", "hmm")
+        # the ruleset (NANA_RULES): tetrio or botris
+        self.rules = spec.get("rules", "tetrio")
         self.spec = dict(spec)
 
     def args(self):
@@ -33,7 +35,7 @@ class Stage:
                 "--max-pieces", str(self.horizon), "--markov-env", "1" if self.env == "hmm" else "0"]
 
     def environment(self):
-        return {"NANA_RULES": "tetrio", "NANA_REWARD": "app",
+        return {"NANA_RULES": self.rules, "NANA_REWARD": "app",
                 "NANA_MARKOV_OPPONENT": "1" if self.env == "hmm" else "0"}
 
 
@@ -105,6 +107,12 @@ class Runner:
                 returncode, stdout, stderr = self._spawn(cmd, self._env(config_path, stage))
                 results = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
                 if returncode == 0 and len(results) == games:
+                    # a nana_emulate that doesn't report its rules (or plays others) would score the
+                    # wrong game without failing
+                    played = {g.get("rules") for g in results}
+                    if played != {stage.rules}:
+                        raise RunnerError(f"asked for {stage.rules} rules, nana_emulate played {sorted(map(str, played))}: "
+                                          f"{' '.join(cmd)}")
                     with self.lock:
                         self.games_played += games
                         self.chunk_times.append((time.monotonic() - started, games))

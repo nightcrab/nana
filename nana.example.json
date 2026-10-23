@@ -1,0 +1,7 @@
+{
+  "rules": "tetrio",
+  "threads": 3,
+  "markov_opponent": true,
+  "reward": "kill",
+  "pin_layout": "compact"
+}

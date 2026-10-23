@@ -56,8 +56,9 @@ improves (it survives longer), so iterations late in a run can take longer than 
 
 `nana_emulate --threads 1 --sims N --search-seed 1` plays a game that replays exactly for a given
 seed and config, so every config in an iteration plays the same seeds (common random numbers) and
-luck in the pieces mostly cancels in comparisons. Games use TETR.IO rules (`NANA_RULES=tetrio`),
-the APP-only reward (`NANA_REWARD=app`), and the opponent HMM fitted on nana's stadium games as the
+luck in the pieces mostly cancels in comparisons. Games use TETR.IO rules (`--rules botris` plays
+Botris; the ruleset is kept in `run.json`, `plan.json`, every `evals.jsonl` and `gates.jsonl` record
+and `status.txt`, and the tuner stops if a game reports other rules than it asked for), the APP-only reward (`NANA_REWARD=app`), and the opponent HMM fitted on nana's stadium games as the
 opponent, with the search modelling the same HMM.
 
 Fitness is attack per piece over a fixed horizon (100 pieces): pieces lost by dying early score no
@@ -81,6 +82,7 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 | `--spread` | 0.3 | the starting swarm's spread around the defaults (unit-cube units per parameter) |
 | `--gate-games` | 400 | the gate's limit on paired games |
 | `--holdout-every` | 5 | iterations between holdouts |
+| `--rules` | `tetrio` | the ruleset games are played with: `tetrio` or `botris` |
 | `--space` | `spaces/eval.json` | parameter space files (repeat to combine) |
 | `-v`, `--verbose` | off | print everything; otherwise the console shows the plan, an ETA per iteration, each kind of warning once, and the result (`log.txt` always has everything) |
 | `--overwrite` | off | replace a run of the same name without asking (`start` asks when it can) |

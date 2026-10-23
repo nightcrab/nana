@@ -56,6 +56,8 @@ DEFAULTS = {
     "spread": 0.3,
     "horizon": 100,
     "env": "hmm",
+    # the ruleset games are played with (NANA_RULES)
+    "rules": "tetrio",
     "pso": {"inertia_start": 0.9, "inertia_end": 0.4, "cognitive": 1.5, "social": 1.5, "vmax": 0.2},
     "gate": {"delta": 0.02, "alpha": 0.05, "beta": 0.05, "max_games": 400},
     "holdout": {"games": 32, "every": 5},
@@ -167,7 +169,11 @@ class Run:
 
     def make_stage(self, sims):
         return Stage({"name": f"s{sims}", "sims": sims, "garbage_scale": garbage_for(sims),
-                      "horizon": self.settings["horizon"], "env": self.settings["env"]})
+                      "horizon": self.settings["horizon"], "env": self.settings["env"], "rules": self.rules()})
+
+    def rules(self):
+        # runs from before the setting played tetrio
+        return self.settings.get("rules", "tetrio")
 
     def stage(self):
         return self.make_stage(self.state["plan"]["sims"])
@@ -211,7 +217,7 @@ class Run:
         run.pso.scatter(space.default_unit(), settings["spread"])
         run.write_release()
         run.save()
-        run.log(f"created run {directory}: {len(space)} parameters, {settings['particles']} particles, "
+        run.log(f"created run {directory}: {settings['rules']} rules, {len(space)} parameters, {settings['particles']} particles, "
                 f"{settings['iterations']} iterations, cpus {cpus}")
         return run
 
@@ -224,7 +230,7 @@ class Run:
     def health_checks(self):
         self.activity("health checks")
         started = time.monotonic()
-        stage = Stage(dict(CHECK_STAGE, horizon=self.settings["horizon"], env=self.settings["env"]))
+        stage = Stage(dict(CHECK_STAGE, horizon=self.settings["horizon"], env=self.settings["env"], rules=self.rules()))
         base = self.state["base_config"]
         center = self.config(self.pso.best()[1] if self.pso.best() else self.pso.x[0])
         random_point = self.config(np.random.default_rng(1).random(len(self.space)))
@@ -309,17 +315,17 @@ class Run:
         p = self.projection(measured[chosen])
         if forced and budget and p["total"] > budget - self.state["hours"]:
             self.log(f"WARNING {forced} sims needs about {p['total']:.2f} h, more than the {budget} h budget leaves", show=True)
-        self.state["plan"] = {"sims": chosen, "garbage_scale": garbage_for(chosen),
+        self.state["plan"] = {"rules": self.rules(), "sims": chosen, "garbage_scale": garbage_for(chosen),
                               "core_seconds_per_game": measured[chosen], "projected_hours": p,
                               "calibration_hours": self.state["hours"]}
         _write_json(self.path("plan.json"), {"measured": {str(k): v for k, v in measured.items()},
                                              "plan": self.state["plan"], "budget_hours": budget})
-        self.log(f"plan: {chosen} sims, garbage x{garbage_for(chosen)}, {s['iterations']} iterations of "
+        self.log(f"plan: {self.rules()} rules, {chosen} sims, garbage x{garbage_for(chosen)}, {s['iterations']} iterations of "
                  f"~{p['iteration'] * 60:.1f} min, about {p['total']:.2f} h in all (tuning {p['tune']:.2f}, "
                  f"holdouts {p['checks']:.2f}, gate at most {p['gate']:.2f})"
                  + (f"; the budget is {budget} h" if budget else ""))
         if not self.verbose:
-            self.log(f"plan: {chosen} sims, {s['iterations']} iterations, about {p['total']:.1f} h"
+            self.log(f"plan: {self.rules()} rules, {chosen} sims, {s['iterations']} iterations, about {p['total']:.1f} h"
                      + (f" of the {budget:g} h budget" if budget else "") + f"; {self.eta(p['total'])}", show=True)
         self.state["phase"] = "tune"
         self.save()
@@ -376,7 +382,7 @@ class Run:
         self.state["iterations"] += 1
         self.state["iteration_seconds"].append(seconds)
 
-        record = {"iteration": self.state["iterations"], "sims": stage.sims, "seed0": seed0, "games": n,
+        record = {"iteration": self.state["iterations"], "rules": stage.rules, "sims": stage.sims, "seed0": seed0, "games": n,
                   "inertia": self.pso.inertia,
                   "scores": {f"{k}{i}": round(m, 5) for (k, i), m in means.items()},
                   "best": {"index": best[0], "mean": best[2], "evaluations": best[3],
@@ -408,7 +414,7 @@ class Run:
         if candidate == release:
             self.log("result: the best is the release; nothing to test", show=True)
             return
-        self.log(f"gate at {stage.sims} sims, garbage x{stage.garbage_scale}")
+        self.log(f"gate at {stage.sims} sims, garbage x{stage.garbage_scale}, {stage.rules} rules")
         self.activity("release gate")
         started = time.monotonic()
         result = run_gate(self.runner, stage, candidate, release, self.state["gate_seed_next"],
@@ -416,7 +422,7 @@ class Run:
                           max_games=settings["max_games"], log=self.log)
         self.state["gate_seed_next"] = result["seed_end"]
         self.account(started)
-        result.update({"iteration": self.state["iterations"], "hours": self.state["hours"], "values": candidate_values})
+        result.update({"iteration": self.state["iterations"], "rules": stage.rules, "hours": self.state["hours"], "values": candidate_values})
         self.append("gates.jsonl", result)
         if result["verdict"] == "accept":
             self.state["release"] = {"values": candidate_values, "source": f"gate after iteration {self.state['iterations']}",
@@ -444,7 +450,7 @@ class Run:
     def status(self, best):
         s, plan = self.settings, self.state["plan"]
         done, total = self.state["iterations"], s["iterations"]
-        lines = [f"run {self.dir}  ({self.state['hours']:.2f} h, {self.runner.games_played} games this session, "
+        lines = [f"run {self.dir}  ({self.rules()} rules, {self.state['hours']:.2f} h, {self.runner.games_played} games this session, "
                  f"{self.runner.failures} game failures)"]
         if plan:
             lines.append(f"{self.state['phase']}: {plan['sims']} sims, garbage x{plan['garbage_scale']}, iteration "

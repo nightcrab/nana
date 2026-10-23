@@ -136,7 +136,7 @@ if(NANA_VARIANTS)
     endforeach()
 
     # built for the compiler's default level, so it runs anywhere
-    add_executable(tbp_tetris "launcher.cpp" ${NANA_ICON})
+    add_executable(tbp_tetris "launcher.cpp" "Tetris/bot/Config.cpp" ${NANA_ICON})
     list(JOIN NANA_VARIANTS "," variants)
     target_compile_definitions(tbp_tetris PRIVATE "NANA_VARIANTS=\"${variants}\"")
     list(TRANSFORM NANA_VARIANTS PREPEND "tbp_tetris-" OUTPUT_VARIABLE variant_targets)

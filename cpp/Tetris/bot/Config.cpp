@@ -1,6 +1,9 @@
 #include "Config.hpp"
 
 #include "Util/json.hpp"
+#include "Util/ExecutablePath.hpp"
+#include <limits>
+#include <type_traits>
 
 #include <cmath>
 #include <cstdlib>
@@ -10,14 +13,38 @@
 
 namespace {
 
+bool& tbpSettingsEnabled() {
+    static bool enabled = false;
+    return enabled;
+}
+
 [[noreturn]] void fail(const std::string& message) {
-    std::cerr << "NANA_CONFIG: " << message << std::endl;
+    std::cerr << "nana config: " << message << std::endl;
     std::exit(2);
 }
 
 // every key, read and written the same way so the two can't drift apart
 template <class Visit>
 void visitFields(NanaConfig& c, Visit&& visit) {
+    if (tbpSettingsEnabled()) {
+        visit("rules", c.rules);
+        visit("threads", c.threads);
+        visit("markov_opponent", c.markov_opponent);
+        visit("reward", c.reward);
+        visit("reward_scale", c.reward_scale);
+        visit("kill_lambda", c.kill_lambda);
+        visit("kill_discount", c.kill_discount);
+        visit("pin_layout", c.pin_layout);
+        visit("variant", c.variant);
+        visit("message_weight", c.message_weight);
+        visit("rollout_weight", c.rollout_weight);
+        visit("low_water", c.low_water);
+        visit("give_margin", c.give_margin);
+        visit("backoff_iterations", c.backoff_iterations);
+        visit("steal_chiplet_penalty", c.steal_chiplet_penalty);
+        visit("steal_topk", c.steal_topk);
+        visit("steal_temperature", c.steal_temperature);
+    }
     visit("top_half", c.top_half);
     visit("top_quarter", c.top_quarter);
     visit("low", c.low);
@@ -51,7 +78,23 @@ void readValue(const nlohmann::json& j, const char* key, T& out) {
     if (!j.is_number()) {
         fail(std::string(key) + " must be a number");
     }
+    const double value = j.get<double>();
+    if (!std::isfinite(value)) fail(std::string(key) + " must be finite");
+    if constexpr (std::is_integral_v<T>) {
+        if (std::trunc(value) != value || value < std::numeric_limits<T>::lowest() || value > std::numeric_limits<T>::max())
+            fail(std::string(key) + " must be an integer in range");
+    }
     out = j.get<T>();
+}
+
+void readValue(const nlohmann::json& j, const char* key, std::string& out) {
+    if (!j.is_string()) fail(std::string(key) + " must be a string");
+    out = j.get<std::string>();
+}
+
+void readValue(const nlohmann::json& j, const char* key, bool& out) {
+    if (!j.is_boolean()) fail(std::string(key) + " must be a boolean");
+    out = j.get<bool>();
 }
 
 template <class T, size_t N>
@@ -65,6 +108,17 @@ void readValue(const nlohmann::json& j, const char* key, std::array<T, N>& out) 
 }
 
 void finish(NanaConfig& c) {
+    if (c.rules != "tetrio" && c.rules != "botris") fail("rules must be tetrio or botris");
+    if (c.threads < 1) fail("threads must be at least 1");
+    if (c.reward != "kill" && c.reward != "app") fail("reward must be kill or app");
+    if (c.pin_layout != "compact" && c.pin_layout != "spread") fail("pin_layout must be compact or spread");
+    if (c.reward_scale <= 0) fail("reward_scale must be positive");
+    if (c.kill_lambda < 0 || c.kill_lambda > 1) fail("kill_lambda must be in [0, 1]");
+    if (c.kill_discount < 0 || c.kill_discount > 1) fail("kill_discount must be in [0, 1]");
+    if (c.message_weight < 0 || c.rollout_weight < 1 || c.low_water < 0 || c.give_margin < 0 ||
+        c.backoff_iterations < 0 || c.steal_chiplet_penalty < 0 || c.steal_temperature < 0)
+        fail("request tuning values must be nonnegative, with rollout_weight at least 1");
+    if (c.steal_topk < 1 || c.steal_topk > 8) fail("steal_topk must be in [1, 8]");
     if (c.depth_step < 1) {
         fail("depth_step must be at least 1");
     }
@@ -79,11 +133,23 @@ void finish(NanaConfig& c) {
     }
 }
 
+
 NanaConfig load() {
     NanaConfig c;
-    const char* path = std::getenv("NANA_CONFIG");
-    if (path && *path) {
-        std::ifstream in(path);
+    std::filesystem::path file;
+    if (tbpSettingsEnabled()) {
+        file = executableDirectory() / "nana.json";
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(file, ec);
+        if (ec) fail(file.string() + ": " + ec.message());
+        if (!exists) { finish(c); return c; }
+    }
+    else if (const char* path = std::getenv("NANA_CONFIG"); path && *path) {
+        file = path;
+    }
+    if (!file.empty()) {
+        const auto path = file.string();
+        std::ifstream in(file);
         if (!in) {
             fail(std::string("can't read ") + path);
         }
@@ -123,6 +189,15 @@ NanaConfig load() {
 }
 
 } // namespace
+
+void loadTbpConfig() {
+    tbpSettingsEnabled() = true;
+    (void)config(); // Validate before sending any protocol messages.
+}
+
+const NanaConfig* tbpConfig() {
+    return tbpSettingsEnabled() ? &config() : nullptr;
+}
 
 float NanaConfig::priorWeight(int rank) const {
     if (rank >= 1 && rank <= PRIOR_TABLE) {

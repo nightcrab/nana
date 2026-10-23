@@ -4,10 +4,30 @@
 #include <string>
 
 // nana's tunable constants: the eval's weights, PUCT and the rollout's score. the defaults are the
-// hand-set values; NANA_CONFIG=path.json overrides any of them (read once, on first use). unknown
+// hand-set values; NANA_CONFIG selects weight overrides for tools. TBP uses nana.json beside
+// the executable. Settings are read once. Unknown
 // keys or malformed values are fatal, so a typo in a tuning run can't silently leave a default in
 // place. tuner/ writes these files
 struct NanaConfig {
+    // Runtime settings for TBP; emulation and benchmarks retain their environment overrides.
+    std::string rules = "tetrio";
+    int threads = 3;
+    bool markov_opponent = true;
+    std::string reward = "kill";
+    double reward_scale = 0.25;
+    double kill_lambda = 0.0;
+    double kill_discount = 0.9;
+    std::string pin_layout = "compact";
+    std::string variant = ""; // empty = choose automatically
+    int message_weight = 1;
+    int rollout_weight = 30;
+    int low_water = 30;
+    int give_margin = 3;
+    int backoff_iterations = 64;
+    int steal_chiplet_penalty = 30;
+    int steal_topk = 4;
+    int steal_temperature = 10;
+
     // eval (Eval::eval_CC): added to the score, which is then mapped by (score + 10000) / 10000
     double top_half = -15.820055334534572;
     double top_quarter = -129.3718779272814;
@@ -55,7 +75,12 @@ struct NanaConfig {
     std::string source = "defaults";
 };
 
-// the config in effect: NANA_CONFIG's file, or the defaults
+// Called by the TBP executable/launcher before using settings. Other tools use NANA_CONFIG.
+void loadTbpConfig();
+// Null for emulation/benchmarks, which retain their environment settings.
+const NanaConfig* tbpConfig();
+
+// The configuration in effect.
 const NanaConfig& config();
 
 // the config as JSON, every key (what --print-config shows)

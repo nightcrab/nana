@@ -3,9 +3,10 @@
 // it our stdin / stdout and arguments, so TBP clients see one bot. It is built for the compiler's
 // default level so it runs anywhere.
 //
-//   NANA_VARIANT=<level>          run that level whatever the CPU says
+//   nana.json: "variant": "<level>" forces a built level
 //   tbp_tetris --list-variants    show what each built level needs that the CPU lacks, and the pick
 
+#include "Tetris/bot/Config.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -332,6 +333,7 @@ int run(const std::string& level, char** argv) {
 } // namespace
 
 int main(int argc, char** argv) {
+    loadTbpConfig();
     const std::vector<std::string> built = split(NANA_VARIANTS, ',');
     const std::vector<std::string> have = detect();
 
@@ -359,9 +361,9 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (const char* forced = std::getenv("NANA_VARIANT"); forced && *forced) {
+    if (const char* forced = config().variant.c_str(); *forced) {
         if (!contains(built, forced)) {
-            std::fprintf(stderr, "nana launcher: NANA_VARIANT=%s isn't built; built: %s\n", forced, NANA_VARIANTS);
+            std::fprintf(stderr, "nana launcher: variant=%s isn't built; built: %s\n", forced, NANA_VARIANTS);
             return 1;
         }
         pick = findLevel(forced);

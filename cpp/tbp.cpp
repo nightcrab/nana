@@ -4,6 +4,7 @@
 #include <string>
 
 #include "Search.hpp"
+#include "Config.hpp"
 #include "OpponentEncoder.hpp"
 #include "OpponentFilter.hpp"
 #include "Util/json.hpp"
@@ -251,11 +252,8 @@ auto json_to_spin(nlohmann::json json) -> spinType {
 // TBP entry point
 int main() {
     try {
-        // search threads; NANA_THREADS overrides, e.g. to run several bots on one machine
-        int CORE_COUNT = 3;
-        if (const char* text = std::getenv("NANA_THREADS")) {
-            CORE_COUNT = std::max(1, std::atoi(text));
-        }
+        loadTbpConfig();
+        const int CORE_COUNT = config().threads;
 
         // send info state to the client
         std::vector<PieceType> queue;

@@ -17,9 +17,12 @@
 // simulates a versus game with a highly simplified opponent model
 class EmulationGame {
    public:
-    // NANA_RULES=tetrio plays TETR.IO rules (set_tetrio_rules); otherwise Botris damage and the
+    // plays TETR.IO rules (set_tetrio_rules), or with NANA_RULES=botris Botris damage and the
     // original garbage rules
-    EmulationGame();
+    // Search placeholders skip rule loading before the executable selects its configuration.
+    explicit EmulationGame(bool apply_rules = true);
+    // the ruleset games are played with: "tetrio" or "botris" (from NANA_RULES, or TBP configuration)
+    static const char* rules();
 
     Game game;
 

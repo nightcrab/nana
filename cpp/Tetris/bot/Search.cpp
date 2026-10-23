@@ -41,7 +41,7 @@ int Search::monte_carlo_depth = 1;
 
 UCT Search::uct;
 
-EmulationGame Search::root_state;
+EmulationGame Search::root_state(false);
 
 // stuff for notifying the main thread that the worker threads have at least a minimum amount of work done
 std::mutex min_work_mutex;
@@ -141,7 +141,7 @@ constexpr size_t MAX_PATH_DEPTH = 64;
 static_assert(!NANA_REPLAY_RESTART || NANA_HASH_QUEUE_FRONT, "NANA_REPLAY_RESTART needs NANA_HASH_QUEUE_FRONT");
 
 // the search root as the workers start (root_state's rng is reseeded by workers on root backprops)
-static EmulationGame replay_root;
+static EmulationGame replay_root(false);
 static uint32_t replay_root_hash = 0;
 
 // play the job's path from the search root with fresh chance. returns the depth of the first node
@@ -199,6 +199,17 @@ constexpr int MAX_STEAL_TOPK = 8;
 static RequestTuning tuning;
 
 static void loadTuning() {
+    if (const auto* c = tbpConfig()) {
+        tuning.message_weight = c->message_weight;
+        tuning.rollout_weight = c->rollout_weight;
+        tuning.low_water = c->low_water;
+        tuning.give_margin = c->give_margin;
+        tuning.backoff_iterations = c->backoff_iterations;
+        tuning.steal_chiplet_penalty = c->steal_chiplet_penalty;
+        tuning.steal_topk = c->steal_topk;
+        tuning.steal_temperature = c->steal_temperature;
+        return;
+    }
     auto read = [](const char* name, int& value) {
         if (const char* text = std::getenv(name)) {
             value = std::atoi(text);
@@ -233,6 +244,13 @@ struct RewardTuning {
 static RewardTuning reward_tuning;
 
 static void loadRewardTuning() {
+    if (const auto* c = tbpConfig()) {
+        reward_tuning.app_only = c->reward == "app";
+        reward_tuning.scale = static_cast<float>(c->reward_scale);
+        reward_tuning.lambda = static_cast<float>(c->kill_lambda);
+        reward_tuning.discount = static_cast<float>(c->kill_discount);
+        return;
+    }
     reward_tuning = RewardTuning();
     if (const char* text = std::getenv("NANA_REWARD")) {
         reward_tuning.app_only = std::strcmp(text, "app") == 0;
@@ -269,6 +287,7 @@ static void resetKill(EmulationGame& root) {
 // NANA_MARKOV_OPPONENT=1: the search models the opponent with MarkovOpponent instead of the
 // handcrafted Opponent, whichever the game being played uses. read when a search starts
 static bool markovSearch() {
+    if (const auto* c = tbpConfig()) return c->markov_opponent;
     const char* text = std::getenv("NANA_MARKOV_OPPONENT");
     return text && std::atoi(text) != 0;
 }
