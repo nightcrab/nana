@@ -106,15 +106,17 @@ Every iteration, in `status.txt` and the log:
 
 ## Parameter spaces (`tuner/spaces/`)
 
-- `eval.json`: the 33 eval weights nana reads, each bounded to default +- max(|default|, 20)
-  (`clears[0]` and `tspins[0]` stay 0: the other entries are relative to them);
-- `search.json`: `c_init`, `c_base`, `depth_step`, `prior_exponent`, `app_weight`, `eval_weight`.
+- `eval.json`: what the bot values. The rollout score's `app_weight` and `eval_weight`, and the
+  33 eval weights nana reads, each bounded to default +- max(|default|, 20) (`clears[0]` and
+  `tspins[0]` stay 0: the other entries are relative to them);
+- `search.json`: how it searches. `c_init`, `c_base`, `n_cap`, `depth_step`, `prior_exponent`.
 
 A space is a JSON list of `{"name", "default", "low", "high"}` with optional `"log": true` (uniform
 in log space) and `"integer": true`; `name[i]` is one element of an array key.
 
-Tuning `eval_weight` together with the eval weights is partly redundant (the eval's overall scale
-and its weight in the rollout score trade off).
+`eval_weight` and the eval weights' overall scale are partly redundant: the eval is
+1 + score / 10000, so both scale the score's share of the rollout, but only `eval_weight` scales
+the constant 1 (what surviving is worth against dying, 0).
 
 ## A run's files (`tuner/runs/NAME/`)
 

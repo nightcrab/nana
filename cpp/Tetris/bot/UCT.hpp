@@ -18,37 +18,74 @@
 
 class UCT;
 
-// polynomial forgetting: an edge's returns are weighted i^beta by arrival order (beta = 1: linear),
-// on top of the 0.9999 decay, so samples from the subtree's early, flatter policy count less.
-// the edge keeps R = Q * M, M its (decayed) count of returns, so R / N still reads as Q with
-// virtual visits counted as zero. NANA_FORGET_BETA=0 is the plain decayed mean, through the same code
-#ifndef NANA_FORGET
-#define NANA_FORGET 0
-#endif
-#ifndef NANA_FORGET_BETA
-#define NANA_FORGET_BETA 1
-#endif
-
-// add count returns summing to sum to R (= Q * M), M counting returns
-void forgetReturns(float& R, float& M, float sum, int count);
-
 // an edge's search statistics: everything selection reads. kept in their own array per node,
 // apart from the rest of the edge (ColdAction), so a select scans 12 bytes per edge
 struct EdgeStats {
     float R = 0;
     float N = 0;
     float prior = 1;
-#if NANA_FORGET
-    float M = 0;
-#endif
 
-    // count returns summing to reward, from a backprop
-    void addReward(float reward, int count);
-    // the same, carried up by a flush (no decay without NANA_FORGET, as before)
-    void addCarried(float reward, int count);
+    // returns summing to reward, from a backprop: R decays as N does (config n_cap)
+    void addReward(float reward);
+    // the same, carried up by a flush, without the decay
+    void addCarried(float reward);
     void addN();
     float Q() const;
 };
+
+// NANA_SUFFIX: an edge is credited only with what happens after it. a return is a few sums
+// (suffix attack A, suffix pieces L, leaf eval E, count n, deaths n_dead), and an edge's value
+// over the returns it has received is app_weight * A / L * (n - n_dead) / n + eval_weight * E / n:
+// the attack rate of its future, not of the path from the search root. edges never see attack from before them, so a
+// node reached by different paths compares its arms on the same footing. a return that died is
+// worth 0, as the whole-path reward made it: it adds nothing to A, L or E but still counts in n, so
+// each death costs its 1/n share however soon it came. NANA_REWARD=app only.
+
+#ifndef NANA_SUFFIX
+#define NANA_SUFFIX 0
+#endif
+// NANA_SUFFIX_DISCOUNT: each piece further from the edge counts this much less in its attack
+// rate (A and L are both discounted, so the rate stays a weighted average). the leaf eval isn't
+// discounted: it stands for everything past the leaf, whatever its depth
+#ifndef NANA_SUFFIX_DISCOUNT
+#define NANA_SUFFIX_DISCOUNT 1.0
+#endif
+
+// NANA_SUFFIX: a reward on its way up, summed over the returns it carries
+struct Return {
+    // attack from here down to the leaf (0 for returns that died)
+    float A = 0;
+    // pieces from here down to the leaf (0 for returns that died)
+    float L = 0;
+    // the leaves' evals
+    float E = 0;
+    // how many returns
+    float n = 0;
+    // how many of them died
+    float n_dead = 0;
+
+    Return& operator+=(const Return& o) {
+        A += o.A; L += o.L; E += o.E; n += o.n; n_dead += o.n_dead;
+        return *this;
+    }
+    Return& operator-=(const Return& o) {
+        A -= o.A; L -= o.L; E -= o.E; n -= o.n; n_dead -= o.n_dead;
+        return *this;
+    }
+    friend Return operator+(Return a, const Return& b) { return a += b; }
+};
+
+#if NANA_SUFFIX
+using Reward = Return;
+#else
+using Reward = float;
+#endif
+
+// what a reward adds to an edge's R: R / N reads as Q, so n returns add n times their value
+inline float rewardScalar(float r) { return r; }
+float rewardScalar(const Return& r);
+inline bool rewardEmpty(float r) { return r == 0; }
+inline bool rewardEmpty(const Return& r) { return r.n == 0; }
 
 // a move without its minos, which follow from type and rotation (6 bytes instead of 14)
 struct PackedMove {
@@ -67,6 +104,12 @@ struct ColdAction {
     PackedMove move;
     int time = 0;
     float eval = 0;
+#if NANA_SUFFIX
+    // attack this move sends (after cancelling): fixed by the node, whose hash has the meter
+    float step_attack = 0;
+    // the returns credited to this edge, decayed as N is; stats().R is their value times count
+    Return sums;
+#endif
 };
 
 // MP-MCTS (Yang, Aasawat, Yoshizoe 2021) history: for each depth of a job's path,
@@ -101,10 +144,6 @@ struct HistoryRow {
     // edges[0] is the chosen edge, the rest are its strongest siblings
     uint32_t count = 0;
     HistoryEdge edges[1 + HISTORY_COMPETITORS];
-#if NANA_FORGET
-    // the chosen edge's M, so returns added to edges[0] are weighted as the edge will weight them
-    float chosen_M = 0;
-#endif
 
     // would the node still pick the chosen edge?
     bool stillChosen() const;
@@ -122,10 +161,8 @@ class UCTNode {
     // rewards and visits of simulations that stopped backpropagating here (MP-MCTS).
     // the next backprop to leave this node carries them up.
     // with transpositions that may be a different path than the one they came from
-    float R_buffer = 0.0;
+    Reward R_buffer{};
     int N_buffer = 0;
-    // how many returns R_buffer sums
-    int M_buffer = 0;
 
     // the parent and edge this node was last selected from (NANA_FLUSH_AT_END only), so parked
     // buffers can be walked up to the root once a search ends; with transpositions, the latest
@@ -148,6 +185,11 @@ class UCTNode {
 
     // the first time an edge is used in a new search (tree reuse), its stats are scaled down
     void updateTime(size_t i, int newtime);
+
+    // add a backprop's reward to edge i (carried: from a flush, without the decay) and return what
+    // goes on to the parent's edge: the same reward, or with NANA_SUFFIX this edge's step added.
+    // apply = false only computes the latter
+    Reward climb(size_t i, Reward reward, bool carried, bool apply = true);
 
     // PUCT, shared by select and the history check so they always agree
     static float c_puct(float node_N, int depth);
@@ -209,19 +251,19 @@ class Job {
    public:
     // STOP job
     Job()
-        : R(0.0), state(EmulationGame()), type(STOP){};
+        : R(), state(EmulationGame()), type(STOP){};
 
     // SELECT job
     Job(EmulationGame state, JobType type)
-        : R(0.0), state(std::move(state)), type(type){};
+        : R(), state(std::move(state)), type(type){};
 
     // PUT job
     Job(UCTNode node, JobType type)
-        : R(0.0), state(blank_state()), type(type), node(std::make_unique<UCTNode>(std::move(node))){};
+        : R(), state(blank_state()), type(type), node(std::make_unique<UCTNode>(std::move(node))){};
 
     // control job (REQUEST, NO_WORK)
     explicit Job(JobType type)
-        : R(0.0), state(blank_state()), type(type){};
+        : R(), state(blank_state()), type(type){};
 
     // move-only: jobs are handed between threads, never duplicated
     Job(Job&&) noexcept = default;
@@ -229,7 +271,7 @@ class Job {
     Job(const Job&) = delete;
     Job& operator=(const Job&) = delete;
 
-    float R;
+    Reward R;
     int depth;
     EmulationGame state;
     JobType type;
@@ -248,12 +290,13 @@ class Job {
     // the path from the search root with fresh chance (the nodes, and so their moves, belong to
     // other threads)
     std::vector<PackedMove> moves;
+    // NANA_SUFFIX: parallel to path, the attack each move sent, so the restart check can tell what
+    // a reward would be worth at each ancestor's edge
+    std::vector<float> steps;
 
     // BACKPROP: visits on top of the one already counted on the way down,
     // drained from nodes where simulations restarted
     int extra_N = 0;
-    // BACKPROP / FLUSH: how many returns R sums
-    int M = 0;
 
     // stamped on every send, so receivers keep a picture of everyone's load (work units)
     uint16_t sender = UINT16_MAX;

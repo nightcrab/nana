@@ -13,3 +13,7 @@ p10          -DNANA_LEAK=1 -DNANA_LEAK_P=0.1
 # MP-MCTS stores history in every node; we keep it for busy nodes, and the top 3 competitors
 history-all  -DNANA_HISTORY_MIN_VISITS=1
 competitors8 -DNANA_HISTORY_COMPETITORS=8
+# backup: suffix credit (NANA_SUFFIX in UCT.hpp; NANA_REWARD=app)
+suffix       -DNANA_SUFFIX=1
+suffix-d99   -DNANA_SUFFIX=1 -DNANA_SUFFIX_DISCOUNT=0.99
+suffix-d90   -DNANA_SUFFIX=1 -DNANA_SUFFIX_DISCOUNT=0.9

@@ -120,7 +120,7 @@ struct JobKind {
 	static constexpr const char* name = "Job, state";
 	static T make(uint64_t i) {
 		Job j(proto_state, SELECT);
-		j.R = (float)i;
+		j.extra_N = (int)i;
 		return j;
 	}
 	static uint64_t consume(const T& m) { return touch_state(m.state); }
@@ -133,7 +133,7 @@ struct JobPathKind {
 	static T make(uint64_t i) {
 		Job j(proto_state, SELECT);
 		j.path = proto_path;
-		j.R = (float)i;
+		j.extra_N = (int)i;
 		return j;
 	}
 	static uint64_t consume(const T& m) {

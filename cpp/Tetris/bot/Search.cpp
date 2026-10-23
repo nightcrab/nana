@@ -86,6 +86,8 @@ constexpr int LOAD_FACTOR = NANA_LOAD_FACTOR;
 // selects past this depth are treated as leaves; a safety net for cycles in the state graph
 constexpr size_t MAX_PATH_DEPTH = 64;
 
+static_assert(!NANA_SUFFIX || Search::search_style == NANA, "NANA_SUFFIX is for the PUCT (NANA) search");
+
 // 1 = MP-MCTS: backprops stop and restart selection where every ancestor would choose the same path.
 // 0 = TDS-UCT: every backprop goes to the root
 #ifndef NANA_MPMCTS
@@ -282,6 +284,10 @@ static void resetKill(EmulationGame& root) {
     const float fitted = markov::params().discount;
     const float discount = root.markov_opponent && fitted > 0 ? fitted : reward_tuning.discount;
     root.reset_kill(discount, !reward_tuning.app_only);
+    if (NANA_SUFFIX && !reward_tuning.app_only) {
+        std::cerr << "NANA_SUFFIX needs NANA_REWARD=app (reward \"app\" in nana.json)" << std::endl;
+        std::exit(2);
+    }
 }
 
 // NANA_MARKOV_OPPONENT=1: the search models the opponent with MarkovOpponent instead of the
@@ -497,7 +503,7 @@ static void flushParked(bool apply) {
     for (auto* side : { &uct.nodes_left, &uct.nodes_right }) {
         for (auto& shard : *side) {
             for (auto& [id, node] : shard.obj_) {
-                if (node.N_buffer != 0 || node.R_buffer != 0) {
+                if (node.N_buffer != 0 || !rewardEmpty(node.R_buffer)) {
                     parked.push_back(&node);
                 }
             }
@@ -506,8 +512,7 @@ static void flushParked(bool apply) {
 
     for (UCTNode* node : parked) {
         const float N = (float)node->N_buffer;
-        const float R = node->R_buffer;
-        const int M = node->M_buffer;
+        Reward R = node->R_buffer;
         UCTNode* child = node;
         for (size_t step = 0; step < MAX_PATH_DEPTH; step++) {
             const uint32_t parent_hash = child->parent_hash;
@@ -519,22 +524,21 @@ static void flushParked(bool apply) {
             if ((size_t)action >= parent.actionCount()) {
                 break;
             }
+            R = parent.climb(action, R, true, apply);
             if (apply) {
-                parent.stats(action).addCarried(R, M);
                 parent.stats(action).N += N;
                 parent.N += (int)N;
             }
             if (parent_hash == root_hash) {
                 hidden_N[action] += N;
-                hidden_R[action] += R;
+                hidden_R[action] += rewardScalar(R);
                 break;
             }
             child = &parent;
         }
         if (apply) {
             node->N_buffer = 0;
-            node->R_buffer = 0;
-            node->M_buffer = 0;
+            node->R_buffer = Reward{};
         }
     }
 
@@ -907,7 +911,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         uct.stats[threadIdx].flushes++;
         UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
         EdgeStats& edge = node.stats(job.path.back().actionID);
-        edge.addCarried(job.R, job.M);
+        job.R = node.climb(job.path.back().actionID, job.R, true);
         edge.N += job.extra_N;
         node.N += job.extra_N;
         if (job.path.size() == 1) {
@@ -918,17 +922,14 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             if (node.id != replay_root_hash) {
                 node.R_buffer += job.R;
                 node.N_buffer += job.extra_N + 1;
-                node.M_buffer += job.M;
             }
             return;
         }
         // this node is being left too: its own parked results belong to the edge above
         job.R += node.R_buffer;
         job.extra_N += node.N_buffer;
-        job.M += node.M_buffer;
-        node.R_buffer = 0;
+        node.R_buffer = Reward{};
         node.N_buffer = 0;
-        node.M_buffer = 0;
         job.path.pop_back();
         send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
         return;
@@ -971,12 +972,11 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         // rollout sends the new node to its owner, and the reward goes to the parent's owner
         uct.stats[threadIdx].nodes++;
 
-        float reward = rollout(job.state, threadIdx);
+        Reward reward = rollout(job.state, threadIdx);
 
         uint32_t parentIdx = uct.getOwner(job.path.back().hash);
 
         job.R = reward;
-        job.M = 1;
         job.extra_N = 0;
         job.depth = job.state.pieces;
         job.type = BACKPROP;
@@ -997,7 +997,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         if (state.game_over) {
 
-            float reward = rollout(state, threadIdx);
+            Reward reward = rollout(state, threadIdx);
 
             if (job.path.empty()) {
                 // the root itself is lost: nothing to search, but don't leave endSearch waiting
@@ -1011,7 +1011,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             // reuse this job as the backprop job and send it back to our parent
             job.R = reward;
-            job.M = 1;
             job.extra_N = 0;
             job.depth = state.pieces;
             job.type = BACKPROP;
@@ -1093,9 +1092,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     row.node_N = node.N;
                     row.depth = depth;
                     row.edges[0] = { edge.R, edge.N, edge.prior };
-#if NANA_FORGET
-                    row.chosen_M = edge.M;
-#endif
                     job.history.push_back(row);
                 }
                 else {
@@ -1116,7 +1112,15 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             }
             state.set_move(state.specific_move(node.move(action)));
 
+            [[maybe_unused]] const int attack_before = state.true_attack;
             state.play_moves();
+#if NANA_SUFFIX
+            {
+                const float step = (float)(state.true_attack - attack_before);
+                node.cold[action].step_attack = step;
+                job.steps.push_back(step);
+            }
+#endif
             state.chance_move();
 
             uint32_t new_hash = state.hash();
@@ -1145,19 +1149,20 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
         EdgeStats& edge = node.stats(job.path.back().actionID);
 
-        float reward = job.R;
-
-        // Undo Virtual Loss by adding R
+        // Undo Virtual Loss by adding R. from here on, reward is what goes to the parent's edge
+        Reward reward = job.R;
+#if NANA_SUFFIX
+        reward = node.climb(job.path.back().actionID, reward, false);
+#else
         if constexpr (search_style == NANA) {
-
-            edge.addReward(reward, job.M);
-
+            reward = node.climb(job.path.back().actionID, reward, false);
         }
         if constexpr (search_style == CC) {
             if (reward > edge.R) {
                 edge.R = reward;
             }
         }
+#endif
 
         // simulations that restarted below us weren't counted on the way down
         edge.N += job.extra_N;
@@ -1166,6 +1171,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         job.path.pop_back();
         if (!job.moves.empty()) {
             job.moves.pop_back();
+        }
+        if (!job.steps.empty()) {
+            job.steps.pop_back();
         }
 
         if (job.path.empty()) {
@@ -1176,11 +1184,11 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             // its own draw of the opponent: workers never write the shared root_state
             job.state = root_state;
             job.state.start_from_root();
-            job.R = 0.0;
+            job.R = Reward{};
             job.extra_N = 0;
-            job.M = 0;
             job.history.clear();
             job.moves.clear();
+            job.steps.clear();
             job.snapshots.clear();
             job.type = SELECT;
 
@@ -1214,16 +1222,30 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 
         bool still_chosen = true;
+#if NANA_SUFFIX
+        // each ancestor's edge would get the reward plus the moves between, whose steps are on the job
+        {
+            Return v = reward;
+            for (size_t j = rows.size(); j-- > 0;) {
+                constexpr float gamma = (float)NANA_SUFFIX_DISCOUNT;
+                v.A = gamma * v.A + (v.n - v.n_dead) * (j < job.steps.size() ? job.steps[j] : 0.0f);
+                v.L = gamma * v.L + (v.n - v.n_dead);
+                rows[j].edges[0].R += rewardScalar(v);
+            }
+        }
         for (HistoryRow& row : rows) {
-#if NANA_FORGET
-            forgetReturns(row.edges[0].R, row.chosen_M, reward, job.M);
-#else
-            row.edges[0].R += reward;
-#endif
             row.edges[0].N += job.extra_N;
             row.node_N += job.extra_N;
             still_chosen = still_chosen && row.stillChosen();
         }
+#else
+        for (HistoryRow& row : rows) {
+            row.edges[0].R += reward;
+            row.edges[0].N += job.extra_N;
+            row.node_N += job.extra_N;
+            still_chosen = still_chosen && row.stillChosen();
+        }
+#endif
 
         // visits this node would have parked, counting this one, if it restarted here
         [[maybe_unused]] const int parked = node.N_buffer + job.extra_N + 1;
@@ -1249,7 +1271,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             // the restarted simulation, which the ancestors haven't counted
             node.R_buffer += reward;
             node.N_buffer += job.extra_N + 1;
-            node.M_buffer += job.M;
 
             // the restarted simulation is also a visit through every ancestor in the history,
             // otherwise their Q never moves and we'd restart here forever
@@ -1285,7 +1306,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     // parking here and send this result, with what's parked, up to depth left - 1
                     node.R_buffer -= reward;
                     node.N_buffer -= job.extra_N + 1;
-                    node.M_buffer -= job.M;
                     uct.stats[threadIdx].restarts--;
                     uct.stats[threadIdx].restart_depth -= depth;
                     uct.stats[threadIdx].replay_diverged++;
@@ -1294,10 +1314,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     Msg flush = std::make_unique<Job>(FLUSH);
                     flush->R = reward + node.R_buffer;
                     flush->extra_N = job.extra_N + node.N_buffer;
-                    flush->M = job.M + node.M_buffer;
-                    node.R_buffer = 0;
+                    node.R_buffer = Reward{};
                     node.N_buffer = 0;
-                    node.M_buffer = 0;
                     flush->path.assign(job.path.begin() + (left - 1), job.path.end());
                     send(threadIdx, uct.getOwner(flush->path.back().hash), std::move(flush));
 
@@ -1306,21 +1324,20 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     // (erase, not resize: shrinking with resize needs default-constructible elements)
                     job.path.erase(job.path.begin() + left, job.path.end());
                     job.moves.erase(job.moves.begin() + left, job.moves.end());
+                    job.steps.erase(job.steps.begin() + std::min(left, job.steps.size()), job.steps.end());
                     job.snapshots.erase(job.snapshots.begin() + std::min(left, job.snapshots.size()), job.snapshots.end());
                     rows.erase(rows.begin() + std::min(left, rows.size()), rows.end());
                     job.history = rows;
-                    job.R = 0.0;
+                    job.R = Reward{};
                     job.extra_N = 0;
-                    job.M = 0;
                     job.type = SELECT;
                     send(threadIdx, uct.getOwner(job.state.hash()), std::move(msg));
                     return;
                 }
                 uct.stats[threadIdx].replay_matched++;
                 job.history = rows;
-                job.R = 0.0;
+                job.R = Reward{};
                 job.extra_N = 0;
-                job.M = 0;
                 job.type = SELECT;
                 send(threadIdx, threadIdx, std::move(msg));
                 return;
@@ -1330,9 +1347,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             job.state = std::move(here);
             job.history = rows;
-            job.R = 0.0;
+            job.R = Reward{};
             job.extra_N = 0;
-            job.M = 0;
             job.type = SELECT;
 
             // we own this node, so the select starts with us
@@ -1347,10 +1363,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         // carry up anything parked here
         job.R = reward + node.R_buffer;
         job.extra_N += node.N_buffer;
-        job.M += node.M_buffer;
-        node.R_buffer = 0;
+        node.R_buffer = Reward{};
         node.N_buffer = 0;
-        node.M_buffer = 0;
 
         send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
     }
@@ -1480,7 +1494,7 @@ void Search::search(std::stop_token stop, const int threadIdx) {
 }
 
 
-float Search::rollout(EmulationGame& state, int threadIdx) {
+Reward Search::rollout(EmulationGame& state, int threadIdx) {
     // Rollout using eval.
 #ifdef NANA_BENCH
     struct RolloutTimer {
@@ -1492,13 +1506,20 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
     } rollout_timer;
 #endif
 
-    float reward = 0;
+    [[maybe_unused]] float reward = 0;
 
     uct.stats[threadIdx].nodes++;
     uct.stats[threadIdx].rollouts++;
 
+    // NANA_SUFFIX: nothing lies below a leaf yet, so only its eval (or its death) goes up
+    [[maybe_unused]] const Return dead{ 0, 0, 0, 1, 1 };
+
     if (state.game_over) {
+#if NANA_SUFFIX
+        return dead;
+#else
         return -0.0;
+#endif
     }
 
     UCTNode node(state);
@@ -1515,9 +1536,16 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
     maybeInsertNode(std::move(node), threadIdx);
 
     if (stuck) {
+#if NANA_SUFFIX
+        return dead;
+#else
         return 0.0;
+#endif
     }
 
+#if NANA_SUFFIX
+    return Return{ 0, 0, max_eval, 1, 0 };
+#else
     static const NanaConfig& c = config();
     {
         float r = (float)c.app_weight * state.true_app() + (float)c.eval_weight * max_eval;
@@ -1537,6 +1565,7 @@ float Search::rollout(EmulationGame& state, int threadIdx) {
     const float r = x / (x + reward_tuning.scale);
     const float kill = (1.0f - reward_tuning.lambda) * state.expected_kill();
     return kill + (1.0f - kill) * r;
+#endif
 }
 
 Move Search::bestMove() {

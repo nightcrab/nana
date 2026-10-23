@@ -21,7 +21,7 @@ def main():
     configs = collections.defaultdict(list)
     for path in glob.glob(os.path.join(out, "parts", "*.jsonl")):
         name = re.sub(r"-seed\d+\.jsonl$", "", os.path.basename(path))
-        match = re.fullmatch(r"t(\d+)-x(\d+)-lf(\d+)(?:-v([\w.]+))?", name)
+        match = re.fullmatch(r"t(\d+)-x(\d+)-lf(\d+)(?:-v([\w.-]+))?", name)
         mult, lf, variant = int(match[2]), int(match[3]), match[4] or ""
         # utf-8-sig: PowerShell's Out-File may start the file with a byte order mark
         for line in open(path, encoding="utf-8-sig"):

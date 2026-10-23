@@ -1,5 +1,19 @@
 [
  {
+  "name": "app_weight",
+  "default": 0.3333333333333333,
+  "low": 0.05,
+  "high": 1.5,
+  "log": true
+ },
+ {
+  "name": "eval_weight",
+  "default": 0.5,
+  "low": 0.05,
+  "high": 2.0,
+  "log": true
+ },
+ {
   "name": "top_half",
   "default": -130.0,
   "low": -260.0,

@@ -16,12 +16,13 @@
 #   POLL_SECONDS  how often to check whether the sweep is done (default 60)
 #   THREADS       thread counts to sweep, e.g. "1 4 8 16 32" (default 1, 2, 4, ... max_threads)
 #   SCRIPT        which script in scripts/ to run (default bench_scaling.sh)
-#   SELF_SHUTDOWN 1 = the instance shuts itself down 3 minutes after the benchmark exits, so a run
+#   SELF_SHUTDOWN 1 = the instance shuts itself down 3 minutes after the benchmark exits (30 if it
+#                 failed, so its log can still be read), so a run
 #                 finishes cleanly even if this machine sleeps or loses its connection (default 0).
 #                 Results stay on the stopped instance's disk; the next run moves them to
 #                 ~/results-archive before re-cloning, so they can still be fetched
 #   WORKTREE      1 = also upload this checkout's modified and untracked files over the clone,
-#                 to benchmark uncommitted work (default 0: just ref)
+#                 and files modified inside submodules, to benchmark uncommitted work (default 0: just ref)
 #
 # The local copy of the script is uploaded over the checkout's, so harness
 # changes don't need pushing; only the code under test comes from ref.
@@ -81,8 +82,11 @@ scp "${ssh_opts[@]}" "$(dirname "$0")/$script" "$user@$host:$script" || { echo "
 extract=":"
 if [ "$worktree" = 1 ]; then
     tarball=ec2-results/worktree-upload.tgz  # gitignored, and a relative path keeps tar and scp happy on Windows
-    git ls-files -m -o --exclude-standard | tar -czf "$tarball" -T -
-    echo "uploading uncommitted files: $(git ls-files -m -o --exclude-standard | tr '\n' ' ')"
+    upload=$( { git ls-files -m -o --exclude-standard
+                git submodule foreach --quiet --recursive 'git ls-files -m | sed "s|^|$displaypath/|"'
+              } | while read -r f; do [ -f "$f" ] && echo "$f"; done)
+    tar -czf "$tarball" -T - <<< "$upload"
+    echo "uploading uncommitted files: $(tr '\n' ' ' <<< "$upload")"
     scp "${ssh_opts[@]}" "$tarball" "$user@$host:worktree.tgz" || { echo "upload failed"; shutdown_instance; exit 1; }
     rm -f "$tarball"
     # files edited on Windows may have CRLF endings, which bash scripts can't run with
@@ -103,10 +107,12 @@ rm -rf nana
 git clone -q "$repo" nana
 cd nana
 git checkout -q "$commit"
+git submodule update -q --init --recursive
 $extract
-cp ../$script scripts/$script
+# the uploaded script may have CRLF endings too (a Windows checkout), and it lands after the extract
+sed 's/\r\$//' ../$script > scripts/$script
 rm -f ../bench.done
-nohup bash -c 'THREADS="${THREADS:-}" bash scripts/$script $bench_args; echo \$? > ../bench.done; [ "$self_shutdown" = 1 ] && sudo shutdown -h +3 "nana bench done"' > ../bench.log 2>&1 < /dev/null &
+nohup bash -c 'THREADS="${THREADS:-}" bash scripts/$script $bench_args; status=\$?; echo \$status > ../bench.done; [ "$self_shutdown" = 1 ] && sudo shutdown -h +\$(( status == 0 ? 3 : 30 )) "nana bench done"' > ../bench.log 2>&1 < /dev/null &
 EOF
 
 armed=1

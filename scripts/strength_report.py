@@ -46,7 +46,7 @@ def load(dirs):
     return configs
 
 
-NAME = re.compile(r"t(\d+)-x(\d+)-lf(\d+)(?:-v([\w.]+))?")
+NAME = re.compile(r"t(\d+)-x(\d+)-lf(\d+)(?:-v([\w.-]+))?")
 
 
 def parse(name):

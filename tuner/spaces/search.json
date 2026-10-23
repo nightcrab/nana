@@ -14,6 +14,13 @@
   "log": true
  },
  {
+  "name": "n_cap",
+  "default": 10000.0,
+  "low": 1000,
+  "high": 1000000,
+  "log": true
+ },
+ {
   "name": "depth_step",
   "default": 3,
   "low": 1,
@@ -25,19 +32,5 @@
   "default": 0.5,
   "low": 0.0,
   "high": 1.5
- },
- {
-  "name": "app_weight",
-  "default": 0.3333333333333333,
-  "low": 0.05,
-  "high": 1.5,
-  "log": true
- },
- {
-  "name": "eval_weight",
-  "default": 0.5,
-  "low": 0.05,
-  "high": 2.0,
-  "log": true
  }
 ]

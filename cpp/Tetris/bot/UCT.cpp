@@ -36,42 +36,21 @@ static float quick_sqrt(const float x)
 	return x * u.x * (1.5f - xhalf * u.x * u.x);// Newton step, repeating increases accuracy 
 }
 
+// N and R are scaled by this before each update, so N levels off at n_cap
 static double decay() {
-	static const double d = config().decay;
+	static const double d = 1.0 - 1.0 / config().n_cap;
 	return d;
 }
 
 void EdgeStats::addN() {
 	N = N * decay() + 1;
 }
-void forgetReturns(float& R, float& M, float sum, int count) {
-	// count returns at their mean, one step each: M decays as N does, and the i-th return gets
-	// step (1 + beta) / (M + beta), i^beta weights. with beta = 0 this is R = R * 0.9999 + r
-	constexpr float beta = (float)NANA_FORGET_BETA;
-	float Q = M > 0 ? R / M : 0.0f;
-	const float r = count > 0 ? sum / count : 0.0f;
-	const double d = decay();
-	for (int i = 0; i < count; i++) {
-		M = M * d + 1;
-		Q += (1 + beta) / (M + beta) * (r - Q);
-	}
-	R = Q * M;
-}
-
-void EdgeStats::addReward(float reward, [[maybe_unused]] int count) {
-#if NANA_FORGET
-	forgetReturns(R, M, reward, count);
-#else
+void EdgeStats::addReward(float reward) {
 	R = R * decay() + reward;
-#endif
 }
 
-void EdgeStats::addCarried(float reward, [[maybe_unused]] int count) {
-#if NANA_FORGET
-	forgetReturns(R, M, reward, count);
-#else
+void EdgeStats::addCarried(float reward) {
 	R += reward;
-#endif
 }
 
 // Q, the average return
@@ -79,13 +58,60 @@ float EdgeStats::Q() const {
 	return R / N;
 }
 
+float rewardScalar(const Return& r) {
+	static const NanaConfig& c = config();
+	// the attack rate of the returns that lived; those that died are worth 0
+	const float rate = r.L > 0 ? r.A / r.L : 0.0f;
+	return (float)c.app_weight * rate * (r.n - r.n_dead) + (float)c.eval_weight * r.E;
+}
+
+Reward UCTNode::climb(size_t i, Reward reward, bool carried, bool apply) {
+#if NANA_SUFFIX
+	// the edge's own move: its attack and one piece for each return that lived
+	constexpr float gamma = (float)NANA_SUFFIX_DISCOUNT;
+	Return v = reward;
+	v.A = gamma * v.A + (v.n - v.n_dead) * cold[i].step_attack;
+	v.L = gamma * v.L + (v.n - v.n_dead);
+
+	if (apply) {
+		Return& s = cold[i].sums;
+		if (!carried) {
+			const float d = (float)decay();
+			s.A *= d;
+			s.L *= d;
+			s.E *= d;
+			s.n *= d;
+			s.n_dead *= d;
+		}
+		s += v;
+		edge_stats[i].R = rewardScalar(s);
+	}
+	return v;
+#else
+	if (apply) {
+		if (carried) {
+			edge_stats[i].addCarried(reward);
+		}
+		else {
+			edge_stats[i].addReward(reward);
+		}
+	}
+	return reward;
+#endif
+}
+
 void UCTNode::updateTime(size_t i, int newtime) {
 	if (time(i) != newtime) {
 		EdgeStats& edge = stats(i);
 		edge.N = edge.N / 5;
 		edge.R = edge.R / 5;
-#if NANA_FORGET
-		edge.M = edge.M / 5;
+#if NANA_SUFFIX
+		Return& s = cold[i].sums;
+		s.A /= 5;
+		s.L /= 5;
+		s.E /= 5;
+		s.n /= 5;
+		s.n_dead /= 5;
 #endif
 		time(i) = newtime;
 	}
@@ -337,9 +363,6 @@ HistoryRow UCTNode::historyRow(uint32_t hash, size_t chosen_id, int depth) const
 	row.node_N = N;
 	row.depth = depth;
 	row.edges[0] = { chosen.R, chosen.N, chosen.prior };
-#if NANA_FORGET
-	row.chosen_M = chosen.M;
-#endif
 	row.count = 1;
 
 	// keep the strongest siblings; the rest are unlikely to overtake before we're back

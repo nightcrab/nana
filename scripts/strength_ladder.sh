@@ -15,6 +15,9 @@
 # them, e.g. SCRIPT=strength_ladder.sh run_ec2_bench.sh <host> <key> master SEED0=100);
 # defaults in brackets:
 #   BASE_MS      base think time per move [80]
+#   SIMS         search each move for this many simulations instead of BASE_MS x multiple
+#                (nana_emulate --sims), so builds of different speed get equal search; BASE_MS then
+#                only sizes the timeouts and estimates, so set it near the real time per move [0 = off]
 #   MULTS        think-time multiples for the 1-thread ladder, space or comma separated, or none
 #                (to pool a ladder from an earlier run on the same seeds) ["1 2 4 8 16"]
 #   PAR_THREADS  thread counts played at the base think time ["16"]; each must divide nproc,
@@ -56,6 +59,7 @@ for setting in "$@"; do
     export "${setting?}"
 done
 base_ms=${BASE_MS:-80}
+sims=${SIMS:-0}
 mults_setting=${MULTS:-1 2 4 8 16}
 [ "$mults_setting" = none ] && mults_setting=""
 read -ra mults <<< "$(tr , " " <<< "$mults_setting")"
@@ -63,7 +67,8 @@ read -ra variants <<< "$(tr , " " <<< "${VARIANTS:-}")"
 extra_flags=$(tr , " " <<< "${EXTRA_FLAGS:-}")
 variants_file=scripts/strength_variants.txt
 variant_flags() {
-    awk -v name="$1" '$1 == name { $1 = ""; sub(/^ +/, ""); print; found = 1 } END { exit !found }' "$variants_file"
+    # (a checkout on Windows, uploaded by run_ec2_bench.sh WORKTREE=1, can have CRLF line endings)
+    awk -v name="$1" '{ sub(/\r$/, "") } $1 == name { $1 = ""; sub(/^ +/, ""); print; found = 1 } END { exit !found }' "$variants_file"
 }
 for v in "${variants[@]}"; do
     variant_flags "$v" > /dev/null || { echo "no variant $v in $variants_file" >&2; exit 1; }
@@ -119,6 +124,7 @@ log() { echo "$*" | tee -a "$out/machine.txt"; }
 {
     echo "host: $(hostname)  cpus: $cpus  base_ms: $base_ms  mults: ${mults[*]}  par_threads: ${par_threads[*]}"
     echo "games: $games  seeds: $seed0..$(( seed0 + games - 1 ))  horizon: $horizon  lf1: $lf1"
+    (( sims > 0 )) && echo "fixed search: $sims simulations per move (ms columns are only BASE_MS)"
     echo "extra flags (plain builds): ${extra_flags:-none}"
     for v in "${variants[@]}"; do echo "variant $v: $(variant_flags "$v")"; done
     lscpu 2>/dev/null | grep -E "Model name|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\)|L3|MHz" || true
@@ -150,18 +156,20 @@ run_tasks() {
     claims=$(mktemp -d)
     worker() {
         local slot=$1 first=$(( $1 * threads )) k name lf ms seed n limit status
-        local pinning=()
+        local pinning=() budget=()
         [ "$pin" = 1 ] && pinning=(taskset -c "$first-$(( first + threads - 1 ))")
+        (( sims > 0 )) && budget=(--sims "$sims")
         for ((k = 0; k < ${#tasks[@]}; k++)); do
             # claim task k: bash's noclobber create is O_EXCL, so exactly one slot wins. (not mkdir:
             # Ubuntu 26.04's Rust coreutils mkdir let several slots claim one task, which then wrote
             # the same files at once)
             ( set -C; : > "$claims/$k" ) 2> /dev/null || continue
             read -r name lf ms seed n <<< "${tasks[$k]}"
-            limit=$(( 2 * n * horizon * ms / 1000 + 60 ))
+            # with SIMS the time per move is only BASE_MS's guess, so allow far more
+            limit=$(( (sims > 0 ? 6 : 2) * n * horizon * ms / 1000 + 60 ))
             status=0
             timeout "$limit" "${pinning[@]}" "${bins[$lf]}" --threads "$threads" --games "$n" --ms "$ms" \
-                --seed "$seed" --max-pieces "$horizon" \
+                --seed "$seed" --max-pieces "$horizon" "${budget[@]}" \
                 > "$dir/$name-seed$seed.jsonl" 2> "$dir/$name-seed$seed.err" || status=$?
             if [ "$status" = 124 ]; then
                 echo "  FAILED: $name seeds $seed..$(( seed + n - 1 )) timed out after ${limit}s"

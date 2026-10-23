@@ -59,9 +59,9 @@ struct NanaConfig {
     int depth_step = 3;
     // priors: the eval's rank r gets weight r^-prior_exponent, normalised
     double prior_exponent = 0.5;
-    // an edge's N, R (and M with NANA_FORGET) are scaled by this before each update, so old samples
-    // fade geometrically and N is capped at 1 / (1 - decay)
-    double decay = 0.9999;
+    // an edge's N and R are scaled by 1 - 1 / n_cap before each update, so old samples fade
+    // geometrically (Q averages roughly the last n_cap returns) and N levels off at n_cap
+    double n_cap = 10000;
 
     // rollout score: app_weight * APP + eval_weight * the best eval of the leaf's moves
     double app_weight = 1.0 / 3.0;

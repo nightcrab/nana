@@ -68,7 +68,7 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("c_base", c.c_base);
     visit("depth_step", c.depth_step);
     visit("prior_exponent", c.prior_exponent);
-    visit("decay", c.decay);
+    visit("n_cap", c.n_cap);
     visit("app_weight", c.app_weight);
     visit("eval_weight", c.eval_weight);
 }
@@ -125,8 +125,8 @@ void finish(NanaConfig& c) {
     if (!(c.c_base > 0)) {
         fail("c_base must be positive");
     }
-    if (!(c.decay > 0 && c.decay <= 1)) {
-        fail("decay must be in (0, 1]");
+    if (!(c.n_cap >= 1)) {
+        fail("n_cap must be at least 1");
     }
     for (int r = 1; r <= NanaConfig::PRIOR_TABLE; r++) {
         c.prior_weight[r - 1] = (float)std::pow((double)r, -c.prior_exponent);
@@ -162,6 +162,13 @@ NanaConfig load() {
         }
         if (!j.is_object()) {
             fail(std::string(path) + " must hold a JSON object");
+        }
+        // configs from before n_cap gave its decay, 1 - 1 / n_cap
+        if (j.contains("decay") && !j.contains("n_cap")) {
+            const double decay = j["decay"].is_number() ? j["decay"].get<double>() : -1;
+            if (!(decay >= 0 && decay <= 1)) fail(std::string(path) + ": decay must be in [0, 1]");
+            j["n_cap"] = decay < 1 ? 1 / (1 - decay) : std::numeric_limits<double>::max();
+            j.erase("decay");
         }
         // every key must be one we know
         size_t known = 0;

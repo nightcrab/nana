@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Random search over the work-requesting heuristics, scored by simulations/s.
+"""Random search over the work-requesting and stealing heuristics, scored by simulations/s.
 
 The heuristics only decide which thread runs a rollout and when, so throughput at a
-fixed load factor is a fair objective. Each trial runs both bench positions; the
+fixed load factor is a fair objective. steal_chiplet_penalty only acts on a machine with more
+than one L3 (EC2's EPYC, not the laptop), so tune on the machine the values are for. Each trial runs both bench positions; the
 current defaults are re-run every few trials so clock/thermal drift can be divided out.
 The best trials are then re-run with more repetitions next to the defaults.
 
@@ -18,24 +19,37 @@ import subprocess
 import sys
 import time
 
-DEFAULTS = {"rollout_weight": 30, "low_water": 30, "give_margin": 3, "backoff_iterations": 64}
+# RequestTuning's defaults (cpp/Tetris/bot/Search.cpp)
+DEFAULTS = {"message_weight": 1, "rollout_weight": 30, "low_water": 30, "give_margin": 3,
+            "backoff_iterations": 64, "steal_chiplet_penalty": 30, "steal_topk": 4, "steal_temperature": 10}
 ENV = {
+    "message_weight": "NANA_MESSAGE_WEIGHT",
     "rollout_weight": "NANA_ROLLOUT_WEIGHT",
     "low_water": "NANA_LOW_WATER",
     "give_margin": "NANA_GIVE_MARGIN",
     "backoff_iterations": "NANA_BACKOFF_ITERATIONS",
+    "steal_chiplet_penalty": "NANA_STEAL_CHIPLET_PENALTY",
+    "steal_topk": "NANA_STEAL_TOPK",
+    "steal_temperature": "NANA_STEAL_TEMPERATURE",
 }
 
 
 def sample(rng):
-    """One random configuration. Thresholds scale with the rollout weight, since they
-    are all in the same units."""
+    """One random configuration. Everything but backoff_iterations and steal_topk is in work
+    units, so it scales with the rollout weight. A message is the unit (1), or 0 to count only
+    rollouts as load: any other message weight just rescales all of them together."""
     rollout_weight = round(math.exp(rng.uniform(math.log(5), math.log(120))))
+    # 0 = always ask the most loaded thread kept
+    temperature = 0 if rng.random() < 0.2 else math.exp(rng.uniform(math.log(0.05), math.log(2)))
     return {
+        "message_weight": rng.choice((0, 1)),
         "rollout_weight": rollout_weight,
         "low_water": round(rng.uniform(0, 4) * rollout_weight),
         "give_margin": round(rng.uniform(0, 1.5) * rollout_weight),
         "backoff_iterations": round(math.exp(rng.uniform(math.log(1), math.log(2048)))),
+        "steal_chiplet_penalty": round(rng.uniform(0, 3) * rollout_weight),
+        "steal_topk": rng.randint(1, 8),
+        "steal_temperature": round(temperature * rollout_weight),
     }
 
 
