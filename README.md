@@ -158,12 +158,14 @@ Omitted settings keep their defaults; a missing file uses all defaults. Unknown 
 and unreadable files are errors. Restart the bot after editing. The same file accepts evaluation
 weights and search settings from `cpp/Tetris/bot/Config.hpp`. In launcher builds, `variant` selects
 an ISA variant (an empty string chooses automatically). TBP uses JSON instead of runtime environment
-settings.
+settings. A `garbage_delay` in the client's `rules` message (the turns an attack spends in transit, as
+Universal-Shaktris-Stadium sends it) sets the garbage delay Nana plays with.
 
 `nana_emulate` and benchmarks keep their existing overrides, including the tuner's configuration:
 
 * `NANA_CONFIG=path/to/config.json` loads evaluation and search weights. `nana_emulate --print-config` shows the format.
 * `NANA_RULES=botris` selects Botris instead of the default TETR.IO S1 rules.
+* `NANA_GARBAGE_DELAY=<turns>` sets how long an attack spends in transit (default 0 for TETR.IO, 1 for Botris).
 * `NANA_MARKOV_OPPONENT=1` models the opponent with the Markov model.
 * Other runtime overrides, such as `NANA_REWARD` and `NANA_PIN_LAYOUT`, continue to work for these tools.
 

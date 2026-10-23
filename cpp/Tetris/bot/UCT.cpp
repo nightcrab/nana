@@ -101,7 +101,7 @@ Move PackedMove::unpack() const {
 }
 
 UCTNode::UCTNode(const EmulationGame &state) {
-	std::vector<Piece> raw_actions = state.game.get_possible_piece_placements();
+	std::vector<Piece> raw_actions = state.placements();
 	// the smeared movegen occasionally yields a placement with a mino off the board (seen at x = -1),
 	// which place_piece would write outside the board's columns
 	std::erase_if(raw_actions, [&](const Piece& piece) {

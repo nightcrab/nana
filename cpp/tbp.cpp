@@ -355,6 +355,16 @@ int main() {
                     }
                 }
 
+                // the turns an attack spends in transit (the stadium sends it): games from the next
+                // start on play it
+                if (message.contains("garbage_delay")) {
+                    int delay;
+                    CHECK_ERR(delay = message["garbage_delay"].get<int>());
+                    if (delay >= 0) {
+                        EmulationGame::set_garbage_delay(delay);
+                    }
+                }
+
                 // send the ready message to the client
                 message.clear();
                 message["type"] = "ready";

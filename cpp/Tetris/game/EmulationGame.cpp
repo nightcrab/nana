@@ -1,5 +1,6 @@
 #include "EmulationGame.hpp"
 #include "Config.hpp"
+#include "engine/RotationSystems.hpp"
 #include "engine/Utility.hpp"
 
 #include "Util/fasthash.h"
@@ -24,15 +25,45 @@ const char* EmulationGame::rules() {
     return name;
 }
 
+namespace {
+// -1 until TBP rules set it
+int tbp_garbage_delay = -1;
+}
+
+int EmulationGame::default_garbage_delay() {
+    if (tbp_garbage_delay >= 0) return tbp_garbage_delay;
+    static const int env = [] {
+        const char* delay = std::getenv("NANA_GARBAGE_DELAY");
+        if (!delay || !*delay) {
+            return -1;
+        }
+        char* end;
+        const long value = std::strtol(delay, &end, 10);
+        if (*end || value < 0) {
+            std::cerr << "NANA_GARBAGE_DELAY=" << delay << " isn't a number of turns" << std::endl;
+            std::exit(1);
+        }
+        return (int)value;
+    }();
+    if (env >= 0) return env;
+    return std::strcmp(rules(), "botris") == 0 ? 1 : 0;
+}
+
+void EmulationGame::set_garbage_delay(int delay) {
+    tbp_garbage_delay = delay;
+}
+
 EmulationGame::EmulationGame(bool apply_rules) {
-    if (apply_rules && std::strcmp(rules(), "tetrio") == 0) {
-        set_tetrio_rules();
+    if (apply_rules) {
+        if (std::strcmp(rules(), "tetrio") == 0) {
+            set_tetrio_rules();
+        }
+        garbage_delay = default_garbage_delay();
     }
 }
 
 void EmulationGame::set_tetrio_rules() {
     game.mode = TetrioS1();
-    stadium_rules = true;
 }
 
 void EmulationGame::set_move(Move move) {
@@ -51,17 +82,45 @@ void EmulationGame::chance_move() {
         }
     }
 
-    for (int& garbage : buffered_garbage) {
-        garbage_meter.insert(garbage_meter.begin(), garbage);
-    }
+    const bool tetrio = std::holds_alternative<TetrioS1>(game.mode);
 
-    buffered_garbage.clear();
+    // the opponent's attack that has waited out the delay joins the meter
+    if (garbage_delay > 0) {
+        buffered_garbage.resize(garbage_delay);
+        if (buffered_garbage.front() > 0) {
+            garbage_meter.insert(garbage_meter.begin(), buffered_garbage.front());
+        }
+        std::shift_left(buffered_garbage.begin(), buffered_garbage.end(), 1);
+        buffered_garbage.back() = 0;
+    }
 
     int garbage_amount = 0;
 
     // simulate opponent
 
     garbage_amount = markov_opponent ? (int)markov.play() : (int)opponent.play();
+
+    // ours that has waited out the delay reaches it, after the piece it just played (so the stadium
+    // rules' tank in receiveAttack goes by that piece). what's left of its attack after its meter
+    // first cancels ours in transit, soonest first
+    if (tetrio && garbage_delay > 0) {
+        outgoing_garbage.resize(garbage_delay);
+        for (int& garbage : outgoing_garbage) {
+            const int cancelled = std::min(garbage_amount, garbage);
+            garbage -= cancelled;
+            garbage_amount -= cancelled;
+        }
+        if (outgoing_garbage.front() > 0) {
+            if (markov_opponent) {
+                markov.receiveAttack(outgoing_garbage.front());
+            }
+            else {
+                opponent.receiveAttack(outgoing_garbage.front());
+            }
+        }
+        std::shift_left(outgoing_garbage.begin(), outgoing_garbage.end(), 1);
+        outgoing_garbage.back() = 0;
+    }
 
     if (garbage_scale != 1 && garbage_amount > 0) {
         float scaled = garbage_amount * garbage_scale + ramp_carry;
@@ -84,12 +143,12 @@ void EmulationGame::chance_move() {
     kill_survival *= 1.0f - death;
 
     if (garbage_amount > 0) {
-        if (stadium_rules) {
+        if (garbage_delay == 0) {
             // both players move at once: it meets our next piece's attack, and is tanked after it
             garbage_meter.insert(garbage_meter.begin(), garbage_amount);
         }
         else {
-            buffered_garbage.insert(buffered_garbage.begin(), garbage_amount);
+            buffered_garbage.back() = garbage_amount;
         }
     }
 };
@@ -161,8 +220,23 @@ void EmulationGame::play_moves(){
         }
     }
 
+    const bool tetrio = std::holds_alternative<TetrioS1>(game.mode);
+
+    // zero pass-through: then the garbage still in transit to us, soonest first
+    if (tetrio) {
+        for (int& incoming : buffered_garbage) {
+            const int cancelled = std::min(damage, incoming);
+            incoming -= cancelled;
+            damage -= cancelled;
+        }
+    }
+
     // send damage
-    if (markov_opponent) {
+    if (tetrio && garbage_delay > 0) {
+        outgoing_garbage.resize(garbage_delay);
+        outgoing_garbage.back() += damage;
+    }
+    else if (markov_opponent) {
         markov.receiveAttack(damage);
     }
     else {
@@ -171,7 +245,7 @@ void EmulationGame::play_moves(){
     last_sent = damage;
 
     // combo block
-    if (cleared_lines == 0 && stadium_rules) {
+    if (cleared_lines == 0 && tetrio) {
         // the whole meter at once, one hole
         int total = 0;
         for (int garbage : garbage_meter) {
@@ -219,8 +293,102 @@ void EmulationGame::objectively_play_moves() {
 }
 
 
+namespace {
+// best spin (spinType) a rotation lands each T state with: [rotation][x][y] of its centre
+using SpinTable = std::array<std::array<std::array<uint8_t, Board::height>, Board::width>, 4>;
+
+// the stadium's Game::validate_spin for every T placement at once: every state reachable from spawn
+// by shift, SRS rotation and sonic drop, and the three-corner spin (srs_rotate, the same code as the
+// stadium's Game::rotate) of each rotation that succeeds, the best kept per state
+void t_spins(const Board& board, SpinTable& best) {
+    const Piece spawn(PieceType::T);
+    if (Shaktris::Utility::collides(board, spawn)) {
+        return;
+    }
+    // a T's centre is one of its minos, so every state's is on the board
+    std::array<std::array<std::array<bool, Board::height>, Board::width>, 4> visited{};
+    std::vector<Piece> open;
+    open.reserve(128);
+    auto visit = [&](const Piece& piece) {
+        bool& seen = visited[piece.rotation][piece.position.x][piece.position.y];
+        if (!seen) {
+            seen = true;
+            open.push_back(piece);
+        }
+    };
+    visit(spawn);
+    while (!open.empty()) {
+        const Piece piece = open.back();
+        open.pop_back();
+        for (TurnDirection dir : { TurnDirection::Left, TurnDirection::Right }) {
+            Piece next = piece;
+            next.spin = spinType::null;
+            srs_rotate(board, next, dir);
+            // a failed rotation leaves the piece where it was
+            if (next.rotation == piece.rotation) {
+                continue;
+            }
+            uint8_t& spin = best[next.rotation][next.position.x][next.position.y];
+            spin = std::max(spin, (uint8_t)next.spin);
+            visit(next);
+        }
+        for (int dir : { -1, 1 }) {
+            Piece next = piece;
+            Shaktris::Utility::shift(board, next, dir);
+            visit(next);
+        }
+        Piece next = piece;
+        Shaktris::Utility::sonic_drop(board, next);
+        visit(next);
+    }
+}
+
+// a spin needs three of a T's corners filled (srs_rotate). off the board counts as filled here, so
+// this never misses one
+bool spin_corners(const Board& board, const Piece& piece) {
+    int filled = 0;
+    for (int dx : { -1, 1 }) {
+        for (int dy : { -1, 1 }) {
+            const int x = piece.position.x + dx;
+            const int y = piece.position.y + dy;
+            filled += x < 0 || x >= (int)Board::width || y < 0 || y >= (int)Board::height || board.get(x, y);
+        }
+    }
+    return filled >= 3;
+}
+}
+
+std::vector<Piece> EmulationGame::placements() const {
+    std::vector<Piece> pieces = game.get_possible_piece_placements();
+    if (!std::holds_alternative<TetrioS1>(game.mode)) {
+        // Botris rewards any piece's spin: the movegen's (immobile placements)
+        return pieces;
+    }
+
+    // the movegen marks immobile placements as spins; the stadium only grants T-spins, by rotation
+    bool candidates = false;
+    for (Piece& piece : pieces) {
+        piece.spin = spinType::null;
+        candidates |= piece.type == PieceType::T && spin_corners(game.board, piece);
+    }
+    if (!candidates) {
+        return pieces;
+    }
+
+    SpinTable best{};
+    t_spins(game.board, best);
+    for (Piece& piece : pieces) {
+        // (the movegen occasionally yields a placement off the board: never reachable, so no spin)
+        if (piece.type == PieceType::T && piece.position.x >= 0 && piece.position.x < (int)Board::width &&
+            piece.position.y >= 0 && piece.position.y < (int)Board::height) {
+            piece.spin = (spinType)best[piece.rotation][piece.position.x][piece.position.y];
+        }
+    }
+    return pieces;
+}
+
 std::vector<Move> EmulationGame::legal_moves() {
-    std::vector<Piece> raw_actions = game.get_possible_piece_placements();
+    std::vector<Piece> raw_actions = placements();
 
     std::vector<Move> moves;
 
@@ -252,6 +420,7 @@ uint32_t EmulationGame::hash() const {
     for (int garbage : garbage_meter) {
         hash = fasthash32(&garbage, sizeof(garbage), hash);
     }
+    // garbage in transit is left out: no player sees it (at best they infer it)
     return hash;
 }
 

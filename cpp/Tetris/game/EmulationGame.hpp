@@ -23,10 +23,21 @@ class EmulationGame {
     explicit EmulationGame(bool apply_rules = true);
     // the ruleset games are played with: "tetrio" or "botris" (from NANA_RULES, or TBP configuration)
     static const char* rules();
+    // the garbage delay new games start with: TBP rules' garbage_delay (set_garbage_delay), else
+    // NANA_GARBAGE_DELAY, else the ruleset's (0 for tetrio, 1 for botris)
+    static int default_garbage_delay();
+    static void set_garbage_delay(int delay);
 
     Game game;
 
+    // turns an attack spends in transit before it joins the receiver's meter, as in the stadium's
+    // VersusGame: 0 lands it the turn it's sent. under TETR.IO rules our attacks wait as long, and
+    // garbage in transit can be cancelled; botris (default 1) only delays the opponent's
+    int garbage_delay = 0;
+    // the opponent's attacks in transit: [i] joins the meter i + 1 chance_moves from now
     std::vector<int> buffered_garbage;
+    // ours (TETR.IO rules): [i] reaches the opponent i + 1 chance_moves from now, after its piece
+    std::vector<int> outgoing_garbage;
     std::vector<int> garbage_meter;
 
     // can be set if the opponent already has some B2B
@@ -45,11 +56,10 @@ class EmulationGame {
     MarkovOpponent markov;
     bool markov_opponent = false;
 
-    // the stadium's garbage rules (Universal-Shaktris-Stadium's VersusGame): the opponent's attack
-    // reaches the meter the same turn instead of a turn later, and a piece that clears no lines
-    // tanks the whole meter at once (one hole), not 8 lines
-    bool stadium_rules = false;
-    // TETR.IO damage (TetrioS1, the same table as the stadium's TetrioStats) and stadium_rules
+    // TETR.IO damage (TetrioS1, the same table as the stadium's TetrioStats), and with it the
+    // stadium's rules (Universal-Shaktris-Stadium's VersusGame): only T-spins, scored as the
+    // stadium validates them (see placements), an attack cancels the meter and then garbage in
+    // transit, and a piece that clears no lines tanks the whole meter at once (one hole), not 8 lines
     void set_tetrio_rules();
 
     // the opponent's death along the search path, for the search's reward: kill_value is
@@ -104,6 +114,10 @@ class EmulationGame {
     void play_moves();
     void objectively_play_moves();
 
+    // the placements of the current and hold pieces. under TETR.IO rules a T's spin is the one the
+    // stadium grants (its Game::validate_spin): the best a rotation onto the placement from a state
+    // reachable from spawn scores by the three-corner rule, and other pieces don't spin
+    std::vector<Piece> placements() const;
     std::vector<Move> legal_moves();
 
     uint32_t hash() const;
