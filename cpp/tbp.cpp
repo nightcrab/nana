@@ -279,7 +279,8 @@ auto json_to_spin(nlohmann::json json) -> spinType {
 int main() {
     try {
         loadTbpConfig();
-        const int CORE_COUNT = config().threads;
+        // search threads: nana.json's, unless the client sets them in rules (set_threads)
+        int core_count = config().threads;
 
         // send info state to the client
         std::vector<PieceType> queue;
@@ -318,8 +319,9 @@ int main() {
         message["name"] = "Nana";
         message["version"] = "0.1";
         message["author"] = "Shakkar + Awyzza";
-        // part of the TBP info message; clients like the stadium require it
-        message["features"] = nlohmann::json::array();
+        // part of the TBP info message; clients like the stadium require it. set_threads: rules may
+        // carry the number of search threads
+        message["features"] = nlohmann::json::array({ "set_threads" });
 
         // send just output to stdout
         std::cout << message.dump() << std::endl;
@@ -343,8 +345,15 @@ int main() {
                 break;
             }
             else if (type == "rules") {
-
-                // currently there really is no use for this because both the client and spec doesnt really use this
+                // set_threads. the search starts its threads on the first start, so later rules can't
+                // change them
+                if (message.contains("threads") && !Search::initialised) {
+                    int threads;
+                    CHECK_ERR(threads = message["threads"].get<int>());
+                    if (threads >= 1) {
+                        core_count = threads;
+                    }
+                }
 
                 // send the ready message to the client
                 message.clear();
@@ -479,7 +488,7 @@ int main() {
 
                 refreshRoot();
                 if (!Search::initialised) {
-                    Search::startSearch(game, CORE_COUNT);
+                    Search::startSearch(game, core_count);
                 }
                 else {
                     Search::continueSearch(game);
