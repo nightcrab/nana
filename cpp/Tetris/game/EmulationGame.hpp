@@ -113,6 +113,9 @@ class EmulationGame {
     double opponent_deaths() const;
     bool opponent_dead() const;
     void reset_opponent_rng();
+    // fresh chance for a simulation: a new seed, and the pieces left in the current bag in a new
+    // order (which pieces are left is known under seven-bag; their order isn't)
+    void reseed_chance();
     // a simulation starting from the search root: fresh randomness, and the HMM opponent's hidden
     // state drawn from the root belief. on a copy of the root, never on the shared root itself
     void start_from_root();

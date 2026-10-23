@@ -293,9 +293,17 @@ void EmulationGame::reset_opponent_rng() {
     }
 }
 
-void EmulationGame::start_from_root() {
+void EmulationGame::reseed_chance() {
     rng.PPTRNG = fast_seed();
+    const int left = rng.bagiterator;
+    for (int i = (int)rng.bag.size() - 1; i > left; i--) {
+        std::swap(rng.bag[i], rng.bag[left + rng.getRand(i - left + 1)]);
+    }
     reset_opponent_rng();
+}
+
+void EmulationGame::start_from_root() {
+    reseed_chance();
     if (markov_opponent) {
         markov.resample_from_root();
     }

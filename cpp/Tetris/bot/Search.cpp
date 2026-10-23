@@ -1326,8 +1326,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 return;
             }
 
-            here.rng.PPTRNG = fast_seed();
-            here.reset_opponent_rng();
+            here.reseed_chance();
 
             job.state = std::move(here);
             job.history = rows;

@@ -40,6 +40,32 @@ auto type_to_json(PieceType type) -> nlohmann::json {
         break;
     }
 };
+auto json_to_type(nlohmann::json json) -> PieceType;
+
+// the pieces left in the current bag after the queue, from a seven_bag randomizer state (the
+// stadium sends it on start); empty if the client doesn't say
+static std::vector<PieceType> json_to_bag(const nlohmann::json& message) {
+    std::vector<PieceType> left;
+    if (!message.contains("randomizer") || message["randomizer"].value("type", "") != "seven_bag") {
+        return left;
+    }
+    for (const auto& piece : message["randomizer"]["bag_state"]) {
+        const PieceType type = json_to_type(piece);
+        if (type == PieceType::Empty || std::find(left.begin(), left.end(), type) != left.end()) {
+            return {};
+        }
+        left.push_back(type);
+    }
+    return left;
+}
+
+// put the pieces left in the bag where the rng deals them next; the search shuffles their order
+// for each simulation (EmulationGame::reseed_chance)
+static void apply_bag(RNG& rng, const std::vector<PieceType>& left) {
+    rng.bagiterator = uint8_t(rng.bag.size() - left.size());
+    std::copy(left.begin(), left.end(), rng.bag.begin() + rng.bagiterator);
+}
+
 auto json_to_type(nlohmann::json json) -> PieceType {
 
     if (json.is_null()) {
@@ -260,6 +286,8 @@ int main() {
 
         // generated pieces that we know about
         int total_pieces = 0;
+        // the pieces left in the current bag after the queue, when the client tells us (empty if not)
+        std::vector<PieceType> bag_left;
 
         EmulationGame game;
 
@@ -307,7 +335,11 @@ int main() {
             std::string type = message["type"];
 
             if (type == "quit") {
-                Search::endSearch();
+                // endSearch waits for a running search's minimum work, so with none (after suggest, the
+                // stadium's last message) it would never return
+                if (Search::searching) {
+                    Search::endSearch();
+                }
                 break;
             }
             else if (type == "rules") {
@@ -435,6 +467,11 @@ int main() {
                 game.game.combo = combo;
                 game.game.b2b = back_to_back;
 
+                bag_left = json_to_bag(message);
+                if (!bag_left.empty()) {
+                    apply_bag(game.rng, bag_left);
+                }
+
                 // end previous search this can happen if damage was sent and immediately after the game is over
                 if (Search::searching) {
                     Search::endSearch();
@@ -454,7 +491,21 @@ int main() {
 
                 total_pieces += 1;
 
-                game.rng.bagiterator = total_pieces % 7;
+                const auto dealt = std::find(bag_left.begin(), bag_left.end(), piece);
+                if (dealt != bag_left.end()) {
+                    // it came out of the bag; the last one out starts the next bag
+                    bag_left.erase(dealt);
+                    if (bag_left.empty()) {
+                        bag_left = { PieceType::S, PieceType::Z, PieceType::J, PieceType::L,
+                                     PieceType::T, PieceType::O, PieceType::I };
+                    }
+                    apply_bag(game.rng, bag_left);
+                }
+                else {
+                    // no bag state from the client, or a piece that wasn't in it
+                    bag_left.clear();
+                    game.rng.bagiterator = total_pieces % 7;
+                }
             }
             else if (type == "suggest") {
                 // end search and give the best move
