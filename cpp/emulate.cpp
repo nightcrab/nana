@@ -4,12 +4,11 @@
 // so two configs played on the same seeds can be compared game by game.
 //
 // usage: nana_emulate [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
-//                  [--markov-env 0|1] [--opponent-log FILE]
+//                  [--opponent-log FILE]
 //                  [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]
 //
 // prints one JSON line per game to stdout and a summary to stderr.
-// --markov-env 1 plays the games against MarkovOpponent instead of the handcrafted Opponent (the
-// search's model is set separately, by NANA_MARKOV_OPPONENT). --opponent-log writes what passed
+// the games are played against MarkovOpponent, which the search models too. --opponent-log writes what passed
 // between the bot and the opponent each piece, to fit MarkovOpponent with
 // scripts/train_markov_opponent.py.
 // --sims N searches each move for N simulations instead of --ms milliseconds. with --threads 1 and
@@ -50,7 +49,6 @@ struct Options {
     int ramp = 0;
     // games still alive here are cut off (counted as survived, not died)
     int max_pieces = 2000;
-    bool markov_env = false;
     std::string opponent_log;
     // simulations per move instead of ms (0 = use ms)
     uint64_t sims = 0;
@@ -76,14 +74,8 @@ static EmulationGame newGame(uint64_t game_seed, const Options& options) {
     game.rng.PPTRNG = seedFor(game_seed, 0);
     game.rng.makebag();
 
-    // the opponent draws its first queue state at construction, from an unseeded rng
-    game.opponent.rng.PPTRNG = seedFor(game_seed, 1);
-    game.opponent.nextI = game.opponent.rng.getRand(7);
-    game.opponent.nextSpinPiece = game.opponent.rng.getRand(7);
-    if (options.markov_env) {
-        game.reset_opponent(true);
-        game.markov.seed(seedFor(game_seed, 1));
-    }
+    game.reset_opponent();
+    game.markov.seed(seedFor(game_seed, 1));
 
     game.game.current_piece = game.rng.getPiece();
     for (auto& piece : game.game.queue) {
@@ -238,7 +230,6 @@ static bool parse(int argc, const char** argv, Options& options) {
         else if (arg == "--seed") options.seed = (uint64_t)value;
         else if (arg == "--ramp") options.ramp = (int)value;
         else if (arg == "--max-pieces") options.max_pieces = (int)value;
-        else if (arg == "--markov-env") options.markov_env = value != 0;
         else if (arg == "--sims") options.sims = (uint64_t)value;
         else if (arg == "--search-seed") options.search_seed = value != 0;
         else if (arg == "--cpu") options.cpu = (int)value;
@@ -261,7 +252,7 @@ int main(int argc, const char** argv) {
     catch (const std::exception&) {
         std::cerr << "usage: " << argv[0]
             << " [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]"
-            << " [--markov-env 0|1] [--opponent-log FILE] [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]"
+            << " [--opponent-log FILE] [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]"
             << std::endl;
         return 1;
     }
@@ -320,8 +311,8 @@ int main(int argc, const char** argv) {
             << ",\"true_attack\":" << game.true_attack
             << ",\"lines\":" << game.lines
             // before the ramp scales it
-            << ",\"opponent_attack\":" << (game.markov_opponent ? game.markov.total_damage : game.opponent.total_damage)
-            << ",\"opponent_deaths\":" << (game.markov_opponent ? game.markov.deaths : game.opponent.deaths)
+            << ",\"opponent_attack\":" << game.markov.total_damage
+            << ",\"opponent_deaths\":" << game.markov.deaths
             << ",\"sims_per_move\":" << result.simulations / moves
             << ",\"restarts_per_sim\":" << (double)result.restarts / std::max<uint64_t>(result.simulations, 1)
             << ",\"root_per_sim\":" << (double)result.root_backprops / std::max<uint64_t>(result.simulations, 1)

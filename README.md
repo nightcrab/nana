@@ -148,7 +148,6 @@ Copy [nana.example.json](nana.example.json) there as `nana.json` and edit it:
 {
   "rules": "tetrio",
   "threads": 3,
-  "markov_opponent": true,
   "reward": "kill",
   "pin_layout": "compact"
 }
@@ -166,7 +165,6 @@ Universal-Shaktris-Stadium sends it) sets the garbage delay Nana plays with.
 * `NANA_CONFIG=path/to/config.json` loads evaluation and search weights. `nana_emulate --print-config` shows the format.
 * `NANA_RULES=botris` selects Botris instead of the default TETR.IO S1 rules.
 * `NANA_GARBAGE_DELAY=<turns>` sets how long an attack spends in transit (default 0 for TETR.IO, 1 for Botris).
-* `NANA_MARKOV_OPPONENT=1` models the opponent with the Markov model.
 * Other runtime overrides, such as `NANA_REWARD` and `NANA_PIN_LAYOUT`, continue to work for these tools.
 
 ## Tuning

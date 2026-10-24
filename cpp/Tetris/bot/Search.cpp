@@ -234,8 +234,8 @@ static void loadTuning() {
 // then the HMM's death_value from the leaf), the value is K' + (1 - K') r with K' = (1 - lambda) K:
 // a kill is worth 1, less lambda of the way back to r. app: APP and eval only, the opponent's death
 // ignored, for the APP strength benchmarks. set from the environment when a search starts:
-// NANA_REWARD=kill|app, NANA_REWARD_SCALE, NANA_KILL_LAMBDA, NANA_KILL_DISCOUNT (for the handcrafted
-// opponent; the HMM uses its fitted discount)
+// NANA_REWARD=kill|app, NANA_REWARD_SCALE, NANA_KILL_LAMBDA, NANA_KILL_DISCOUNT (only when the HMM
+// has no fitted discount)
 struct RewardTuning {
     bool app_only = false;
     float scale = 0.25f;
@@ -272,7 +272,7 @@ static void loadRewardTuning() {
 // belief for the simulations to sample from; otherwise the opponent starts fresh
 static void adoptOpponentBelief(EmulationGame& root) {
     markov::root_belief.active = false;
-    if (root.markov_opponent && Search::root_opponent) {
+    if (Search::root_opponent) {
         root.markov.adopt(*Search::root_opponent);
         Search::root_opponent->publish();
     }
@@ -282,20 +282,12 @@ static void adoptOpponentBelief(EmulationGame& root) {
 static void resetKill(EmulationGame& root) {
     loadRewardTuning();
     const float fitted = markov::params().discount;
-    const float discount = root.markov_opponent && fitted > 0 ? fitted : reward_tuning.discount;
+    const float discount = fitted > 0 ? fitted : reward_tuning.discount;
     root.reset_kill(discount, !reward_tuning.app_only);
     if (NANA_SUFFIX && !reward_tuning.app_only) {
         std::cerr << "NANA_SUFFIX needs NANA_REWARD=app (reward \"app\" in nana.json)" << std::endl;
         std::exit(2);
     }
-}
-
-// NANA_MARKOV_OPPONENT=1: the search models the opponent with MarkovOpponent instead of the
-// handcrafted Opponent, whichever the game being played uses. read when a search starts
-static bool markovSearch() {
-    if (const auto* c = tbpConfig()) return c->markov_opponent;
-    const char* text = std::getenv("NANA_MARKOV_OPPONENT");
-    return text && std::atoi(text) != 0;
 }
 
 // state private to one worker
@@ -342,8 +334,8 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     Search::core_count = core_count;
 
     root_state = state;
-    // the game's own opponent may be the HMM, true state and all: the search starts from its model
-    root_state.reset_opponent(markovSearch());
+    // the game's own opponent is the HMM, true state and all: the search starts from its model
+    root_state.reset_opponent();
     adoptOpponentBelief(root_state);
     resetKill(root_state);
 
@@ -416,7 +408,7 @@ void Search::continueSearch(EmulationGame state) {
     root_state.true_attack = state.true_app() * 0;
     root_state.pieces = 0;
     root_state.lines = 2;
-    root_state.reset_opponent(markovSearch());
+    root_state.reset_opponent();
     adoptOpponentBelief(root_state);
     resetKill(root_state);
 

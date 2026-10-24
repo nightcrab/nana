@@ -55,7 +55,6 @@ DEFAULTS = {
     "games_per_eval": 32,
     "spread": 0.3,
     "horizon": 100,
-    "env": "hmm",
     # the ruleset games are played with (NANA_RULES)
     "rules": "tetrio",
     "pso": {"inertia_start": 0.9, "inertia_end": 0.4, "cognitive": 1.5, "social": 1.5, "vmax": 0.2},
@@ -169,7 +168,7 @@ class Run:
 
     def make_stage(self, sims):
         return Stage({"name": f"s{sims}", "sims": sims, "garbage_scale": garbage_for(sims),
-                      "horizon": self.settings["horizon"], "env": self.settings["env"], "rules": self.rules()})
+                      "horizon": self.settings["horizon"], "env": self.settings.get("env", "hmm"), "rules": self.rules()})
 
     def rules(self):
         # runs from before the setting played tetrio
@@ -230,7 +229,7 @@ class Run:
     def health_checks(self):
         self.activity("health checks")
         started = time.monotonic()
-        stage = Stage(dict(CHECK_STAGE, horizon=self.settings["horizon"], env=self.settings["env"], rules=self.rules()))
+        stage = Stage(dict(CHECK_STAGE, horizon=self.settings["horizon"], env=self.settings.get("env", "hmm"), rules=self.rules()))
         base = self.state["base_config"]
         center = self.config(self.pso.best()[1] if self.pso.best() else self.pso.x[0])
         random_point = self.config(np.random.default_rng(1).random(len(self.space)))

@@ -350,8 +350,6 @@ private:
             std::cout << "APP:" << game.app() << std::endl;
             std::cout << "True APP:" << game.true_app() << std::endl;
 
-            std::cout << Opponent(game.game).stateString().str() << std::endl;
-
             for (int garbage : game.garbage_meter) {
                 // do this to get rid of unused variable warning
                 (void)garbage;

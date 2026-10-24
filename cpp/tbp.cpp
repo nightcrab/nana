@@ -442,16 +442,6 @@ int main() {
 
                     // tbp 2
                     CHECK_ERR(player_2 = message["opponents"][0]);
-                    Board board2;
-
-                    CHECK_ERR(board2 = json_to_board(player_2["board"]));
-                    // there is more information that isnt just the board, such as hold, queue, combo, b2b
-                    // but the opponent constructor only needs the board so thats all im going to pull
-
-                    Game game2;
-                    game2.board = board2;
-                    game.opponent = Opponent(game2);
-
                     readOpponent(player_2, seen_opponent);
                 }
 #endif
@@ -569,14 +559,6 @@ int main() {
                     // tbp 2
                     if (full.contains("opponents") && full["opponents"].is_array() && !full["opponents"].empty()) {
                         player_2 = full["opponents"][0];
-                        Board board2;
-
-                        CHECK_ERR(board2 = json_to_board(player_2["board"]));
-
-                        Game game2;
-                        game2.board = board2;
-                        game.opponent = Opponent(game2);
-
                         readOpponent(player_2, seen_opponent);
                     }
                 }

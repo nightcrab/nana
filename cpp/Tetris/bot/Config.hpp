@@ -12,7 +12,6 @@ struct NanaConfig {
     // Runtime settings for TBP; emulation and benchmarks retain their environment overrides.
     std::string rules = "tetrio";
     int threads = 3;
-    bool markov_opponent = true;
     std::string reward = "kill";
     double reward_scale = 0.25;
     double kill_lambda = 0.0;

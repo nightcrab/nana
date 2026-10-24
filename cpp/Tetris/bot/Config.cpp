@@ -29,7 +29,6 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     if (tbpSettingsEnabled()) {
         visit("rules", c.rules);
         visit("threads", c.threads);
-        visit("markov_opponent", c.markov_opponent);
         visit("reward", c.reward);
         visit("reward_scale", c.reward_scale);
         visit("kill_lambda", c.kill_lambda);
@@ -169,6 +168,14 @@ NanaConfig load() {
             if (!(decay >= 0 && decay <= 1)) fail(std::string(path) + ": decay must be in [0, 1]");
             j["n_cap"] = decay < 1 ? 1 / (1 - decay) : std::numeric_limits<double>::max();
             j.erase("decay");
+        }
+        // configs from before the handcrafted opponent was removed chose the opponent model; only the
+        // HMM is left
+        if (j.contains("markov_opponent")) {
+            if (j["markov_opponent"] != true) {
+                fail(std::string(path) + ": markov_opponent: the handcrafted opponent was removed; delete the key");
+            }
+            j.erase("markov_opponent");
         }
         // every key must be one we know
         size_t known = 0;

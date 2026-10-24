@@ -1,7 +1,7 @@
 #pragma once
-#include "Opponent.hpp"
 #include "MarkovOpponent.hpp"
 #include "engine/Game.hpp"
+#include "util/rng.hpp"
 
 #include <ostream>
 #include <queue>
@@ -51,10 +51,7 @@ class EmulationGame {
 
     Move move;
     RNG rng;
-    Opponent opponent;
-    // plays markov in place of opponent
     MarkovOpponent markov;
-    bool markov_opponent = false;
 
     // TETR.IO damage (TetrioS1, the same table as the stadium's TetrioStats), and with it the
     // stadium's rules (Universal-Shaktris-Stadium's VersusGame): only T-spins, scored as the
@@ -64,8 +61,7 @@ class EmulationGame {
 
     // the opponent's death along the search path, for the search's reward: kill_value is
     // sum over its pieces t of P(alive before t) P(dies at t) discount^t, kill_survival P(alive now)
-    // and kill_weight discount^(pieces so far). the HMM gives P(dies at t) exactly (expected_death);
-    // the handcrafted opponent's is 0 or 1
+    // and kill_weight discount^(pieces so far). the HMM gives P(dies at t) exactly (expected_death)
     float kill_value = 0;
     float kill_survival = 1;
     float kill_weight = 1;
@@ -133,8 +129,8 @@ class EmulationGame {
     // a simulation starting from the search root: fresh randomness, and the HMM opponent's hidden
     // state drawn from the root belief. on a copy of the root, never on the shared root itself
     void start_from_root();
-    // a fresh opponent of either model
-    void reset_opponent(bool markov);
+    // a fresh HMM opponent
+    void reset_opponent();
 
     // one CSV row of what passed between us and the opponent this piece, after play_moves and
     // chance_move: the training data for scripts/train_markov_opponent.py

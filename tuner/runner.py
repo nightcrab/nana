@@ -23,20 +23,20 @@ class Stage:
         self.sims = int(spec["sims"])
         self.garbage_scale = float(spec.get("garbage_scale", 1.0))
         self.horizon = int(spec.get("horizon", 100))
-        # hmm: the game plays the opponent HMM (MarkovOpponent, fitted on nana's stadium games) and
-        # the search models it; handcrafted: the old Opponent for both
-        self.env = spec.get("env", "hmm")
+        # the game plays the opponent HMM (MarkovOpponent, fitted on nana's stadium games) and the
+        # search models it. runs from before the handcrafted opponent was removed may name it
+        if spec.get("env", "hmm") != "hmm":
+            raise ValueError(f"stage {self.name}: env {spec['env']!r}: only the hmm opponent is left")
         # the ruleset (NANA_RULES): tetrio or botris
         self.rules = spec.get("rules", "tetrio")
         self.spec = dict(spec)
 
     def args(self):
         return ["--sims", str(self.sims), "--garbage-scale", repr(self.garbage_scale),
-                "--max-pieces", str(self.horizon), "--markov-env", "1" if self.env == "hmm" else "0"]
+                "--max-pieces", str(self.horizon)]
 
     def environment(self):
-        return {"NANA_RULES": self.rules, "NANA_REWARD": "app",
-                "NANA_MARKOV_OPPONENT": "1" if self.env == "hmm" else "0"}
+        return {"NANA_RULES": self.rules, "NANA_REWARD": "app"}
 
 
 def fitness(game, horizon):

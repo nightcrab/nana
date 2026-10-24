@@ -101,7 +101,7 @@ struct BlobKind {
 static void write_job(Job& j) {
 	j.state.pieces++;
 	j.state.game.board.board[0] ^= 1;
-	if (!j.state.opponent.stack.empty()) j.state.opponent.stack[0].height += 1e-9;
+	j.state.markov.meter += 1e-6f;
 	if (!j.path.empty()) j.path.back().actionID++;
 }
 
@@ -109,8 +109,7 @@ static uint64_t touch_state(const EmulationGame& s) {
 	uint64_t x = s.game.board.board[0] + s.pieces;
 	if (!s.garbage_meter.empty()) x += s.garbage_meter[0];
 	if (!s.buffered_garbage.empty()) x += s.buffered_garbage[0];
-	if (!s.opponent.stack.empty()) x += (uint64_t)s.opponent.stack[0].height;
-	if (!s.opponent.garbage.empty()) x += (uint64_t)s.opponent.garbage[0].height;
+	x += (uint64_t)s.markov.meter;
 	return x;
 }
 
@@ -482,9 +481,8 @@ int main(int argc, const char** argv) {
 		return g_sink == 42 ? 1 : 0;
 	}
 
-	std::printf("sizeof(Job) = %zu, path entries = %zu, state vectors: buffered %zu, meter %zu, stack %zu, opp garbage %zu\n",
-		sizeof(Job), proto_path.size(), proto_state.buffered_garbage.size(), proto_state.garbage_meter.size(),
-		proto_state.opponent.stack.size(), proto_state.opponent.garbage.size());
+	std::printf("sizeof(Job) = %zu, path entries = %zu, state vectors: buffered %zu, meter %zu\n",
+		sizeof(Job), proto_path.size(), proto_state.buffered_garbage.size(), proto_state.garbage_meter.size());
 	std::printf("one-way latency, tiny message: smt sibling %.1f ns, other core %.1f ns\n\n",
 		median_of(reps, [&] { return pingpong(n / 4, 2, 3); }),
 		median_of(reps, [&] { return pingpong(n / 4, 2, 4); }));

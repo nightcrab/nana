@@ -98,7 +98,7 @@ void EmulationGame::chance_move() {
 
     // simulate opponent
 
-    garbage_amount = markov_opponent ? (int)markov.play() : (int)opponent.play();
+    garbage_amount = (int)markov.play();
 
     // ours that has waited out the delay reaches it, after the piece it just played (so the stadium
     // rules' tank in receiveAttack goes by that piece). what's left of its attack after its meter
@@ -111,12 +111,7 @@ void EmulationGame::chance_move() {
             garbage_amount -= cancelled;
         }
         if (outgoing_garbage.front() > 0) {
-            if (markov_opponent) {
-                markov.receiveAttack(outgoing_garbage.front());
-            }
-            else {
-                opponent.receiveAttack(outgoing_garbage.front());
-            }
+            markov.receiveAttack(outgoing_garbage.front());
         }
         std::shift_left(outgoing_garbage.begin(), outgoing_garbage.end(), 1);
         outgoing_garbage.back() = 0;
@@ -136,8 +131,7 @@ void EmulationGame::chance_move() {
 
     last_received = garbage_amount;
 
-    const float death = markov_opponent ? (markov.expected_death ? markov.last_death_prob : (markov.dead ? 1.0f : 0.0f))
-                                        : (opponent.dead ? 1.0f : 0.0f);
+    const float death = markov.expected_death ? markov.last_death_prob : (markov.dead ? 1.0f : 0.0f);
     kill_weight *= kill_discount;
     kill_value += kill_survival * death * kill_weight;
     kill_survival *= 1.0f - death;
@@ -236,11 +230,8 @@ void EmulationGame::play_moves(){
         outgoing_garbage.resize(garbage_delay);
         outgoing_garbage.back() += damage;
     }
-    else if (markov_opponent) {
-        markov.receiveAttack(damage);
-    }
     else {
-        opponent.receiveAttack(damage);
+        markov.receiveAttack(damage);
     }
     last_sent = damage;
 
@@ -442,24 +433,19 @@ float EmulationGame::b2b() {
 }
 
 double EmulationGame::opponent_jeopardy() const {
-    return markov_opponent ? markov.jeopardy() : opponent.jeopardy();
+    return markov.jeopardy();
 }
 
 double EmulationGame::opponent_deaths() const {
-    return markov_opponent ? markov.deaths : opponent.deaths;
+    return markov.deaths;
 }
 
 bool EmulationGame::opponent_dead() const {
-    return markov_opponent ? markov.is_dead() : opponent.dead;
+    return markov.is_dead();
 }
 
 void EmulationGame::reset_opponent_rng() {
-    if (markov_opponent) {
-        markov.reset_rng();
-    }
-    else {
-        opponent.reset_rng();
-    }
+    markov.reset_rng();
 }
 
 void EmulationGame::reseed_chance() {
@@ -473,27 +459,11 @@ void EmulationGame::reseed_chance() {
 
 void EmulationGame::start_from_root() {
     reseed_chance();
-    if (markov_opponent) {
-        markov.resample_from_root();
-    }
+    markov.resample_from_root();
 }
 
-void EmulationGame::reset_opponent(bool markov) {
-    markov_opponent = markov;
-    if (markov) {
-        this->markov = MarkovOpponent();
-        // empty, so copying the state doesn't allocate
-        opponent.stack.clear();
-        opponent.garbage.clear();
-    }
-    else {
-        opponent = Opponent();
-        // Opponent() seeds itself from random_device and draws its queue from that: reseed from
-        // fast_seed so a seeded search (fast_seed_reset) replays exactly
-        opponent.rng.PPTRNG = fast_seed();
-        opponent.nextI = opponent.rng.getRand(7);
-        opponent.nextSpinPiece = opponent.rng.getRand(7);
-    }
+void EmulationGame::reset_opponent() {
+    markov = MarkovOpponent();
 }
 
 void EmulationGame::reset_kill(float discount, bool expected) {
@@ -501,12 +471,12 @@ void EmulationGame::reset_kill(float discount, bool expected) {
     kill_survival = 1;
     kill_weight = 1;
     kill_discount = discount;
-    markov.expected_death = expected && markov_opponent;
+    markov.expected_death = expected;
 }
 
 float EmulationGame::expected_kill() const {
     // death_value is in the same discount from the next piece on
-    const float ahead = markov_opponent ? markov.death_value() : 0.0f;
+    const float ahead = markov.death_value();
     return std::clamp(kill_value + kill_survival * kill_weight * ahead, 0.0f, 1.0f);
 }
 
@@ -515,7 +485,7 @@ void EmulationGame::write_opponent_header(std::ostream& out) {
 }
 
 void EmulationGame::write_opponent_step(std::ostream& out, uint64_t game_id) const {
-    const double opp_attack = markov_opponent ? markov.last_attack : opponent.last_attack;
+    const double opp_attack = markov.last_attack;
     out << game_id << ',' << ramp_pieces << ',' << last_sent << ',' << opp_attack << ',' << last_received << ','
         << opponent_jeopardy() << ',' << (opponent_dead() ? 1 : 0) << '\n';
 }

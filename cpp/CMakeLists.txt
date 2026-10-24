@@ -21,7 +21,6 @@ set(TETRIS_SOURCES
 	"Tetris/bot/Config.hpp"
 	"Tetris/game/EmulationGame.cpp"
 	"Tetris/game/EmulationGame.hpp"
-	"Tetris/game/Opponent.cpp"
 	"Tetris/game/MarkovOpponent.cpp"
 	"Tetris/game/OpponentEncoder.cpp"
 	"Tetris/bot/UCT.cpp"

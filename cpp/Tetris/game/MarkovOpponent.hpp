@@ -31,7 +31,7 @@ constexpr int ATTACKS = 8;
 // the last emission is death
 constexpr int DEATH = ATTACKS;
 constexpr int EMISSIONS = ATTACKS + 1;
-// garbage tanked at once, as in Opponent::process_meter
+// garbage tanked at once (8 lines, outside stadium rules)
 constexpr float GARBAGE_CAP = 8;
 
 struct Params {
@@ -118,7 +118,7 @@ public:
         const markov::Params& p = markov::params();
 
         if (dead) {
-            // revive with a clean board, as Opponent::play does; the meter stays
+            // revive with a clean board; the meter stays
             dead = false;
             fresh = true;
         }

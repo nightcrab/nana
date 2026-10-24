@@ -147,6 +147,6 @@ games of plain PSO and stops the swarm chasing lucky evaluations.
 - The tuning budget is usually far below real play (about 100k sims). Eval weights should mostly
   transfer; search constants (`search.json`) may not.
 - The fitness is APP, not wins. Stadium win rate is the final test of a release.
-- The `hmm` opponent models nana at 1 pps; regenerate it (scripts/train_markov_opponent.py) when nana
+- The opponent HMM models nana at 1 pps; regenerate it (scripts/train_markov_opponent.py) when nana
   changes a lot.
 - The ramp-based tuner this replaced (stages from 32 to 8192 sims) is in git history.
