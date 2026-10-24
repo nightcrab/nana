@@ -52,7 +52,7 @@ CHECK_STAGE = {"name": "check", "sims": 32, "garbage_scale": 0.25}
 DEFAULTS = {
     "iterations": 15,
     "particles": 24,
-    "games_per_eval": 16,
+    "games_per_eval": 32,
     "spread": 0.3,
     "horizon": 100,
     "env": "hmm",

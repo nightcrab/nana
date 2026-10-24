@@ -78,7 +78,7 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 | `--budget-hours H` / `--sims N` | (one is required) | the time budget, or a fixed sims count |
 | `--iterations` | 15 | PSO iterations |
 | `--particles` | 24 | swarm size; an iteration costs about 2 x particles x games games |
-| `--games` | 16 | games per evaluation: more is less noise and slower iterations |
+| `--games` | 32 | games per evaluation: more is less noise and slower iterations |
 | `--spread` | 0.3 | the starting swarm's spread around the defaults (unit-cube units per parameter) |
 | `--gate-games` | 400 | the gate's limit on paired games |
 | `--holdout-every` | 5 | iterations between holdouts |

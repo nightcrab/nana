@@ -2,7 +2,7 @@
 
     python -m tuner start NAME --nana PATH --cpus 0,2,4,6 (--budget-hours H | --sims N)
                                [--space tuner/spaces/eval.json ...] [--iterations 15] [--particles 24]
-                               [--games 16] [--spread 0.3] [--gate-games 400] [--plan-only]
+                               [--games 32] [--spread 0.3] [--gate-games 400] [--plan-only]
     python -m tuner resume NAME
     python -m tuner status NAME
     python -m tuner check NAME          health checks only
@@ -73,7 +73,7 @@ def main():
     start.add_argument("--space", action="append", help="parameter space files (default tuner/spaces/eval.json)")
     start.add_argument("--iterations", type=int, help="PSO iterations (default 15)")
     start.add_argument("--particles", type=int, help="default 24")
-    start.add_argument("--games", dest="games_per_eval", type=int, help="games per evaluation (default 16)")
+    start.add_argument("--games", dest="games_per_eval", type=int, help="games per evaluation (default 32)")
     start.add_argument("--spread", type=float,
                        help="the starting swarm's spread around the defaults, in unit-cube units (default 0.3)")
     start.add_argument("--gate-games", type=int, help="the release gate's limit on paired games (default 400)")
