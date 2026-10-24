@@ -128,21 +128,13 @@ CMake options (pass with `-D`):
 * `NANA_MARCH=<level>` sets the `-march` of every executable except a launcher-built `tbp_tetris` (default `native`).
 * `NANA_VARIANTS="<level>;<level>;..."` builds `tbp_tetris` for several ISA levels (see below).
 
-### Portable builds
+### Portable build
 
-`NANA_VARIANTS` builds the engine once per listed ISA level, as `tbp_tetris-<level>`, and makes `tbp_tetris` a small launcher. The launcher reads CPUID, runs the best level the CPU supports, and passes it stdin, stdout and its arguments, so TBP clients still see one bot. A release build targets the benchmark server (Zen 5), AVX2 machines, and any x86-64:
+Distributed via Github releases, there are some portable Nana pre-compiled binaries for Windows and Linux.
 
-```
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNANA_VARIANTS="znver5;x86-64-v3;x86-64"
-cmake --build build --target tbp_tetris -j
-```
+Each release contains multiple binaries targeting different hardware. `tbp_tetris` uses the optimal version of Nana based on your detected hardware.
 
-Ship `tbp_tetris` together with every `tbp_tetris-<level>` from the same directory. The launcher knows `znver5`, `znver4`, `x86-64-v4`, `x86-64-v3`, `x86-64-v2` and `x86-64`. `tbp_tetris --list-variants` shows which levels the CPU runs and what it lacks for the rest, and `"variant": "<level>"` in `nana.json` forces one.
-
-Nana also builds as 32-bit x86, provided SSE2 is enabled: MSVC's 8-byte atomics need it. On Windows, use clang-cl from an x86 developer prompt with `-m32` added to the default flags and `-DNANA_MARCH=pentium4`. At a fixed simulation count it plays the same games as the 64-bit build, in about twice the time per move.
-
-`tbp_tetris` reads `nana.json` beside the executable, regardless of the working directory.
-Copy [nana.example.json](nana.example.json) there as `nana.json` and edit it:
+`tbp_tetris` reads `nana.json` beside the executable, which can adjust Nana's default settings. It looks like this:
 
 ```json
 {
@@ -153,19 +145,7 @@ Copy [nana.example.json](nana.example.json) there as `nana.json` and edit it:
 }
 ```
 
-Omitted settings keep their defaults; a missing file uses all defaults. Unknown keys, invalid values,
-and unreadable files are errors. Restart the bot after editing. The same file accepts evaluation
-weights and search settings from `cpp/Tetris/bot/Config.hpp`. In launcher builds, `variant` selects
-an ISA variant (an empty string chooses automatically). TBP uses JSON instead of runtime environment
-settings. A `garbage_delay` in the client's `rules` message (the turns an attack spends in transit, as
-Universal-Shaktris-Stadium sends it) sets the garbage delay Nana plays with.
-
-`nana_emulate` and benchmarks keep their existing overrides, including the tuner's configuration:
-
-* `NANA_CONFIG=path/to/config.json` loads evaluation and search weights. `nana_emulate --print-config` shows the format.
-* `NANA_RULES=botris` selects Botris instead of the default TETR.IO S1 rules.
-* `NANA_GARBAGE_DELAY=<turns>` sets how long an attack spends in transit (default 0 for TETR.IO, 1 for Botris).
-* Other runtime overrides, such as `NANA_REWARD` and `NANA_PIN_LAYOUT`, continue to work for these tools.
+Some of these, such as `threads` can be overridden by a TBP2 frontend but are used otherwise.
 
 ## Tuning
 
