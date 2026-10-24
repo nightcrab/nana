@@ -91,7 +91,7 @@ struct NanaConfig {
     std::array<double, 4> tspins = { 0, 78.50966110273028, 367.1433218304415, 193.4661682079611 };
 
     // PUCT (UCTNode::c_puct): c = ln((N + c_base + 1) / c_base) + c_init * (1 + depth / depth_step)
-    double c_init = 1.25;
+    double c_init = 1.8;
     double c_base = 19652;
     int depth_step = 3;
     // priors: the eval's rank r gets weight r^-prior_exponent, normalised
@@ -99,11 +99,11 @@ struct NanaConfig {
     // an edge's N and R are scaled by 1 - 1 / n_cap before each update, so old samples fade
     // geometrically (Q averages roughly the last n_cap returns) and N levels off at n_cap
     double n_cap = 10000;
-    // Nodes this many moves below the root are leaves (0 = no cap).
+    // nodes this many moves below the root are leaves (0 = no cap)
     int depth_cap = 0;
-
-    // Select the evaluator without changing the search algorithm.
-    std::string eval = "nana";
+    // the eval scoring every move: "nana" (eval_CC, the weights above) or "cc" (Cold Clear's Standard
+    // evaluator with its default weights, Eval::eval_CC_standard)
+    std::string eval = "cc";
     // the CC eval's term over the search's belief about the HMM opponent (EmulationGame::belief): the
     // belief a move leaves, one piece ahead, weighed per hidden state. in CC score units; 0 = off
     std::array<double, 8> belief_weights{};

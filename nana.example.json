@@ -1,6 +1,6 @@
 {
   "rules": "tetrio",
   "threads": 3,
-  "reward": "kill",
+  "reward": "app",
   "pin_layout": "compact"
 }
