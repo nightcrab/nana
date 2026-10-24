@@ -5,11 +5,14 @@
 #include "Eval.hpp"
 #include "engine/Utility.hpp"
 #include <algorithm>
-#include <optional>
 #include <cassert>
+#include <optional>
 #include <cstring>
 #include <cmath>
 #include <iostream>
+#ifdef NANA_SEARCH_FIXTURE
+#include "SearchFixture.hpp"
+#endif
 
 using namespace Distribution;
 
@@ -59,6 +62,15 @@ float EdgeStats::Q() const {
 	return R / N;
 }
 
+Return stepUp(Return v, float step) {
+	constexpr float gamma = (float)NANA_SUFFIX_DISCOUNT;
+	// the edge's own move: its attack and one piece for each return that made it
+	const float moved = v.n - v.n_dead;
+	v.A = gamma * v.A + moved * step;
+	v.L = gamma * v.L + moved;
+	return v;
+}
+
 float rewardScalar(const Return& r) {
 	static const NanaConfig& c = config();
 	// the attack rate of the returns that lived; those that died are worth 0
@@ -68,11 +80,7 @@ float rewardScalar(const Return& r) {
 
 Reward UCTNode::climb(size_t i, Reward reward, bool carried, bool apply) {
 #if NANA_SUFFIX
-	// the edge's own move: its attack and one piece for each return that lived
-	constexpr float gamma = (float)NANA_SUFFIX_DISCOUNT;
-	Return v = reward;
-	v.A = gamma * v.A + (v.n - v.n_dead) * cold[i].step_attack;
-	v.L = gamma * v.L + (v.n - v.n_dead);
+	Return v = stepUp(reward, cold[i].step_attack);
 
 	if (apply) {
 		Return& s = cold[i].sums;
@@ -101,6 +109,110 @@ Reward UCTNode::climb(size_t i, Reward reward, bool carried, bool apply) {
 #endif
 }
 
+#if NANA_EXPECTIMAX
+void ChildTable::put(uint32_t child, Reward V, float k) {
+	if (first.n == 0 || first.hash == child) {
+		first = { child, first.n + k, V };
+		return;
+	}
+	if (!more) {
+		more = std::make_unique<ChildValue[]>(MORE);
+	}
+	for (int j = 0; j < MORE; j++) {
+		ChildValue& slot = more[j];
+		if (slot.n == 0 || slot.hash == child) {
+			slot = { child, slot.n + k, V };
+			return;
+		}
+	}
+	rest_sum += scaled(V, k);
+	rest_n += k;
+}
+
+Reward ChildTable::sum(float& n) const {
+	n = first.n + rest_n;
+	Reward s = scaled(first.V, first.n) + rest_sum;
+	if (more) {
+		for (int j = 0; j < MORE && more[j].n > 0; j++) {
+			n += more[j].n;
+			s += scaled(more[j].V, more[j].n);
+		}
+	}
+	return s;
+}
+
+float UCTNode::armValue(size_t i, Reward& V) const {
+	float n = 0;
+	Reward s = cold[i].children.sum(n);
+	if (n <= 0) {
+		V = Reward{};
+		return 0.0f;
+	}
+#if NANA_SUFFIX
+	// this edge's own move, as climb adds it
+	s = stepUp(s, cold[i].step_attack);
+#endif
+	V = scaled(s, 1.0f / n);
+	return rewardScalar(V);
+}
+
+static bool counts(const ChildTable& t) {
+	// N_MIN 1: any result, even one scaled down by tree reuse
+	return NANA_EXPECTIMAX_MIN_N <= 1 ? t.completed > 0 : t.completed >= NANA_EXPECTIMAX_MIN_N;
+}
+
+Reward UCTNode::report(size_t i, uint32_t child, Reward V, float k, bool fresh, bool apply) {
+	if (!apply) {
+		return value();
+	}
+	ChildTable& t = cold[i].children;
+#ifdef NANA_SEARCH_FIXTURE
+    // Negative control: the harness must catch biased backup weights while draws stay correct.
+    if (search_fixture::inject_weights && child == search_fixture::hash_base+2) k *= 4;
+#endif
+	t.put(child, V, k);
+	t.completed = fresh ? t.completed * (float)decay() + k : t.completed + k;
+	Reward arm;
+	const float q = armValue(i, arm);
+	// R / N reads as Q once N's virtual losses are back, as with averaged returns
+	edge_stats[i].R = q * t.completed;
+
+	if (counts(t)) {
+		if ((int)i == best) {
+			if (q >= best_Q) {
+				best_Q = q;
+				best_V = arm;
+			}
+			else {
+				rescanBest();
+			}
+		}
+		else if (best < 0 || q > best_Q) {
+			best = (int)i;
+			best_Q = q;
+			best_V = arm;
+		}
+	}
+	return value();
+}
+
+void UCTNode::rescanBest() {
+	best = -1;
+	for (size_t j = 0; j < actionCount(); j++) {
+		if (!counts(cold[j].children)) {
+			continue;
+		}
+		Reward arm;
+		const float q = armValue(j, arm);
+		if (best < 0 || q > best_Q) {
+			best = (int)j;
+			best_Q = q;
+			best_V = arm;
+		}
+	}
+}
+#endif
+
 void UCTNode::updateTime(size_t i, int newtime) {
 	if (time(i) != newtime) {
 		EdgeStats& edge = stats(i);
@@ -113,6 +225,13 @@ void UCTNode::updateTime(size_t i, int newtime) {
 		s.E /= 5;
 		s.n /= 5;
 		s.n_dead /= 5;
+#endif
+#if NANA_EXPECTIMAX
+		// Q is a ratio, unchanged; only the weight R carries is scaled with N
+		cold[i].children.completed /= 5;
+		if ((int)i == best && !counts(cold[i].children)) {
+			rescanBest();
+		}
 #endif
 		time(i) = newtime;
 	}
@@ -128,6 +247,9 @@ Move PackedMove::unpack() const {
 }
 
 UCTNode::UCTNode(const EmulationGame &state) {
+#ifdef NANA_SEARCH_FIXTURE
+    if (state.fixture_active) { search_fixture::initialize(*this, state); return; }
+#endif
 	std::vector<Piece> raw_actions = state.placements();
 	// the smeared movegen occasionally yields a placement with a mino off the board (seen at x = -1),
 	// which place_piece would write outside the board's columns
@@ -146,6 +268,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 
 	int gheight = state.game.board.get_garbage_height();
 
+	// Cold Clear's evaluator wants the pieces left in the bag after the queue
 	static const bool use_cc_eval = config().eval == "cc";
 	std::vector<PieceType> bag_left;
 	if (use_cc_eval) {
@@ -170,7 +293,8 @@ UCTNode::UCTNode(const EmulationGame &state) {
 
 	for (auto& raw_action : raw_actions) {
 		double move_reward = 0;
-		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, &move_reward, belief ? &*belief : nullptr, meter)
+		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, &move_reward,
+		                                                  belief ? &*belief : nullptr, meter)
 		                         : Eval::eval_CC(state.game, Move(raw_action, false), &move_reward);
 		// Surface abstraction step
 		raw_action.position.y -= gheight;
@@ -183,7 +307,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		const Move unpacked = c.move.unpack();
 		assert(std::memcmp(&unpacked.piece.minos, &raw_action.minos, sizeof(raw_action.minos)) == 0);
 #endif
-		cold.push_back(c);
+		cold.push_back(std::move(c));
 		prior.push_back(Stochastic<int>(idx, eval));
 		idx++;
 	}

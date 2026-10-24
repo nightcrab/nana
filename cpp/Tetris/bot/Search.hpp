@@ -77,6 +77,10 @@ namespace Search {
 
     Reward rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_board);
 
+#if !NANA_SUFFIX
+    float leafReward(EmulationGame& state, float max_eval);
+#endif
+
     void printStatistics();
 
     // See the best move found so far.

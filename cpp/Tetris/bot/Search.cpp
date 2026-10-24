@@ -1,7 +1,10 @@
 #include "Search.hpp"
+#ifdef NANA_SEARCH_FIXTURE
+#include "SearchFixture.hpp"
+#endif
 #include "Config.hpp"
-#include <cstring>
 #include <array>
+#include <cstring>
 
 #include <bit>
 #include <cmath>
@@ -106,14 +109,12 @@ static size_t leafDepth() {
     return depth;
 }
 
-
-static_assert(!NANA_SUFFIX || Search::search_style == NANA, "NANA_SUFFIX is for the PUCT (NANA) search");
-
 // 1 = MP-MCTS: backprops stop and restart selection where every ancestor would choose the same path.
 // 0 = TDS-UCT: every backprop goes to the root
 #ifndef NANA_MPMCTS
 #define NANA_MPMCTS 1
 #endif
+static_assert(!NANA_SUFFIX || Search::search_style == NANA, "NANA_SUFFIX is for the PUCT (NANA) search");
 
 // leaky gate for MP-MCTS restarts (notes/leaky-gate-mp-mcts.md): a leak carries a backprop on up
 // although every ancestor would still choose its path, delivering what's parked below them.
@@ -256,9 +257,9 @@ static void loadTuning() {
 // a kill is worth 1, less lambda of the way back to r. app: APP and eval only, the opponent's death
 // ignored, for the APP strength benchmarks. set from the environment when a search starts:
 // NANA_REWARD=kill|app, NANA_REWARD_SCALE, NANA_KILL_LAMBDA, NANA_KILL_DISCOUNT (only when the HMM
-// has no fitted discount)
+// has no fitted discount, as with the placeholder model)
 struct RewardTuning {
-    bool app_only = false;
+    bool app_only = NANA_SUFFIX;
     float scale = 0.25f;
     float lambda = 0.0f;
     float discount = 0.9f;
@@ -355,6 +356,40 @@ static void searchOpponent(EmulationGame& root) {
     }
 }
 
+// NANA_BELIEF_LOG (measurement only): every expansion's surprise, the leaf's best eval less what its
+// parent made of the board its move left, with the leaf's depth and the belief's prediction of the
+// opponent's next hidden state, one CSV line each to $NANA_BELIEF_LOG_FILE: what belief_weights should
+// predict, over the states the search explores
+#ifndef NANA_BELIEF_LOG
+#define NANA_BELIEF_LOG 0
+#endif
+#if NANA_BELIEF_LOG
+static void logBelief(const EmulationGame& state, size_t depth, float surprise) {
+    static std::mutex mutex;
+    static std::FILE* file = [] {
+        const char* path = std::getenv("NANA_BELIEF_LOG_FILE");
+        std::FILE* f = path && *path ? std::fopen(path, "w") : nullptr;
+        if (f) std::fputs("depth,surprise,sent,combo,b2b,meter,garbage,q0,q1,q2,q3,q4,q5,q6,q7\n", f);
+        return f;
+    }();
+    if (!file || !state.track_belief) {
+        return;
+    }
+    const auto q = state.belief.predicted();
+    std::lock_guard<std::mutex> lock(mutex);
+    int meter = 0;
+    for (int garbage : state.garbage_meter) {
+        meter += garbage;
+    }
+    std::fprintf(file, "%zu,%.6g,%d,%d,%d,%d,%d", depth, surprise * 10000.0f, state.last_sent, (int)state.game.combo,
+                 (int)state.game.b2b, meter, (int)state.game.board.get_garbage_height());
+    for (float p : q) {
+        std::fprintf(file, ",%.4g", p);
+    }
+    std::fputc('\n', file);
+}
+#endif
+
 // state private to one worker
 struct alignas(64) WorkerLocal {
     // rollouts for new leaves we own, run when there are no messages or given away on request
@@ -409,6 +444,9 @@ struct alignas(64) DepthBaseline {
 };
 static std::vector<DepthBaseline> depth_baseline;
 
+// a new root's edges start on the same footing as a new leaf's (level mode: the root is depth 0's
+// one sample; paired mode corrects nothing at depth 0)
+
 // which L3 cache (chiplet) each worker's core shares; workers are pinned by index
 static std::vector<int> worker_l3_group;
 
@@ -438,7 +476,6 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     Search::core_count = core_count;
 
     root_state = state;
-    // the game's own opponent is the HMM, true state and all: the search starts from its model
     searchOpponent(root_state);
     resetKill(root_state);
     searchGarbage(root_state);
@@ -516,7 +553,6 @@ void Search::continueSearch(EmulationGame state) {
     searchOpponent(root_state);
     resetKill(root_state);
     searchGarbage(root_state);
-
     depth_baseline.resize(core_count);
     for (DepthBaseline& baseline : depth_baseline) {
         baseline.shift();
@@ -614,7 +650,12 @@ static void flushParked(bool apply) {
 
     for (UCTNode* node : parked) {
         const float N = (float)node->N_buffer;
+#if NANA_EXPECTIMAX
+        // only visits are parked; the value is the node's own
+        Reward R = node->value();
+#else
         Reward R = node->R_buffer;
+#endif
         UCTNode* child = node;
         for (size_t step = 0; step < MAX_PATH_DEPTH; step++) {
             const uint32_t parent_hash = child->parent_hash;
@@ -626,7 +667,11 @@ static void flushParked(bool apply) {
             if ((size_t)action >= parent.actionCount()) {
                 break;
             }
+#if NANA_EXPECTIMAX
+            R = parent.report(action, child->id, R, N, false, apply);
+#else
             R = parent.climb(action, R, true, apply);
+#endif
             if (apply) {
                 parent.stats(action).N += N;
                 parent.N += (int)N;
@@ -679,8 +724,9 @@ void Search::endSearch() {
     for (auto& thread : worker_threads) {
 		thread.join();
 	}
-    // Real play resumes with its own chance.
+    // the real game, played between searches, has its own chance
     EmulationGame::deterministic_chance = false;
+
 
     // reset stop bool for min wait time
     min_work_bool = false;
@@ -1015,7 +1061,11 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         uct.stats[threadIdx].flushes++;
         UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
         EdgeStats& edge = node.stats(job.path.back().actionID);
+#if NANA_EXPECTIMAX
+        job.R = node.report(job.path.back().actionID, job.child_hash, job.R, 1.0f + job.extra_N, false);
+#else
         job.R = node.climb(job.path.back().actionID, job.R, true);
+#endif
         edge.N += job.extra_N;
         node.N += job.extra_N;
         if (job.path.size() == 1) {
@@ -1024,11 +1074,14 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             edge.N += 1;
             node.N += 1;
             if (node.id != replay_root_hash) {
-                node.R_buffer += job.R;
+                if constexpr (!NANA_EXPECTIMAX) {
+                    node.R_buffer += job.R;
+                }
                 node.N_buffer += job.extra_N + 1;
             }
             return;
         }
+        job.child_hash = job.path.back().hash;
         // this node is being left too: its own parked results belong to the edge above
         job.R += node.R_buffer;
         job.extra_N += node.N_buffer;
@@ -1098,6 +1151,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         int depth = state.pieces;
 
         uint32_t hash = state.hash();
+        // A diverged restart replay can arrive with the abandoned backprop's child_hash.
+        // Terminal and newly expanded leaves must report the state they actually reached.
+        job.child_hash = hash;
 
         if (state.game_over) {
 
@@ -1229,6 +1285,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             state.chance_move();
 
             uint32_t new_hash = state.hash();
+            job.child_hash = new_hash;
 
             // Get the owner of the updated state based on the hash
             uint32_t ownerIdx = uct.getOwner(new_hash);
@@ -1256,6 +1313,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         // Undo Virtual Loss by adding R. from here on, reward is what goes to the parent's edge
         Reward reward = job.R;
+#if NANA_EXPECTIMAX
+        reward = node.report(job.path.back().actionID, job.child_hash, job.R, 1.0f + job.extra_N, true);
+#else
 #if NANA_SUFFIX
         reward = node.climb(job.path.back().actionID, reward, false);
 #else
@@ -1268,11 +1328,14 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             }
         }
 #endif
+#endif
 
         // simulations that restarted below us weren't counted on the way down
         edge.N += job.extra_N;
         node.N += job.extra_N;
 
+        // from here on R is this node's value
+        job.child_hash = job.path.back().hash;
         job.path.pop_back();
         if (!job.moves.empty()) {
             job.moves.pop_back();
@@ -1306,6 +1369,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 
         if constexpr (!NANA_MPMCTS) {
+            // what goes to the parent's edge (the same reward, unless the backup changes it on the way)
+            job.R = reward;
             send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
             return;
         }
@@ -1332,9 +1397,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         {
             Return v = reward;
             for (size_t j = rows.size(); j-- > 0;) {
-                constexpr float gamma = (float)NANA_SUFFIX_DISCOUNT;
-                v.A = gamma * v.A + (v.n - v.n_dead) * (j < job.steps.size() ? job.steps[j] : 0.0f);
-                v.L = gamma * v.L + (v.n - v.n_dead);
+                v = stepUp(v, j < job.steps.size() ? job.steps[j] : 0.0f);
                 rows[j].edges[0].R += rewardScalar(v);
             }
         }
@@ -1374,7 +1437,11 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             // the ancestors would just send a simulation straight back here, so start it here.
             // park the reward for the next backprop that leaves this node, plus a visit for
             // the restarted simulation, which the ancestors haven't counted
-            node.R_buffer += reward;
+            // (NANA_EXPECTIMAX parks only the visits: whichever backprop leaves here next carries
+            // this node's value as it is then)
+            if constexpr (!NANA_EXPECTIMAX) {
+                node.R_buffer += reward;
+            }
             node.N_buffer += job.extra_N + 1;
 
             // the restarted simulation is also a visit through every ancestor in the history,
@@ -1409,7 +1476,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 if (left <= depth) {
                     // a fresh select would have left the path at depth `left`: undo the restart's
                     // parking here and send this result, with what's parked, up to depth left - 1
-                    node.R_buffer -= reward;
+                    if constexpr (!NANA_EXPECTIMAX) {
+                        node.R_buffer -= reward;
+                    }
                     node.N_buffer -= job.extra_N + 1;
                     uct.stats[threadIdx].restarts--;
                     uct.stats[threadIdx].restart_depth -= depth;
@@ -1419,6 +1488,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     Msg flush = std::make_unique<Job>(FLUSH);
                     flush->R = reward + node.R_buffer;
                     flush->extra_N = job.extra_N + node.N_buffer;
+                    flush->child_hash = job.child_hash;
                     node.R_buffer = Reward{};
                     node.N_buffer = 0;
                     flush->path.assign(job.path.begin() + (left - 1), job.path.end());
@@ -1599,7 +1669,8 @@ void Search::search(std::stop_token stop, const int threadIdx) {
 }
 
 
-Reward Search::rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_board) {
+Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] size_t depth,
+                       [[maybe_unused]] float parent_board) {
     // Rollout using eval.
 #ifdef NANA_BENCH
     struct RolloutTimer {
@@ -1616,6 +1687,15 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, size_t depth, float 
     uct.stats[threadIdx].nodes++;
     uct.stats[threadIdx].rollouts++;
 
+#ifdef NANA_SEARCH_FIXTURE
+    if (state.fixture_active) {
+        const auto& fixture = search_fixture::model->nodes.at(state.fixture_node);
+        const double v = state.game_over ? fixture.payoff : fixture.heuristic;
+        if (!state.game_over) maybeInsertNode(UCTNode(state), threadIdx);
+        return Return{0,0,float(v/config().eval_weight),1,0};
+    }
+#endif
+
     // NANA_SUFFIX: nothing lies below a leaf yet, so only its eval (or its death) goes up
     [[maybe_unused]] const Return dead{ 0, 0, 0, 1, 1 };
 
@@ -1623,7 +1703,7 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, size_t depth, float 
 #if NANA_SUFFIX
         return dead;
 #else
-        return -0.0;
+        return -0.0f;
 #endif
     }
 
@@ -1638,12 +1718,29 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, size_t depth, float 
     // no legal placement: as lost as topping out
     const bool stuck = node.actionCount() == 0;
 
+#if NANA_BELIEF_LOG
+    if (!stuck) {
+        logBelief(state, depth, max_eval - parent_board);
+    }
+#endif
+
     if constexpr (NANA_DEPTH_BASELINE) {
         if (!stuck) {
             max_eval = depth_baseline[threadIdx].correct(depth, max_eval, parent_board);
         }
     }
 
+#if NANA_EXPECTIMAX
+    // the node is worth its rollout until its arms have results back
+#if NANA_SUFFIX
+    const Reward value = stuck ? dead : Return{ 0, 0, max_eval, 1, 0 };
+#else
+    const Reward value = stuck ? 0.0f : leafReward(state, max_eval);
+#endif
+    node.leaf_V = value;
+    maybeInsertNode(std::move(node), threadIdx);
+    return value;
+#else
     maybeInsertNode(std::move(node), threadIdx);
 
     if (stuck) {
@@ -1657,6 +1754,15 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, size_t depth, float 
 #if NANA_SUFFIX
     return Return{ 0, 0, max_eval, 1, 0 };
 #else
+    return leafReward(state, max_eval);
+#endif
+#endif
+}
+
+#if !NANA_SUFFIX
+// a leaf's reward, from the game so far and the best eval among its moves
+float Search::leafReward(EmulationGame& state, float max_eval) {
+    float reward = 0;
     static const NanaConfig& c = config();
     {
         float r = (float)c.app_weight * state.true_app() + (float)c.eval_weight * max_eval;
@@ -1676,8 +1782,8 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, size_t depth, float 
     const float r = x / (x + reward_tuning.scale);
     const float kill = (1.0f - reward_tuning.lambda) * state.expected_kill();
     return kill + (1.0f - kill) * r;
-#endif
 }
+#endif
 
 Move Search::bestMove() {
 

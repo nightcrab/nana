@@ -124,9 +124,23 @@ nana_add_executable(nana_bench nana_core_bench "bench.cpp")
 nana_add_executable(nana_speed nana_core "bench.cpp")
 nana_add_executable(nana_msgbench nana_core "msgbench.cpp")
 nana_add_executable(nana_emulate nana_core "emulate.cpp")
-# Paired games against external TBP bots and evaluator parity dumps.
+# nana_emulate's games played by any TBP bot (Cold Clear, or nana's own tbp_tetris)
 nana_add_executable(nana_emulate_tbp nana_core "emulate_tbp.cpp")
+# scores positions with the ported Cold Clear eval, for cold-clear's eval_dump to check
 nana_add_executable(nana_eval_dump nana_core "eval_dump.cpp")
+
+option(NANA_STATCHECK "Build exact-reference sampling and backup diagnostics" OFF)
+if(NANA_STATCHECK)
+    nana_add_executable(nana_statcheck nana_core "statcheck.cpp")
+endif()
+
+option(NANA_SEARCHCHECK "Build full scheduler exact-value integration tests" OFF)
+if(NANA_SEARCHCHECK)
+    nana_add_core(nana_core_searchcheck ${NANA_MARCH})
+    target_compile_definitions(nana_core_searchcheck PUBLIC NANA_SEARCH_FIXTURE=1)
+    target_sources(nana_core_searchcheck PRIVATE "SearchFixture.cpp")
+    nana_add_executable(nana_searchcheck nana_core_searchcheck "searchcheck.cpp")
+endif()
 
 if(NANA_VARIANTS)
     foreach(variant IN LISTS NANA_VARIANTS)

@@ -42,7 +42,7 @@ struct EdgeStats {
 // each death costs its 1/n share however soon it came. NANA_REWARD=app only.
 
 #ifndef NANA_SUFFIX
-#define NANA_SUFFIX 0
+#define NANA_SUFFIX 1
 #endif
 // NANA_SUFFIX_DISCOUNT: each piece further from the edge counts this much less in its attack
 // rate (A and L are both discounted, so the rate stays a weighted average). the leaf eval isn't
@@ -50,6 +50,7 @@ struct EdgeStats {
 #ifndef NANA_SUFFIX_DISCOUNT
 #define NANA_SUFFIX_DISCOUNT 1.0
 #endif
+
 
 // NANA_SUFFIX: a reward on its way up, summed over the returns it carries
 struct Return {
@@ -81,9 +82,58 @@ using Reward = Return;
 using Reward = float;
 #endif
 
+// NANA_EXPECTIMAX: an edge's value is the average, over the children chance sent it to, of each
+// child's latest value, and a node's value is its best arm's. a backprop carries the value of the
+// node it leaves, which replaces that child's last one at the parent's edge instead of being
+// averaged in, so a line found deep down reaches the root in one backprop. a node with no arm
+// back yet is worth its rollout. with NANA_SUFFIX a value is one return's worth of sums (n = 1),
+// and an edge adds its own step to its children's before reading them
+#ifndef NANA_EXPECTIMAX
+#define NANA_EXPECTIMAX 1
+#endif
+// arms count towards a node's value once they've had this many results back
+#ifndef NANA_EXPECTIMAX_MIN_N
+#define NANA_EXPECTIMAX_MIN_N 1
+#endif
+
+// a reward scaled as if it carried k times as many returns
+inline float scaled(float r, float k) { return r * k; }
+inline Return scaled(Return r, float k) {
+    r.A *= k; r.L *= k; r.E *= k; r.n *= k; r.n_dead *= k;
+    return r;
+}
+
+// NANA_EXPECTIMAX: a child an edge has led to, and its latest value
+struct ChildValue {
+    uint32_t hash = 0;
+    // results that came back through this child (0 = empty slot)
+    float n = 0;
+    Reward V{};
+};
+
+// NANA_EXPECTIMAX: the children an edge has led to. usually one: within the preview the next piece
+// is known, so only the meter (versus) or pieces past the preview split them
+struct ChildTable {
+    static constexpr int MORE = 7;
+    ChildValue first;
+    // allocated when a second child turns up
+    std::unique_ptr<ChildValue[]> more;
+    // children that didn't fit: their values summed as they came, not replaced
+    float rest_n = 0;
+    Reward rest_sum{};
+    // results back through this edge, decayed as N is: the edge's R is its Q times this
+    float completed = 0;
+
+    void put(uint32_t child, Reward V, float k);
+    // the children's values weighted by how often the edge led to each; n is their total weight
+    Reward sum(float& n) const;
+};
+
 // what a reward adds to an edge's R: R / N reads as Q, so n returns add n times their value
 inline float rewardScalar(float r) { return r; }
 float rewardScalar(const Return& r);
+// NANA_SUFFIX: returns carried up past an edge whose move sent `step` attack
+Return stepUp(Return v, float step);
 inline bool rewardEmpty(float r) { return r == 0; }
 inline bool rewardEmpty(const Return& r) { return r.n == 0; }
 
@@ -104,13 +154,17 @@ struct ColdAction {
     PackedMove move;
     int time = 0;
     float eval = 0;
-    // Share of eval rewarding the move itself, separate from the resulting board.
+    // the part of eval that rewards the move itself (Eval::eval_CC's move_part): the CC search adds
+    // it to the child's value
     float move_reward = 0;
 #if NANA_SUFFIX
     // attack this move sends (after cancelling): fixed by the node, whose hash has the meter
     float step_attack = 0;
     // the returns credited to this edge, decayed as N is; stats().R is their value times count
     Return sums;
+#endif
+#if NANA_EXPECTIMAX
+    ChildTable children;
 #endif
 };
 
@@ -193,6 +247,25 @@ class UCTNode {
     // apply = false only computes the latter
     Reward climb(size_t i, Reward reward, bool carried, bool apply = true);
 
+#if NANA_EXPECTIMAX
+    // the rollout's value, until an arm has results back
+    Reward leaf_V{};
+    // the best arm with results back (-1 = none yet), its Q and its value as one return
+    int best = -1;
+    float best_Q = 0;
+    Reward best_V{};
+
+    // what this node is worth to the edge above it
+    Reward value() const { return best >= 0 ? best_V : leaf_V; }
+    // k results came back to edge i through `child`, now worth V (fresh: from a backprop, decayed
+    // as N is; otherwise carried by a flush). returns this node's value, for the edge above.
+    // apply = false only returns the value
+    Reward report(size_t i, uint32_t child, Reward V, float k, bool fresh, bool apply = true);
+    void rescanBest();
+    // edge i's value as one return (its children's, plus its own step), and its Q
+    float armValue(size_t i, Reward& V) const;
+#endif
+
     // PUCT, shared by select and the history check so they always agree
     static float c_puct(float node_N, int depth);
     static float priority(float c, float node_N, float R, float N, float prior);
@@ -205,6 +278,7 @@ class UCTNode {
     // historyRow would record after the virtual loss (node N + 1). fills row.count and
     // row.edges[1..]; the caller fills the rest once the virtual loss is applied
     size_t selectWithCompetitors(int depth, HistoryRow& row) const;
+
 
     // these return the index of the chosen edge
     size_t select_uct(int depth);
@@ -300,7 +374,12 @@ class Job {
     // drained from nodes where simulations restarted
     int extra_N = 0;
 
-    // Parent's board score before the next chance transition, for depth correction.
+    // NANA_EXPECTIMAX: the node whose value R is (a select step's latest child, then each node a
+    // backprop or flush leaves)
+    uint32_t child_hash = 0;
+
+    // NANA_DEPTH_BASELINE: what the last select step's node thought of the board its move left
+    // (the move's eval without the move's own reward), to compare with the leaf's score
     float parent_board = 0;
 
     // stamped on every send, so receivers keep a picture of everyone's load (work units)

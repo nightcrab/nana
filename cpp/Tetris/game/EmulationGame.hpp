@@ -43,6 +43,11 @@ class EmulationGame {
     static void set_garbage_delay(int delay);
 
     Game game;
+#ifdef NANA_SEARCH_FIXTURE
+    bool fixture_active = false;
+    int fixture_node = 0;
+    int fixture_action = 0;
+#endif
 
     // turns an attack spends in transit before it joins the receiver's meter, as in the stadium's
     // VersusGame: 0 lands it the turn it's sent. under TETR.IO rules our attacks wait as long, and
@@ -158,7 +163,8 @@ class EmulationGame {
     // fresh chance for a simulation: a new seed, and the pieces left in the current bag in a new
     // order (which pieces are left is known under seven-bag; their order isn't)
     void reseed_chance();
-    // Diagnostic oracle builds retain the root's future instead of reseeding each simulation.
+    // set while the CC search (NANA_CC_SEARCH) runs: reseed_chance does nothing, so every simulation
+    // plays the one future the search root drew
     static inline bool deterministic_chance = false;
     // a simulation starting from the search root: fresh randomness, and the HMM opponent's hidden
     // state drawn from the root belief. on a copy of the root, never on the shared root itself

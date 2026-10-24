@@ -149,12 +149,12 @@ struct BackpropKind {
 	static constexpr const char* name = "Job, path only read";
 	static T make(uint64_t i) { return JobPathKind::make(i); }
 	static uint64_t consume(const T& m) {
-		uint64_t s = (uint64_t)m.R;
+		uint64_t s = (uint64_t)rewardScalar(m.R);
 		for (auto& p : m.path) s += p.hash;
 		return s;
 	}
 	static void work(T& m) {
-		m.R += 1;
+		m.R = scaled(m.R, 2.0f);
 		if (!m.path.empty()) m.path.back().actionID++;
 	}
 };
