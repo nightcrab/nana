@@ -104,6 +104,8 @@ struct ColdAction {
     PackedMove move;
     int time = 0;
     float eval = 0;
+    // Share of eval rewarding the move itself, separate from the resulting board.
+    float move_reward = 0;
 #if NANA_SUFFIX
     // attack this move sends (after cancelling): fixed by the node, whose hash has the meter
     float step_attack = 0;
@@ -297,6 +299,9 @@ class Job {
     // BACKPROP: visits on top of the one already counted on the way down,
     // drained from nodes where simulations restarted
     int extra_N = 0;
+
+    // Parent's board score before the next chance transition, for depth correction.
+    float parent_board = 0;
 
     // stamped on every send, so receivers keep a picture of everyone's load (work units)
     uint16_t sender = UINT16_MAX;

@@ -169,13 +169,15 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	}
 
 	for (auto& raw_action : raw_actions) {
-		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, nullptr, belief ? &*belief : nullptr, meter)
-		                         : Eval::eval_CC(state.game, Move(raw_action, false));
+		double move_reward = 0;
+		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, &move_reward, belief ? &*belief : nullptr, meter)
+		                         : Eval::eval_CC(state.game, Move(raw_action, false), &move_reward);
 		// Surface abstraction step
 		raw_action.position.y -= gheight;
 		ColdAction c;
 		c.move = PackedMove::pack(Move(raw_action, false));
 		c.eval = eval;
+		c.move_reward = (float)move_reward;
 		// the minos must follow from type and rotation for packing to be lossless
 #ifndef NDEBUG
 		const Move unpacked = c.move.unpack();

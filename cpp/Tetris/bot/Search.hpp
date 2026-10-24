@@ -75,7 +75,7 @@ namespace Search {
 
     void processJob(const int threadIdx, Msg&& msg);
 
-    Reward rollout(EmulationGame& state, int threadIdx);
+    Reward rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_board);
 
     void printStatistics();
 

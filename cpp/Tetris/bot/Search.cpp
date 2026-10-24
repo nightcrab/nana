@@ -1,6 +1,7 @@
 #include "Search.hpp"
 #include "Config.hpp"
 #include <cstring>
+#include <array>
 
 #include <bit>
 #include <cmath>
@@ -86,6 +87,25 @@ constexpr int LOAD_FACTOR = NANA_LOAD_FACTOR;
 
 // selects past this depth are treated as leaves; a safety net for cycles in the state graph
 constexpr size_t MAX_PATH_DEPTH = 64;
+// nodes this many moves below the root are leaves: config depth_cap, or NANA_DEPTH_CAP for builds
+// that fix it (strength variants), or the environment variable NANA_DEPTH_CAP in builds that don't
+// (measurement: one binary for a sweep); 0 = no cap
+#ifndef NANA_DEPTH_CAP
+#define NANA_DEPTH_CAP 0
+#endif
+static int configuredDepthCap() {
+    if (NANA_DEPTH_CAP > 0) return NANA_DEPTH_CAP;
+    if (const char* text = std::getenv("NANA_DEPTH_CAP"); text && *text) return std::atoi(text);
+    return config().depth_cap;
+}
+static size_t leafDepth() {
+    static const size_t depth = [] {
+        const int cap = configuredDepthCap();
+        return cap > 0 && (size_t)cap < MAX_PATH_DEPTH ? (size_t)cap : MAX_PATH_DEPTH;
+    }();
+    return depth;
+}
+
 
 static_assert(!NANA_SUFFIX || Search::search_style == NANA, "NANA_SUFFIX is for the PUCT (NANA) search");
 
@@ -350,6 +370,45 @@ struct alignas(64) WorkerLocal {
 
 static std::vector<WorkerLocal> worker_local;
 
+// NANA_DEPTH_BASELINE: some of what a leaf scores comes with time, not with the moves that got
+// there (garbage landing, a bad piece), so lines look worse the further they're expanded. a leaf
+// scores its eval less the mean step, at each depth down to it, from what the parent thought of the
+// board its move left to what the child scores: the time-driven part averages out, and each line
+// still pays for doing worse than the average step. paired (child against its own parent), so which
+// lines the search chose to deepen doesn't leak in. each worker keeps its own; the next search
+// shifts them up a ply and halves their weight
+#ifndef NANA_DEPTH_BASELINE
+#define NANA_DEPTH_BASELINE 1
+#endif
+struct alignas(64) DepthBaseline {
+    std::array<double, MAX_PATH_DEPTH + 1> sum{};
+    std::array<double, MAX_PATH_DEPTH + 1> count{};
+
+    float mean(size_t d) const { return count[d] > 0 ? (float)(sum[d] / count[d]) : 0.0f; }
+
+    // record a leaf at depth d scoring raw, and return what it scores instead
+    float correct(size_t d, float raw, float parent_board) {
+        d = std::min(d, MAX_PATH_DEPTH);
+        sum[d] += raw - parent_board;
+        count[d] += 1;
+        float drift = 0;
+        for (size_t k = 1; k <= d; k++) {
+            drift += mean(k);
+        }
+        return raw - drift;
+    }
+
+    // the root moved a piece down: depth d+1 of the last search is depth d of this one
+    void shift() {
+        for (size_t d = 0; d < MAX_PATH_DEPTH; d++) {
+            sum[d] = sum[d + 1] * 0.5;
+            count[d] = count[d + 1] * 0.5;
+        }
+        sum[MAX_PATH_DEPTH] = count[MAX_PATH_DEPTH] = 0;
+    }
+};
+static std::vector<DepthBaseline> depth_baseline;
+
 // which L3 cache (chiplet) each worker's core shares; workers are pinned by index
 static std::vector<int> worker_l3_group;
 
@@ -388,6 +447,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
 
     // Create new search tree
     uct = UCT(core_count);
+    depth_baseline.assign(core_count, DepthBaseline{});
 
     // Create root node
     uct.insertNode(UCTNode(root_state));
@@ -456,6 +516,11 @@ void Search::continueSearch(EmulationGame state) {
     searchOpponent(root_state);
     resetKill(root_state);
     searchGarbage(root_state);
+
+    depth_baseline.resize(core_count);
+    for (DepthBaseline& baseline : depth_baseline) {
+        baseline.shift();
+    }
 
     if (!uct.nodeExists(state.hash())) {
         uct.insertNode(UCTNode(state));
@@ -1011,7 +1076,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         // rollout sends the new node to its owner, and the reward goes to the parent's owner
         uct.stats[threadIdx].nodes++;
 
-        Reward reward = rollout(job.state, threadIdx);
+        Reward reward = rollout(job.state, threadIdx, job.path.size(), job.parent_board);
 
         uint32_t parentIdx = uct.getOwner(job.path.back().hash);
 
@@ -1036,7 +1101,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         if (state.game_over) {
 
-            Reward reward = rollout(state, threadIdx);
+            Reward reward = rollout(state, threadIdx, job.path.size(), job.parent_board);
 
             if (job.path.empty()) {
                 // the root itself is lost: nothing to search, but don't leave endSearch waiting
@@ -1060,7 +1125,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 
         bool exists = uct.nodeExists(hash);
-        if (exists && job.path.size() >= MAX_PATH_DEPTH) {
+        if (exists && job.path.size() >= leafDepth()) {
             // safety net for cycles: treat it as a leaf
             uct.stats[threadIdx].depth_capped++;
             exists = false;
@@ -1149,6 +1214,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             if constexpr (NANA_REPLAY_RESTART) {
                 job.moves.push_back(node.cold[action].move);
             }
+            job.parent_board = node.cold[action].eval - node.cold[action].move_reward;
             state.set_move(state.specific_move(node.move(action)));
 
             [[maybe_unused]] const int attack_before = state.true_attack;
@@ -1533,7 +1599,7 @@ void Search::search(std::stop_token stop, const int threadIdx) {
 }
 
 
-Reward Search::rollout(EmulationGame& state, int threadIdx) {
+Reward Search::rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_board) {
     // Rollout using eval.
 #ifdef NANA_BENCH
     struct RolloutTimer {
@@ -1571,6 +1637,12 @@ Reward Search::rollout(EmulationGame& state, int threadIdx) {
 
     // no legal placement: as lost as topping out
     const bool stuck = node.actionCount() == 0;
+
+    if constexpr (NANA_DEPTH_BASELINE) {
+        if (!stuck) {
+            max_eval = depth_baseline[threadIdx].correct(depth, max_eval, parent_board);
+        }
+    }
 
     maybeInsertNode(std::move(node), threadIdx);
 

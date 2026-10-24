@@ -68,6 +68,8 @@ struct GameResult {
     uint64_t restarts = 0;
     uint64_t root_backprops = 0;
     uint64_t leaks = 0;
+    // selects that stopped at the depth cap
+    uint64_t depth_capped = 0;
     uint64_t illegal_moves = 0;
     uint64_t replay_matched = 0;
     uint64_t replay_diverged = 0;
@@ -162,6 +164,7 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
             result.restarts += stats.restarts;
             result.root_backprops += stats.root_backprops;
             result.leaks += stats.leaks;
+            result.depth_capped += stats.depth_capped;
             result.illegal_moves += stats.illegal_moves;
             result.replay_matched += stats.replay_matched;
             result.replay_diverged += stats.replay_diverged;
@@ -339,6 +342,7 @@ int main(int argc, const char** argv) {
             << ",\"restarts_per_sim\":" << (double)result.restarts / std::max<uint64_t>(result.simulations, 1)
             << ",\"root_per_sim\":" << (double)result.root_backprops / std::max<uint64_t>(result.simulations, 1)
             << ",\"leaks_per_sim\":" << (double)result.leaks / std::max<uint64_t>(result.simulations, 1)
+            << ",\"capped_per_sim\":" << (double)result.depth_capped / std::max<uint64_t>(result.simulations, 1)
             << ",\"illegal_per_sim\":" << (double)result.illegal_moves / std::max<uint64_t>(result.simulations, 1)
             << ",\"replay_match_rate\":" << (double)result.replay_matched / std::max<uint64_t>(result.replay_matched + result.replay_diverged, 1)
             << ",\"replay_diverge_depth\":" << (double)result.replay_diverge_depth / std::max<uint64_t>(result.replay_diverged, 1)

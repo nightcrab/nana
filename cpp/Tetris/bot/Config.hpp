@@ -99,6 +99,8 @@ struct NanaConfig {
     // an edge's N and R are scaled by 1 - 1 / n_cap before each update, so old samples fade
     // geometrically (Q averages roughly the last n_cap returns) and N levels off at n_cap
     double n_cap = 10000;
+    // Nodes this many moves below the root are leaves (0 = no cap).
+    int depth_cap = 0;
 
     // Select the evaluator without changing the search algorithm.
     std::string eval = "nana";
