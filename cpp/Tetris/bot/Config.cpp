@@ -68,6 +68,39 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("depth_step", c.depth_step);
     visit("prior_exponent", c.prior_exponent);
     visit("n_cap", c.n_cap);
+    visit("eval", c.eval);
+    visit("cc_back_to_back", c.cc.back_to_back);
+    visit("cc_bumpiness", c.cc.bumpiness);
+    visit("cc_bumpiness_sq", c.cc.bumpiness_sq);
+    visit("cc_row_transitions", c.cc.row_transitions);
+    visit("cc_height", c.cc.height);
+    visit("cc_top_half", c.cc.top_half);
+    visit("cc_top_quarter", c.cc.top_quarter);
+    visit("cc_jeopardy", c.cc.jeopardy);
+    visit("cc_cavity_cells", c.cc.cavity_cells);
+    visit("cc_cavity_cells_sq", c.cc.cavity_cells_sq);
+    visit("cc_overhang_cells", c.cc.overhang_cells);
+    visit("cc_overhang_cells_sq", c.cc.overhang_cells_sq);
+    visit("cc_covered_cells", c.cc.covered_cells);
+    visit("cc_covered_cells_sq", c.cc.covered_cells_sq);
+    visit("cc_tslot", c.cc.tslot);
+    visit("cc_well_depth", c.cc.well_depth);
+    visit("cc_max_well_depth", c.cc.max_well_depth);
+    visit("cc_well_column", c.cc.well_column);
+    visit("cc_move_time", c.cc.move_time);
+    visit("cc_wasted_t", c.cc.wasted_t);
+    visit("cc_b2b_clear", c.cc.b2b_clear);
+    visit("cc_clear1", c.cc.clear1);
+    visit("cc_clear2", c.cc.clear2);
+    visit("cc_clear3", c.cc.clear3);
+    visit("cc_clear4", c.cc.clear4);
+    visit("cc_tspin1", c.cc.tspin1);
+    visit("cc_tspin2", c.cc.tspin2);
+    visit("cc_tspin3", c.cc.tspin3);
+    visit("cc_mini_tspin1", c.cc.mini_tspin1);
+    visit("cc_mini_tspin2", c.cc.mini_tspin2);
+    visit("cc_perfect_clear", c.cc.perfect_clear);
+    visit("cc_combo_garbage", c.cc.combo_garbage);
     visit("app_weight", c.app_weight);
     visit("eval_weight", c.eval_weight);
 }
@@ -126,6 +159,9 @@ void finish(NanaConfig& c) {
     }
     if (!(c.n_cap >= 1)) {
         fail("n_cap must be at least 1");
+    }
+    if (c.eval != "nana" && c.eval != "cc") {
+        fail("eval must be nana or cc");
     }
     for (int r = 1; r <= NanaConfig::PRIOR_TABLE; r++) {
         c.prior_weight[r - 1] = (float)std::pow((double)r, -c.prior_exponent);

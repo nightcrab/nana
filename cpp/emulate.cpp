@@ -19,6 +19,7 @@
 // on Linux, run several at once on separate chiplets with e.g. taskset -c 8-15.
 
 #include "EmulationGame.hpp"
+#include "EmulateCommon.hpp"
 #include "Search.hpp"
 #include "UCT.hpp"
 #include "Config.hpp"
@@ -57,32 +58,6 @@ struct Options {
     bool print_config = false;
     float garbage_scale = 1;
 };
-
-static uint32_t seedFor(uint64_t game_seed, uint64_t stream) {
-    // splitmix64 of (seed, stream), so neighbouring seeds give unrelated games
-    uint64_t z = game_seed * 0x9E3779B97F4A7C15ull + stream * 0xD1B54A32D192ED03ull + 0x632BE59BD9B4E019ull;
-    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-    return uint32_t((z ^ (z >> 31)) >> 32);
-}
-
-static EmulationGame newGame(uint64_t game_seed, const Options& options) {
-    EmulationGame game;
-    game.garbage_ramp = options.ramp;
-    game.garbage_scale = options.garbage_scale;
-
-    game.rng.PPTRNG = seedFor(game_seed, 0);
-    game.rng.makebag();
-
-    game.reset_opponent();
-    game.markov.seed(seedFor(game_seed, 1));
-
-    game.game.current_piece = game.rng.getPiece();
-    for (auto& piece : game.game.queue) {
-        piece = game.rng.getPiece();
-    }
-    return game;
-}
 
 struct GameResult {
     int pieces = 0;
@@ -290,7 +265,7 @@ int main(int argc, const char** argv) {
         uint64_t game_seed = options.seed + i;
         // before the game's state exists: constructing it draws seeds too
         fast_seed_reset(options.search_seed ? (uint64_t)seedFor(game_seed, 2) | 1 : 0);
-        EmulationGame game = newGame(game_seed, options);
+        EmulationGame game = newGame(game_seed, options.ramp, options.garbage_scale);
         GameResult result = playGame(game, options, game_seed, opponent_log ? &opponent_log : nullptr);
 
         deaths += result.died;

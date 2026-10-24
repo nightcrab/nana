@@ -145,8 +145,15 @@ UCTNode::UCTNode(const EmulationGame &state) {
 
 	int gheight = state.game.board.get_garbage_height();
 
+	static const bool use_cc_eval = config().eval == "cc";
+	std::vector<PieceType> bag_left;
+	if (use_cc_eval) {
+		bag_left.assign(state.rng.bag.begin() + std::min<size_t>(state.rng.bagiterator, state.rng.bag.size()), state.rng.bag.end());
+	}
+
 	for (auto& raw_action : raw_actions) {
-		float eval = Eval::eval_CC(state.game, Move(raw_action, false));
+		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left)
+		                         : Eval::eval_CC(state.game, Move(raw_action, false));
 		// Surface abstraction step
 		raw_action.position.y -= gheight;
 		ColdAction c;

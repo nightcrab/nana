@@ -284,7 +284,7 @@ double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
     return (score + 10000) / 10000;
 }
 
-double Eval::eval_CC(Game game, Move move) {
+double Eval::eval_CC(Game game, Move move, double* move_part) {
     game.place_piece(move.piece);
     int lines = game.board.clearLines();
     spinType spin = move.piece.spin;
@@ -302,5 +302,17 @@ double Eval::eval_CC(Game game, Move move) {
         }
     }
 
+    if (move_part) {
+        // the terms eval_CC(board, ...) adds for the move, on its scale
+        static const NanaConfig& c = config();
+        double score = c.clears[lines];
+        if (tspin && lines < (int)std::size(c.tspins)) {
+            score += c.tspins[lines];
+        }
+        if (waste_t) {
+            score += c.wasted_t;
+        }
+        *move_part = score / 10000;
+    }
     return eval_CC(game.board, lines, tspin, waste_t);
 }

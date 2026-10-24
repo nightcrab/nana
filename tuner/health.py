@@ -5,7 +5,8 @@ Hard checks (run before tuning, and after every resume) stop the run:
                nana doesn't read, or a file it can't find, is caught before a week is spent on it
   determinism  the same config on the same seeds plays the same games; without this the paired
                comparisons are noise
-  canary       a deliberately bad config (the eval's height penalties flipped) must score clearly
+  canary       a deliberately bad config (nana's own eval with its height penalties flipped, whichever
+               eval the config uses) must score clearly
                below the baseline, or the fitness isn't responding to the config at all
 Soft monitors (every iteration) only warn, in the status file and the log.
 """
@@ -13,7 +14,7 @@ Soft monitors (every iteration) only warn, in the status file and the log.
 import math
 import statistics
 
-CANARY = {"height": 46.0, "top_half": 130.0, "top_quarter": 499.0, "cavity_cells": 176.0}
+CANARY = {"eval": "nana", "height": 46.0, "top_half": 130.0, "top_quarter": 499.0, "cavity_cells": 176.0}
 
 
 class HealthError(RuntimeError):
@@ -21,6 +22,8 @@ class HealthError(RuntimeError):
 
 
 def _close(a, b):
+    if isinstance(a, str) or isinstance(b, str):
+        return a == b
     if isinstance(a, list):
         return isinstance(b, list) and len(a) == len(b) and all(_close(x, y) for x, y in zip(a, b))
     return abs(float(a) - float(b)) <= 1e-9 * max(1.0, abs(float(a)))

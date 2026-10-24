@@ -320,8 +320,9 @@ int main() {
         message["version"] = "0.1";
         message["author"] = "Shakkar + Awyzza";
         // part of the TBP info message; clients like the stadium require it. set_threads: rules may
-        // carry the number of search threads
-        message["features"] = nlohmann::json::array({ "set_threads" });
+        // carry the number of search threads. set_thinks: rules may carry `thinks`, simulations to run
+        // per move before a suggestion
+        message["features"] = nlohmann::json::array({ "set_threads", "set_thinks" });
 
         // send just output to stdout
         std::cout << message.dump() << std::endl;
@@ -353,6 +354,13 @@ int main() {
                     if (threads >= 1) {
                         core_count = threads;
                     }
+                }
+
+                // set_thinks: each search runs this many simulations, and suggest waits for them
+                if (message.contains("thinks")) {
+                    uint64_t thinks;
+                    CHECK_ERR(thinks = message["thinks"].get<uint64_t>());
+                    Search::simulation_limit = thinks;
                 }
 
                 // the turns an attack spends in transit (the stadium sends it): games from the next
@@ -517,7 +525,10 @@ int main() {
                 }
             }
             else if (type == "suggest") {
-                // end search and give the best move
+                // end search and give the best move (with set_thinks, once its simulations are done)
+                if (Search::simulation_limit > 0 && Search::searching) {
+                    Search::waitForSimulations(std::chrono::seconds(120));
+                }
                 Search::endSearch();
                 Move best_move = game.specific_move(Search::bestMove());
                 last_suggestion = best_move;

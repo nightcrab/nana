@@ -16,6 +16,7 @@ list(TRANSFORM SHAKTRIS_SOURCES PREPEND "${SHAKTRIS_DIR}/")
 
 set(TETRIS_SOURCES
 	"Tetris/bot/Eval.cpp"
+	"Tetris/bot/EvalCC.cpp"
 	"Tetris/bot/Eval.hpp"
 	"Tetris/bot/Config.cpp"
 	"Tetris/bot/Config.hpp"
@@ -123,6 +124,9 @@ nana_add_executable(nana_bench nana_core_bench "bench.cpp")
 nana_add_executable(nana_speed nana_core "bench.cpp")
 nana_add_executable(nana_msgbench nana_core "msgbench.cpp")
 nana_add_executable(nana_emulate nana_core "emulate.cpp")
+# Paired games against external TBP bots and evaluator parity dumps.
+nana_add_executable(nana_emulate_tbp nana_core "emulate_tbp.cpp")
+nana_add_executable(nana_eval_dump nana_core "eval_dump.cpp")
 
 if(NANA_VARIANTS)
     foreach(variant IN LISTS NANA_VARIANTS)

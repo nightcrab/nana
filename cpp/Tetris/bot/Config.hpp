@@ -8,6 +8,44 @@
 // the executable. Settings are read once. Unknown
 // keys or malformed values are fatal, so a typo in a tuning run can't silently leave a default in
 // place. tuner/ writes these files
+// Cold Clear's Standard evaluator's weights (eval "cc", EvalCC.cpp), its defaults for TETR.IO garbage;
+// config keys cc_<name>
+struct CCWeights {
+    double back_to_back = 52;
+    double bumpiness = -24;
+    double bumpiness_sq = -7;
+    double row_transitions = -5;
+    double height = -39;
+    double top_half = -150;
+    double top_quarter = -511;
+    double jeopardy = -11;
+    double cavity_cells = -173;
+    double cavity_cells_sq = -3;
+    double overhang_cells = -34;
+    double overhang_cells_sq = -1;
+    double covered_cells = -17;
+    double covered_cells_sq = -1;
+    std::array<double, 4> tslot = { 8, 148, 192, 407 };
+    double well_depth = 57;
+    int max_well_depth = 17;
+    std::array<double, 10> well_column = { 20, 23, 20, 50, 59, 21, 59, 10, -10, 24 };
+
+    double move_time = -3;
+    double wasted_t = -152;
+    double b2b_clear = 104;
+    double clear1 = -143;
+    double clear2 = -100;
+    double clear3 = -58;
+    double clear4 = 390;
+    double tspin1 = 121;
+    double tspin2 = 410;
+    double tspin3 = 602;
+    double mini_tspin1 = -158;
+    double mini_tspin2 = -93;
+    double perfect_clear = 999;
+    double combo_garbage = 150;
+};
+
 struct NanaConfig {
     // Runtime settings for TBP; emulation and benchmarks retain their environment overrides.
     std::string rules = "tetrio";
@@ -61,6 +99,10 @@ struct NanaConfig {
     // an edge's N and R are scaled by 1 - 1 / n_cap before each update, so old samples fade
     // geometrically (Q averages roughly the last n_cap returns) and N levels off at n_cap
     double n_cap = 10000;
+
+    // Select the evaluator without changing the search algorithm.
+    std::string eval = "nana";
+    CCWeights cc;
 
     // rollout score: app_weight * APP + eval_weight * the best eval of the leaf's moves
     double app_weight = 1.0 / 3.0;
