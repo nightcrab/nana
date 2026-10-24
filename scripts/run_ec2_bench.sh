@@ -16,7 +16,7 @@
 #   POLL_SECONDS  how often to check whether the sweep is done (default 60)
 #   THREADS       thread counts to sweep, e.g. "1 4 8 16 32" (default 1, 2, 4, ... max_threads)
 #   SCRIPT        which script in scripts/ to run (default bench_scaling.sh)
-#   SELF_SHUTDOWN 1 = the instance shuts itself down 3 minutes after the benchmark exits (30 if it
+#   SELF_SHUTDOWN 1 = the instance shuts itself down 10 minutes after the benchmark exits (30 if it
 #                 failed, so its log can still be read), so a run
 #                 finishes cleanly even if this machine sleeps or loses its connection (default 0).
 #                 Results stay on the stopped instance's disk; the next run moves them to
@@ -112,7 +112,7 @@ $extract
 # the uploaded script may have CRLF endings too (a Windows checkout), and it lands after the extract
 sed 's/\r\$//' ../$script > scripts/$script
 rm -f ../bench.done
-nohup bash -c 'THREADS="${THREADS:-}" bash scripts/$script $bench_args; status=\$?; echo \$status > ../bench.done; [ "$self_shutdown" = 1 ] && sudo shutdown -h +\$(( status == 0 ? 3 : 30 )) "nana bench done"' > ../bench.log 2>&1 < /dev/null &
+nohup bash -c 'THREADS="${THREADS:-}" bash scripts/$script $bench_args; status=\$?; echo \$status > ../bench.done; [ "$self_shutdown" = 1 ] && sudo shutdown -h +\$(( status == 0 ? 10 : 30 )) "nana bench done"' > ../bench.log 2>&1 < /dev/null &
 EOF
 
 armed=1

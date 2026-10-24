@@ -1,6 +1,9 @@
 #include "MarkovOpponent.hpp"
 #include "MarkovOpponentParams.hpp"
 
+#include <cmath>
+#include <cstdlib>
+
 namespace markov {
 
 template <size_t N>
@@ -18,8 +21,50 @@ static void toCdf(std::array<float, N>& row) {
     row[N - 1] = 1.0f;
 }
 
+// NANA_MARKOV_SHARPEN=a (measurement only): a more predictable opponent. every transition row and the
+// attack part of every emission row become p^a renormalised (a = 1: the fit; large a: nearly the
+// argmax), the death probability kept as fitted. the game's opponent and the search's model share
+// params(), so both get the same sharpened model
+static float sharpenExponent() {
+    const char* text = std::getenv("NANA_MARKOV_SHARPEN");
+    return text && *text ? (float)std::atof(text) : 1.0f;
+}
+
+template <size_t N>
+static void sharpen(std::array<float, N>& row, float a, size_t n = N) {
+    float before = 0;
+    float after = 0;
+    for (size_t i = 0; i < n; i++) {
+        before += row[i];
+        row[i] = row[i] > 0 ? std::pow(row[i], a) : 0.0f;
+        after += row[i];
+    }
+    if (after <= 0) {
+        return;
+    }
+    for (size_t i = 0; i < n; i++) {
+        row[i] *= before / after;
+    }
+}
+
 static Params makeCdfs() {
     Params p = fitted_params;
+    const float a = sharpenExponent();
+    if (a != 1.0f) {
+        for (auto& by_jeopardy : p.transition) {
+            for (auto& by_since : by_jeopardy) {
+                for (auto& rows : by_since) {
+                    for (auto& row : rows) {
+                        sharpen(row, a);
+                    }
+                }
+            }
+        }
+        for (auto& row : p.emission) {
+            // the attack bins only, keeping their total: death stays as likely as fitted
+            sharpen(row, a, ATTACKS);
+        }
+    }
     toCdf(p.initial);
     for (auto& by_jeopardy : p.transition) {
         for (auto& by_since : by_jeopardy) {
