@@ -89,26 +89,17 @@ void print_strength() {
 	UCTNode& root = Search::uct.getNode(Search::root_state.hash());
 	for (size_t i = 0; i < root.actionCount(); i++) {
 		const EdgeStats& action = root.stats(i);
-		if constexpr (Search::search_style == NANA) {
-			if (action.N == biggest_N) {
-				if (action.R > biggest_R) {
-					biggest_R = action.R;
-					biggest_N = action.N;
-					best_move = root.move(i);
-				}
-			}
-			if (action.N > biggest_N) {
-				biggest_R = action.R;
-				biggest_N = action.N;
-				best_move = root.move(i);
-			}
-		}
-		if constexpr (Search::search_style == CC) {
+		if (action.N == biggest_N) {
 			if (action.R > biggest_R) {
 				biggest_R = action.R;
 				biggest_N = action.N;
 				best_move = root.move(i);
 			}
+		}
+		if (action.N > biggest_N) {
+			biggest_R = action.R;
+			biggest_N = action.N;
+			best_move = root.move(i);
 		}
 
 

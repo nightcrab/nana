@@ -33,6 +33,18 @@ struct EdgeStats {
     float Q() const;
 };
 
+// NANA_CC_SEARCH (a reference for benchmarking, multicore in particular): Cold Clear's search on
+// nana's machinery. each edge's R is its value: its move's reward plus its child's (its eval until the
+// child is expanded), a node is worth its best edge, and selection draws edges by Cold Clear's rank
+// weights. the search plays one future drawn at its root and no attacks from the opponent, as Cold
+// Clear does. TDS (NANA_MPMCTS=0) only; the backups below are off with it
+#ifndef NANA_CC_SEARCH
+#define NANA_CC_SEARCH 0
+#endif
+constexpr bool cc_search = NANA_CC_SEARCH;
+// a dead end in the CC search (no move, or every move dies)
+constexpr float CC_DEAD = -1e9f;
+
 // NANA_SUFFIX: an edge is credited only with what happens after it. a return is a few sums
 // (suffix attack A, suffix pieces L, leaf eval E, count n, deaths n_dead), and an edge's value
 // over the returns it has received is app_weight * A / L * (n - n_dead) / n + eval_weight * E / n:
@@ -42,7 +54,7 @@ struct EdgeStats {
 // each death costs its 1/n share however soon it came. NANA_REWARD=app only.
 
 #ifndef NANA_SUFFIX
-#define NANA_SUFFIX 1
+#define NANA_SUFFIX !NANA_CC_SEARCH
 #endif
 // NANA_SUFFIX_DISCOUNT: each piece further from the edge counts this much less in its attack
 // rate (A and L are both discounted, so the rate stays a weighted average). the leaf eval isn't
@@ -89,7 +101,7 @@ using Reward = float;
 // back yet is worth its rollout. with NANA_SUFFIX a value is one return's worth of sums (n = 1),
 // and an edge adds its own step to its children's before reading them
 #ifndef NANA_EXPECTIMAX
-#define NANA_EXPECTIMAX 1
+#define NANA_EXPECTIMAX !NANA_CC_SEARCH
 #endif
 // arms count towards a node's value once they've had this many results back
 #ifndef NANA_EXPECTIMAX_MIN_N
@@ -285,6 +297,10 @@ class UCTNode {
     size_t select(int depth);
     size_t select_r_max();
     size_t select_SOR(RNG& rng);
+    // NANA_CC_SEARCH: the best edge's value, and Cold Clear's selection (edges ranked best first,
+    // drawn with weight (e - worst + 10)^2 / (rank^2 + 1), e in eval_CC's score units)
+    float ccValue() const;
+    size_t select_CC(RNG& rng) const;
 };
 
 class HashActionPair {

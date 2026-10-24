@@ -103,7 +103,7 @@ static int configuredDepthCap() {
 }
 static size_t leafDepth() {
     static const size_t depth = [] {
-        const int cap = configuredDepthCap();
+        const int cap = cc_search ? 0 : configuredDepthCap();
         return cap > 0 && (size_t)cap < MAX_PATH_DEPTH ? (size_t)cap : MAX_PATH_DEPTH;
     }();
     return depth;
@@ -112,9 +112,9 @@ static size_t leafDepth() {
 // 1 = MP-MCTS: backprops stop and restart selection where every ancestor would choose the same path.
 // 0 = TDS-UCT: every backprop goes to the root
 #ifndef NANA_MPMCTS
-#define NANA_MPMCTS 1
+#define NANA_MPMCTS !NANA_CC_SEARCH
 #endif
-static_assert(!NANA_SUFFIX || Search::search_style == NANA, "NANA_SUFFIX is for the PUCT (NANA) search");
+static_assert(!cc_search || !NANA_MPMCTS, "the CC search needs NANA_MPMCTS=0: its restarts assume PUCT");
 
 // leaky gate for MP-MCTS restarts (notes/leaky-gate-mp-mcts.md): a leak carries a backprop on up
 // although every ancestor would still choose its path, delivering what's parked below them.
@@ -312,8 +312,8 @@ static void resetKill(EmulationGame& root) {
     }
 }
 
-// NANA_SEARCH_GARBAGE=0 (measurement): the opponent sends nothing in the search;
-// garbage already on the meter still comes.
+// NANA_SEARCH_GARBAGE=0 (comparison only; always so in the CC search): the opponent sends nothing in
+// the search, as Cold Clear assumes; garbage already on the meter still comes
 #ifndef NANA_SEARCH_GARBAGE
 #define NANA_SEARCH_GARBAGE 1
 #endif
@@ -325,12 +325,19 @@ static void resetKill(EmulationGame& root) {
 #endif
 static void searchGarbage(EmulationGame& root) {
     if constexpr (NANA_FUTURE_ORACLE) {
+        static_assert(!NANA_FUTURE_ORACLE || !cc_search, "future oracle requires the regular search");
         EmulationGame::deterministic_chance = true;
     }
-    if constexpr (!NANA_SEARCH_GARBAGE) {
+    if constexpr (cc_search) {
+        // one future for the whole search, drawn here (not the real game's)
+        EmulationGame::deterministic_chance = false;
+        root.reseed_chance();
+        EmulationGame::deterministic_chance = true;
+    }
+    if constexpr (!NANA_SEARCH_GARBAGE || cc_search) {
         // the sampled opponent's attacks scaled to nothing
         root.garbage_scale = 0;
-        root.phantom_garbage = NANA_PHANTOM_GARBAGE;
+        root.phantom_garbage = NANA_PHANTOM_GARBAGE && !cc_search;
         root.phantom_meter.clear();
     }
 }
@@ -413,7 +420,7 @@ static std::vector<WorkerLocal> worker_local;
 // lines the search chose to deepen doesn't leak in. each worker keeps its own; the next search
 // shifts them up a ply and halves their weight
 #ifndef NANA_DEPTH_BASELINE
-#define NANA_DEPTH_BASELINE 1
+#define NANA_DEPTH_BASELINE !NANA_CC_SEARCH
 #endif
 struct alignas(64) DepthBaseline {
     std::array<double, MAX_PATH_DEPTH + 1> sum{};
@@ -1223,16 +1230,15 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             }
 
             // MP-MCTS with PUCT: the select scan also collects the history row's competitors
-            constexpr bool single_pass = NANA_MPMCTS && search_style == NANA;
+            constexpr bool single_pass = NANA_MPMCTS;
             if constexpr (single_pass) {
                 action = node.selectWithCompetitors(depth, row);
             }
-            else if constexpr (search_style == NANA) {
-                action = node.select(depth);
+            else if constexpr (cc_search) {
+                action = node.select_CC(uct.rng[threadIdx]);
             }
-            if constexpr (search_style == CC) {
-
-                action = node.select_SOR(uct.rng[threadIdx]);
+            else {
+                action = node.select(depth);
             }
 
             // Virtual Loss by setting N := N+1
@@ -1313,21 +1319,24 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         // Undo Virtual Loss by adding R. from here on, reward is what goes to the parent's edge
         Reward reward = job.R;
+        // the CC search: this node's value didn't change, so nothing above it does
+        [[maybe_unused]] bool settled = false;
 #if NANA_EXPECTIMAX
+        // the child's value replaces its last at this edge; ours goes up
         reward = node.report(job.path.back().actionID, job.child_hash, job.R, 1.0f + job.extra_N, true);
-#else
-#if NANA_SUFFIX
+#elif NANA_SUFFIX
         reward = node.climb(job.path.back().actionID, reward, false);
 #else
-        if constexpr (search_style == NANA) {
+        if constexpr (cc_search) {
+            // the edge is worth its move's reward plus its child's value, and this node its best edge
+            const float before = node.ccValue();
+            edge.R = reward <= CC_DEAD ? CC_DEAD : node.cold[job.path.back().actionID].move_reward + reward;
+            reward = node.ccValue();
+            settled = reward == before;
+        }
+        else {
             reward = node.climb(job.path.back().actionID, reward, false);
         }
-        if constexpr (search_style == CC) {
-            if (reward > edge.R) {
-                edge.R = reward;
-            }
-        }
-#endif
 #endif
 
         // simulations that restarted below us weren't counted on the way down
@@ -1344,8 +1353,13 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.steps.pop_back();
         }
 
-        if (job.path.empty()) {
-            uct.stats[threadIdx].root_backprops++;
+        if (job.path.empty() || settled) {
+            if (job.path.empty()) {
+                uct.stats[threadIdx].root_backprops++;
+            }
+            // (a CC search backprop that settled below the root stops there: its selection draws
+            // from the root again, as a restart further down would oversample this subtree)
+            job.path.clear();
 
             // reuse this job for a fresh select from the root;
             // copy-assigning keeps the existing vector capacity. the copy gets fresh randomness and
@@ -1362,8 +1376,14 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             notifySimulationDone();
 
-            // give ourself this job
-            queues[threadIdx]->enqueue(std::move(msg), threadIdx);
+            // A settled CC backup may stop below the root, on a different shard's owner.
+            // Fresh selection must return to the root's owner before accessing its node.
+            if constexpr (cc_search) {
+                send(threadIdx, uct.getOwner(root_state.hash()), std::move(msg));
+            }
+            else {
+                queues[threadIdx]->enqueue(std::move(msg), threadIdx);
+            }
 
             return;
         }
@@ -1703,7 +1723,7 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
 #if NANA_SUFFIX
         return dead;
 #else
-        return -0.0f;
+        return cc_search ? CC_DEAD : -0.0f;
 #endif
     }
 
@@ -1729,6 +1749,19 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
             max_eval = depth_baseline[threadIdx].correct(depth, max_eval, parent_board);
         }
     }
+
+#if !NANA_SUFFIX && !NANA_EXPECTIMAX
+    if constexpr (cc_search) {
+        // Cold Clear's expansion: the node is worth its best move's eval (the move's reward and the
+        // board it leaves), dead if it has none
+        float value = CC_DEAD;
+        for (size_t i = 0; i < node.actionCount(); i++) {
+            value = std::max(value, node.eval(i));
+        }
+        maybeInsertNode(std::move(node), threadIdx);
+        return value;
+    }
+#endif
 
 #if NANA_EXPECTIMAX
     // the node is worth its rollout until its arms have results back
@@ -1794,46 +1827,26 @@ Move Search::bestMove() {
     UCTNode& root = uct.getNode(root_state.hash());
     for (size_t i = 0; i < root.actionCount(); i++) {
         const EdgeStats& action = root.stats(i);
-        if constexpr (search_style == NANA) {
-            if (action.N == biggest_N) {
-                if (action.R > biggest_R) {
-                    biggest_R = action.R;
-                    biggest_N = action.N;
-                    best_move = root.move(i);
-                }
-            }
-            if (action.N > biggest_N) {
+        if constexpr (cc_search) {
+            // Cold Clear plays the best value, not the most visited
+            if (best_move.null_move || action.R > biggest_R) {
                 biggest_R = action.R;
-                biggest_N = action.N;
                 best_move = root.move(i);
             }
-#ifndef TBP
-           //std::cout << "N:" << action.N << " R_avg:" << action.Q() << std::endl;
-#endif
+            continue;
         }
-        if constexpr (search_style == CC) {
+        if (action.N == biggest_N) {
             if (action.R > biggest_R) {
                 biggest_R = action.R;
                 biggest_N = action.N;
                 best_move = root.move(i);
             }
-
-#ifndef TBP
-            //std::cout << "N:" << action.N << " R_max:" << action.R << std::endl;
-#endif
         }
-        
-
-    }
-    if constexpr (search_style == NANA) {
-#ifndef TBP
-         //std::cout << "best move was visited " << biggest_N << " times, with R_avg " << biggest_R / biggest_N << std::endl;
-#endif
-    }
-    if constexpr (search_style == CC) {
-#ifndef TBP
-         //std::cout << "best move was visited " << biggest_N << " times, with R_max " << biggest_R << std::endl;
-#endif
+        if (action.N > biggest_N) {
+            biggest_R = action.R;
+            biggest_N = action.N;
+            best_move = root.move(i);
+        }
     }
 
     return best_move;

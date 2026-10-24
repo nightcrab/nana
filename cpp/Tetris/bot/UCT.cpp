@@ -217,7 +217,10 @@ void UCTNode::updateTime(size_t i, int newtime) {
 	if (time(i) != newtime) {
 		EdgeStats& edge = stats(i);
 		edge.N = edge.N / 5;
-		edge.R = edge.R / 5;
+		// (the CC search's R is a value, not a sum of returns)
+		if constexpr (!cc_search) {
+			edge.R = edge.R / 5;
+		}
 #if NANA_SUFFIX
 		Return& s = cold[i].sums;
 		s.A /= 5;
@@ -296,6 +299,9 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, &move_reward,
 		                                                  belief ? &*belief : nullptr, meter)
 		                         : Eval::eval_CC(state.game, Move(raw_action, false), &move_reward);
+		if constexpr (cc_search) {
+			edge_stats[idx].R = eval;
+		}
 		// Surface abstraction step
 		raw_action.position.y -= gheight;
 		ColdAction c;
@@ -537,6 +543,49 @@ bool HistoryRow::stillChosen() const {
 		}
 	}
 	return true;
+}
+
+float UCTNode::ccValue() const {
+	float best = CC_DEAD;
+	for (const EdgeStats& edge : edge_stats) {
+		best = std::max(best, edge.R);
+	}
+	return best;
+}
+
+size_t UCTNode::select_CC(RNG& rng) const {
+	static thread_local std::vector<std::pair<float, uint32_t>> ranked;
+	static thread_local std::vector<double> weights;
+	ranked.clear();
+	for (size_t i = 0; i < actionCount(); i++) {
+		if (stats(i).R > CC_DEAD) {
+			ranked.push_back({ stats(i).R, (uint32_t)i });
+		}
+	}
+	if (ranked.empty()) {
+		return 0;
+	}
+	std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+	const float worst = ranked.back().first;
+	weights.clear();
+	double total = 0;
+	for (size_t rank = 0; rank < ranked.size(); rank++) {
+		// eval_CC is a score / 10000: Cold Clear weighs in score units
+		const double e = std::floor((ranked[rank].first - worst) * 10000.0) + 10;
+		const double w = std::floor(e * e / (double)(rank * rank + 1));
+		weights.push_back(w);
+		total += w;
+	}
+	// a 32-bit uniform draw from two 16-bit ones (getRand(n) takes n up to 2^16)
+	const double u = ((double)rng.getRand(1u << 16) * 65536.0 + (double)rng.getRand(1u << 16)) / 4294967296.0;
+	double target = u * total;
+	for (size_t rank = 0; rank < ranked.size(); rank++) {
+		target -= weights[rank];
+		if (target < 0) {
+			return ranked[rank].second;
+		}
+	}
+	return ranked.back().second;
 }
 
 size_t UCTNode::select_SOR(RNG &rng) {

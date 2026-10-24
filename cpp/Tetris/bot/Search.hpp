@@ -13,17 +13,9 @@
 #ifndef __SEARCH_HPP
 #define __SEARCH_HPP
 
-enum SearchType {
-    CC,
-    NANA
-};
-
-
 namespace Search {
 
     extern bool searching;
-
-    constexpr SearchType search_style = NANA;
 
     extern int core_count;
 
@@ -64,7 +56,8 @@ namespace Search {
     // state and since counter drawn per simulation) instead of starting fresh at every root.
     // nullptr = start fresh
     extern const RootOpponent* root_opponent;
-    // Caller's filter, copied into each simulation root.
+    // the caller's filter over the real opponent, if any: each search's root starts the simulations'
+    // belief from it (EmulationGame::belief)
     extern const OpponentFilter* root_filter;
     // wait until the search reaches simulation_limit, or for timeout; false on timeout
     bool waitForSimulations(std::chrono::milliseconds timeout);
@@ -76,7 +69,6 @@ namespace Search {
     void processJob(const int threadIdx, Msg&& msg);
 
     Reward rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_board);
-
 #if !NANA_SUFFIX
     float leafReward(EmulationGame& state, float max_eval);
 #endif
