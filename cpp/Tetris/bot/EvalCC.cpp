@@ -232,7 +232,17 @@ float Eval::BeliefTerm::value(int attack, bool cleared) {
     return v;
 }
 
-double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>& bag_left, double* move_part, BeliefTerm* belief) {
+// NANA_EVAL_TANK: a move that clears nothing is scored as if the meter had tanked under it, as the
+// game will play it, rather than on a board the garbage never reaches. 1: the rows only raise the
+// stack, so the height terms read the tank on top of the highest column (the rows themselves would be
+// full but for a hole the game draws at random, which the rest of the eval can't know). 2: the rows
+// go under the board with a hole from a hash of the board
+#ifndef NANA_EVAL_TANK
+#define NANA_EVAL_TANK 1
+#endif
+
+double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>& bag_left, double* move_part,
+                              BeliefTerm* belief, [[maybe_unused]] int meter) {
     static const CCWeights& w = config().cc;
     const Piece& piece = move.piece;
     const auto b2b_before = game.b2b;
@@ -291,13 +301,30 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
         transient += w.back_to_back;
     }
 
+    // TETR.IO tanks the whole meter, Botris up to 8 rows a piece
+    const int tank = NANA_EVAL_TANK && lines == 0 && meter > 0
+        ? (std::holds_alternative<TetrioS1>(game.mode) ? meter : std::min(meter, 8)) : 0;
+    if constexpr (NANA_EVAL_TANK == 2) {
+        if (tank > 0) {
+            // the hole is random in the game: here a column from the board itself, so the score doesn't
+            // peek at the game's rng
+            uint32_t h = 0;
+            for (int x = 0; x < Board::width; x++) {
+                h = h * 31 + game.board.get_column(x);
+            }
+            game.add_garbage(tank, (int)(h % Board::width));
+        }
+    }
+    // what the height terms add to the stack
+    const int raised = NANA_EVAL_TANK == 1 ? tank : 0;
+
     CCBoard board = CCBoard::from(game.board);
     int highest = board.highest();
     const double opponent = belief ? belief->value(garbage, lines > 0) : 0.0;
-    transient += w.top_quarter * std::max(highest - 15, 0);
-    transient += w.top_half * std::max(highest - 10, 0);
+    transient += w.top_quarter * std::max(highest + raised - 15, 0);
+    transient += w.top_half * std::max(highest + raised - 10, 0);
     // (Cold Clear divides in integers)
-    acc += std::trunc(w.jeopardy * std::max(highest - 10, 0) * move_time / 10);
+    acc += std::trunc(w.jeopardy * std::max(highest + raised - 10, 0) * move_time / 10);
 
     // the bag the next piece comes from: the pieces left after the queue, filled back in through it
     unsigned bag = 0;
@@ -328,7 +355,7 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
     }
 
     highest = board.highest();
-    transient += w.height * (highest);
+    transient += w.height * (highest + raised);
 
     int well = 0;
     for (int x = 1; x < 10; x++) {

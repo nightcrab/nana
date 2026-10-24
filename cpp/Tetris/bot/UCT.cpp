@@ -169,7 +169,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	}
 
 	for (auto& raw_action : raw_actions) {
-		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, nullptr, belief ? &*belief : nullptr)
+		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, nullptr, belief ? &*belief : nullptr, meter)
 		                         : Eval::eval_CC(state.game, Move(raw_action, false));
 		// Surface abstraction step
 		raw_action.position.y -= gheight;
