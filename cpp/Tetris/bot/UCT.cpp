@@ -399,7 +399,11 @@ size_t UCTNode::select_uct(int depth) {
 */
 float UCTNode::c_puct(float node_N, int depth) {
 	static const NanaConfig& c = config();
-	const float c_init = (float)c.c_init;
+	// NANA_C_INIT_SCALE: a build-time multiple of the configured c_init, for strength variants
+#ifndef NANA_C_INIT_SCALE
+#define NANA_C_INIT_SCALE 1
+#endif
+	const float c_init = (float)(c.c_init * NANA_C_INIT_SCALE);
 	const float c_base = (float)c.c_base;
 
 	float D = 1 + depth / c.depth_step;
