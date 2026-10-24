@@ -5,58 +5,19 @@
 
 # Nana
 
---------------------------
-
-Nana is a parallel search program for two-player stacking games, such as Versus Tetris. 
-
-Versus Tetris presents a variety of challenges that Nana chooses to approach explicitly, namely:
-
-* Large branching factors
-* Random chance
-* Hidden information
-* Efficient parallelisation
-* Online any-time planning
+Nana is a parallel search program for two-player stacking games, such as Versus Tetris.
 
 The engine is designed to run on tournament hardware with an emphasis on high core counts and modern x86.
 
-
 ## How It Works
 
-Nana at its core is based on the combination of two search techniques; Monte Carlo Tree Search (MCTS)[[1]](#1), and Transposition Driven Scheduling (TDS)[[2]](#2).
+Nana at its core is based on the combination of two search techniques; Monte Carlo Tree Search (MCTS)[[1]](#1)[[5]](#5)[[6]](#6), and Transposition Driven Scheduling (TDS)[[2]](#2)[[3]](#3)[[4]](#4). It marries these with an informative opponent model[[7]](#7), state abstraction[[8]](#8), and estimation over random outcomes[[9]](#9).
 
 MCTS operates on the premise that we can generate an analysis of the game's local search space by phrasing states and actions as individual Multi Arm Bandit problems, and repeatedly performing Upper Confidence Bound selection of the actions which provide the best balance of exploitation and exploration. This method is also known as Upper Confidence bound applied to Trees, or UCT search.[[1]](#1)
 
 Transposition Driven Scheduling is a load balancing technique that allows a program to efficiently scale to many threads while searching for solutions, and has historically been applied to puzzle games. It works by having the program globally agree to allocate ownership of certain gamestates to certain threads, based on the state's hash. This means that any thread can calculate who the owner is of a state that has never been seen before. 
 
-### Work Requesting
-
-One of the challenges specifically of searching Tetris that computing legal actions is very costly and highly non-uniform. In some states, it is a trivial computation while in others, it can take a long time. This means that existing TDS-MCTS methods such as those by Yoshizoe et al.[[3]](#3) encounter significant congestion issues when applied to this domain without dynamic load balancing.
-
-To address this, Nana workers try to predict when they are at risk of running out of work, and pre-emptively request to borrow work from individual workers using a tuned heuristic taking into account load statistics and memory topology.
-
-### Information State MCTS
-
-Nana uses a special variant of MCTS that combines state abstraction with open-loop MCTS [[5]](#5) to games with randomness and hidden information. It is based on Information State MCTS [[6]](#6) which was designed for games with hidden information.
-
-State abstraction allows Nana to combine search statistics on gamestates that look similar but differ superficially, while open-loop MCTS walks forward random simulations of the game without needing to know the underlying transition probabilities.
-
-### Backpropagation Pruning
-
-Nana's search parallelization is based on the optimized version of TDS-MCTS presented by Yang et al. 2020[[4]](#4), named MP-MCTS. By skipping redundant backpropagations, MP-MCTS significantly reduces root contention.
-
-To adapt the MP-MCTS optimization correctly to ISMCTS, Nana resamples the environment dynamics based on the action table, and hands off the job once the trajectory diverges. This ensures the search doesn't degrade statistically, while eliminating unnecessary communication on the shared prefix.
-
-### Opponent Modelling
-
-To model garbage-trading dynamics and macro state, Nana uses an internal simulator that implements an Input-Output Hidden Markov Model (IOHMM). [[7]](#7) The IOHMM models the opponent as a probability distribution over macro states rather than a board that needs to be played out.
-
-The default opponent model is the 8-state IOHMM trained on Nana's own play. In principle, it could be retuned or replaced with a custom model supporting the same input-output structure.
-
-### Board Watching
-
-If provided, Nana feeds opponent board information directly into the IOHMM using a logistic encoder.
-
-Under TBP1 and protocols that don't support board watching, Nana uses the history of incoming garbage to reconstruct a belief about the opponent's boardstate.
+For a more detailed overview of how Nana is implemented, including MCTS variations, multithreading architecture, and opponent modelling, please see `docs/README.md`.
 
 ## Scaling Experiments
 
@@ -128,7 +89,7 @@ CMake options (pass with `-D`):
 * `NANA_MARCH=<level>` sets the `-march` of every executable except a launcher-built `tbp_tetris` (default `native`).
 * `NANA_VARIANTS="<level>;<level>;..."` builds `tbp_tetris` for several ISA levels (see below).
 
-### Portable build
+### Portable Build
 
 Distributed via Github releases, there are some portable Nana pre-compiled binaries for Windows and Linux.
 
@@ -167,8 +128,6 @@ python -m tuner status eval1            # where the run is, from another termina
 python -m tuner resume eval1            # after Ctrl-C or a reboot
 ```
 
-Give ``--cpus`` one logical cpu per physical core and keep the machine otherwise idle. The result is ``tuner/runs/<name>/release.json``, a config file Nana loads with ``NANA_CONFIG=path/to/release.json``; for TBP, copy its weights into ``nana.json``. See ``tuner/README.md`` for how it works.
-
 ## References
 
 1. https://en.wikipedia.org/wiki/Monte_Carlo_tree_search
@@ -178,3 +137,5 @@ Give ``--cpus`` one logical cpu per physical core and keep the machine otherwise
 5. Open Loop Optimistic Planning, Bubeck and Munos 2010 (https://chercheurs.lille.inria.fr/munos/papers/files/olop.pdf)
 6. Information Set Monte Carlo Tree Search, Cowling et al. 2012 (https://eprints.whiterose.ac.uk/id/eprint/75048/1/CowlingPowleyWhitehouse2012.pdf)
 7. An Input Output HMM Architecture, Bengio and Frasconi 1995 (https://www.iro.umontreal.ca/~lisa/bib/pub_subject/language/pointeurs/iohmm-nips7.pdf)
+8. State Aggregation in Monte Carlo Tree Search, Hostetler et al. 2014 (https://ojs.aaai.org/index.php/AAAI/article/view/9066)
+9. Reinforcement Learning via AIXI Approximation, Veness et al. 2010(https://arxiv.org/html/1007.2049v1)
