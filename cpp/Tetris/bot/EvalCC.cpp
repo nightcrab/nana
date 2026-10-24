@@ -220,7 +220,19 @@ std::optional<TSpot> findTslot(const CCBoard& b) {
 
 }  // namespace
 
-double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>& bag_left, double* move_part) {
+Eval::BeliefTerm::BeliefTerm(const OpponentFilter* filter, int meter) : filter(filter), meter(meter) {
+    cache.fill(std::numeric_limits<float>::quiet_NaN());
+}
+
+float Eval::BeliefTerm::value(int attack, bool cleared) {
+    float& v = cache[(cleared ? 16 : 0) + std::min(attack, 15)];
+    if (std::isnan(v)) {
+        v = filter->valueAfter(attack, cleared, cleared ? 0 : meter, config().belief_weights);
+    }
+    return v;
+}
+
+double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>& bag_left, double* move_part, BeliefTerm* belief) {
     static const CCWeights& w = config().cc;
     const Piece& piece = move.piece;
     const auto b2b_before = game.b2b;
@@ -281,6 +293,7 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
 
     CCBoard board = CCBoard::from(game.board);
     int highest = board.highest();
+    const double opponent = belief ? belief->value(garbage, lines > 0) : 0.0;
     transient += w.top_quarter * std::max(highest - 15, 0);
     transient += w.top_half * std::max(highest - 10, 0);
     // (Cold Clear divides in integers)
@@ -386,5 +399,5 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
         *move_part = acc / 10000.0;
     }
     // eval_CC's scale: a score / 10000, around 1
-    return (transient + acc + 10000) / 10000.0;
+    return (transient + acc + opponent + 10000) / 10000.0;
 }

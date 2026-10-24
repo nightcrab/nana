@@ -1,0 +1,182 @@
+[
+ {
+  "name": "cc_back_to_back",
+  "default": 52.0,
+  "low": -72.0,
+  "high": 176.0
+ },
+ {
+  "name": "cc_bumpiness",
+  "default": -24.0,
+  "low": -92.0,
+  "high": 44.0
+ },
+ {
+  "name": "cc_bumpiness_sq",
+  "default": -7.0,
+  "low": -41.0,
+  "high": 27.0
+ },
+ {
+  "name": "cc_row_transitions",
+  "default": -5.0,
+  "low": -35.0,
+  "high": 25.0
+ },
+ {
+  "name": "cc_height",
+  "default": -39.0,
+  "low": -137.0,
+  "high": 59.0
+ },
+ {
+  "name": "cc_top_half",
+  "default": -150.0,
+  "low": -470.0,
+  "high": 170.0
+ },
+ {
+  "name": "cc_top_quarter",
+  "default": -511.0,
+  "low": -1553.0,
+  "high": 531.0
+ },
+ {
+  "name": "cc_jeopardy",
+  "default": -11.0,
+  "low": -53.0,
+  "high": 31.0
+ },
+ {
+  "name": "cc_cavity_cells",
+  "default": -173.0,
+  "low": -539.0,
+  "high": 193.0
+ },
+ {
+  "name": "cc_overhang_cells",
+  "default": -34.0,
+  "low": -122.0,
+  "high": 54.0
+ },
+ {
+  "name": "cc_covered_cells",
+  "default": -17.0,
+  "low": -71.0,
+  "high": 37.0
+ },
+ {
+  "name": "cc_well_depth",
+  "default": 57.0,
+  "low": -77.0,
+  "high": 191.0
+ },
+ {
+  "name": "cc_wasted_t",
+  "default": -152.0,
+  "low": -476.0,
+  "high": 172.0
+ },
+ {
+  "name": "cc_b2b_clear",
+  "default": 104.0,
+  "low": -124.0,
+  "high": 332.0
+ },
+ {
+  "name": "cc_clear1",
+  "default": -143.0,
+  "low": -449.0,
+  "high": 163.0
+ },
+ {
+  "name": "cc_clear2",
+  "default": -100.0,
+  "low": -320.0,
+  "high": 120.0
+ },
+ {
+  "name": "cc_clear3",
+  "default": -58.0,
+  "low": -194.0,
+  "high": 78.0
+ },
+ {
+  "name": "cc_clear4",
+  "default": 390.0,
+  "low": -410.0,
+  "high": 1190.0
+ },
+ {
+  "name": "cc_tspin1",
+  "default": 121.0,
+  "low": -141.0,
+  "high": 383.0
+ },
+ {
+  "name": "cc_tspin2",
+  "default": 410.0,
+  "low": -430.0,
+  "high": 1250.0
+ },
+ {
+  "name": "cc_tspin3",
+  "default": 602.0,
+  "low": -622.0,
+  "high": 1826.0
+ },
+ {
+  "name": "cc_combo_garbage",
+  "default": 150.0,
+  "low": -170.0,
+  "high": 470.0
+ },
+ {
+  "name": "belief_weights[0]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[1]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[2]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[3]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[4]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[5]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[6]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[7]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ }
+]

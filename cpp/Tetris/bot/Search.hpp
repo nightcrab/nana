@@ -64,6 +64,8 @@ namespace Search {
     // state and since counter drawn per simulation) instead of starting fresh at every root.
     // nullptr = start fresh
     extern const RootOpponent* root_opponent;
+    // Caller's filter, copied into each simulation root.
+    extern const OpponentFilter* root_filter;
     // wait until the search reaches simulation_limit, or for timeout; false on timeout
     bool waitForSimulations(std::chrono::milliseconds timeout);
 

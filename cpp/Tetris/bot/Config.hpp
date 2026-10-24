@@ -102,6 +102,9 @@ struct NanaConfig {
 
     // Select the evaluator without changing the search algorithm.
     std::string eval = "nana";
+    // the CC eval's term over the search's belief about the HMM opponent (EmulationGame::belief): the
+    // belief a move leaves, one piece ahead, weighed per hidden state. in CC score units; 0 = off
+    std::array<double, 8> belief_weights{};
     CCWeights cc;
 
     // rollout score: app_weight * APP + eval_weight * the best eval of the leaf's moves

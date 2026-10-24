@@ -5,6 +5,7 @@
 #include "Eval.hpp"
 #include "engine/Utility.hpp"
 #include <algorithm>
+#include <optional>
 #include <cassert>
 #include <cstring>
 #include <cmath>
@@ -151,8 +152,24 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		bag_left.assign(state.rng.bag.begin() + std::min<size_t>(state.rng.bagiterator, state.rng.bag.size()), state.rng.bag.end());
 	}
 
+	// the term over our belief about the HMM opponent, when it has weights and the search tracks one
+	static const bool belief_weighted = [] {
+		for (double w : config().belief_weights) {
+			if (w != 0) return true;
+		}
+		return false;
+	}();
+	int meter = 0;
+	for (int garbage : state.garbage_meter) {
+		meter += garbage;
+	}
+	std::optional<Eval::BeliefTerm> belief;
+	if (use_cc_eval && belief_weighted && state.track_belief) {
+		belief.emplace(&state.belief, meter);
+	}
+
 	for (auto& raw_action : raw_actions) {
-		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left)
+		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, nullptr, belief ? &*belief : nullptr)
 		                         : Eval::eval_CC(state.game, Move(raw_action, false));
 		// Surface abstraction step
 		raw_action.position.y -= gheight;

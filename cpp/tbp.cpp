@@ -192,10 +192,12 @@ static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
 
 // what the search's root knows of the opponent: the filter over what we've seen of its attacks, times
 // the encoder's evidence from its latest board if we've seen one (TBP2). before the filter has seen a
-// turn (a game joined midway), the board alone
-static RootOpponent rootOpponent(const OpponentFilter& filter, const SeenOpponent& seen) {
+// turn (a game joined midway), the board alone. search: the same belief as a filter, for the search's
+// simulations to carry on from (Search::root_filter)
+static RootOpponent rootOpponent(const OpponentFilter& filter, const SeenOpponent& seen, OpponentFilter& search) {
     std::array<float, markov::STATES> state;
     std::array<float, markov::SINCE> since;
+    search = filter;
     if (!seen.have) {
         return filter.root();
     }
@@ -206,9 +208,11 @@ static RootOpponent rootOpponent(const OpponentFilter& filter, const SeenOpponen
     if (!filter.started()) {
         RootOpponent out;
         out.fresh = empty || !markov::encodeOpponent(seen.board, seen.combo, seen.b2b, out.state, out.since);
+        search = OpponentFilter::fromRoot(out);
         return out;
     }
     if (markov::opponentEvidence(seen.board, seen.combo, seen.b2b, state, since)) {
+        search.applyEvidence(&state, &since);
         return filter.root(&state, &since);
     }
     return filter.root();
@@ -298,9 +302,11 @@ int main() {
         OpponentFilter opponent_filter;
         SeenOpponent seen_opponent;
         RootOpponent root_opponent;
+        OpponentFilter search_filter;
         auto refreshRoot = [&] {
-            root_opponent = rootOpponent(opponent_filter, seen_opponent);
+            root_opponent = rootOpponent(opponent_filter, seen_opponent, search_filter);
             Search::root_opponent = &root_opponent;
+            Search::root_filter = &search_filter;
         };
         // our last suggestion, and the state it was made from: a client that restarts us after garbage
         // (the stadium) sends start instead of play, and we replay the move to see what landed

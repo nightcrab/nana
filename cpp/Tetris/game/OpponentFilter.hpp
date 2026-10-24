@@ -61,6 +61,38 @@ public:
 
     bool started() const { return !fresh; }
 
+    // a filter with no history behind it, believing the root's marginals as if independent (a game
+    // joined midway, known only from the opponent's board)
+    static OpponentFilter fromRoot(const RootOpponent& root) {
+        OpponentFilter f;
+        f.fresh = root.fresh;
+        for (int z = 0; z < markov::STATES; z++) {
+            for (int s = 0; s < markov::SINCE; s++) {
+                f.joint[z][s] = root.state[z] * root.since[s];
+            }
+        }
+        f.normalise();
+        return f;
+    }
+
+    // multiply in the encoder's evidence from the opponent's board, as root() does
+    void applyEvidence(const std::array<float, markov::STATES>* state_evidence,
+                       const std::array<float, markov::SINCE>* since_evidence) {
+        if (fresh) {
+            return;
+        }
+        const auto before = joint;
+        for (int z = 0; z < markov::STATES; z++) {
+            for (int s = 0; s < markov::SINCE; s++) {
+                if (state_evidence) joint[z][s] *= (*state_evidence)[z];
+                if (since_evidence) joint[z][s] *= (*since_evidence)[s];
+            }
+        }
+        if (!normalise()) {
+            joint = before;
+        }
+    }
+
     // one turn: our attack (before cancelling), whether our piece cleared lines, and the garbage we then
     // received (only meaningful if we cleared nothing; 0 if none arrived)
     void turn(int our_attack, bool we_cleared, int received) {
@@ -188,7 +220,66 @@ public:
         return out;
     }
 
+    // P(the opponent's next hidden state), predicted through its next transition, whose input is our
+    // last turn's attack (as the next turn() will take it)
+    std::array<float, markov::STATES> predicted() const {
+        std::array<float, markov::STATES> out{};
+        const markov::Params& p = markov::params();
+        if (fresh) {
+            for (int z = 0; z < markov::STATES; z++) {
+                out[z] = markov::probability(p.initial, z);
+            }
+            return out;
+        }
+        const int action = std::min(our_last_attack, markov::ACTIONS - 1);
+        for (int z = 0; z < markov::STATES; z++) {
+            for (int s = 0; s < markov::SINCE; s++) {
+                const float mass = joint[z][s];
+                if (mass <= 0) {
+                    continue;
+                }
+                const auto& row = p.transition[action][0][s][z];
+                for (int to = 0; to < markov::STATES; to++) {
+                    out[to] += mass * markov::probability(row, to);
+                }
+            }
+        }
+        return out;
+    }
+
+    // P . W one piece ahead: the belief after a turn of ours (as turn() takes it), predicted through
+    // the opponent's next transition; W weighs its hidden states
+    template <class Weights>
+    float valueAfter(int our_attack, bool we_cleared, int received, const Weights& W) const {
+        OpponentFilter f = *this;
+        f.turn(our_attack, we_cleared, received);
+        const std::array<float, markov::STATES> q = f.predicted();
+        float value = 0;
+        for (int z = 0; z < markov::STATES; z++) {
+            value += q[z] * (float)W[z];
+        }
+        return value;
+    }
+
 private:
+    bool normalise() {
+        float total = 0;
+        for (const auto& row : joint) {
+            for (float x : row) {
+                total += x;
+            }
+        }
+        if (total <= 0) {
+            return false;
+        }
+        for (auto& row : joint) {
+            for (float& x : row) {
+                x /= total;
+            }
+        }
+        return true;
+    }
+
     // P(state of its last piece, since counter after it)
     std::array<std::array<float, markov::SINCE>, markov::STATES> joint{};
     bool fresh = true;

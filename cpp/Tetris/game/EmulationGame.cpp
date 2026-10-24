@@ -194,6 +194,9 @@ void EmulationGame::play_moves(){
 
 
     int damage = game.damage_sent(cleared_lines, spin, pc);
+    // what the belief sees: our attack before cancelling, and what then lands
+    const int sent = damage;
+    int landed = 0;
 
     attack += damage;
 
@@ -245,6 +248,7 @@ void EmulationGame::play_moves(){
         if (total > 0) {
             game.add_garbage(total, rng.getRand(Board::width));
         }
+        landed = total;
         garbage_meter.clear();
     }
     else if (cleared_lines == 0) {
@@ -273,6 +277,10 @@ void EmulationGame::play_moves(){
     }
 
     true_attack += damage;
+
+    if (track_belief && tetrio) {
+        belief.turn(sent, cleared_lines > 0, landed);
+    }
 
     //game.app = app();
 

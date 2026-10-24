@@ -18,8 +18,9 @@
 // --garbage-scale X multiplies the opponent's garbage (0.5 = half, 0 = none), for the search too.
 // on Linux, run several at once on separate chiplets with e.g. taskset -c 8-15.
 
-#include "EmulationGame.hpp"
 #include "EmulateCommon.hpp"
+#include "EmulationGame.hpp"
+#include "OpponentFilter.hpp"
 #include "Search.hpp"
 #include "UCT.hpp"
 #include "Config.hpp"
@@ -91,8 +92,12 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
 
     GameResult result;
     bool first = true;
-    // the simulated opponents have no board to encode, so the search's opponent starts fresh each move
-    Search::root_opponent = nullptr;
+    // what the search's root knows of the opponent, as under TBP1: a filter over the attacks we see
+    // land (the simulated opponents have no board to encode)
+    OpponentFilter opponent_filter;
+    RootOpponent root_opponent;
+    Search::root_opponent = &root_opponent;
+    Search::root_filter = &opponent_filter;
     const Search::FlushStats flush_start = Search::flush_stats;
 
     while (true) {
@@ -116,6 +121,7 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
 
         // the budget is wall time per move, including starting and stopping the workers
         auto start = clock::now();
+        root_opponent = opponent_filter.root();
         if (first) {
             Search::startSearch(game, options.threads);
             first = false;
@@ -170,7 +176,17 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
         }
 
         game.set_move(game.specific_move(move));
+        int meter = 0;
+        for (int garbage : game.garbage_meter) {
+            meter += garbage;
+        }
+        const int attack_before = game.attack;
+        const int lines_before = game.lines;
         game.play_moves();
+        // what tbp.cpp sees: our attack, whether we cleared, and the meter we tanked if we didn't
+        const int attack = game.attack - attack_before;
+        const bool cleared = game.lines > lines_before;
+        opponent_filter.turn(attack, cleared, cleared ? 0 : std::max(0, meter - attack));
         game.chance_move();
         if (opponent_log) {
             game.write_opponent_step(*opponent_log, game_seed);

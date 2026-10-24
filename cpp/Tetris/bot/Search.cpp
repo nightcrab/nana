@@ -50,6 +50,7 @@ std::atomic_bool min_work_bool;
 
 uint64_t Search::simulation_limit = 0;
 const RootOpponent* Search::root_opponent = nullptr;
+const OpponentFilter* Search::root_filter = nullptr;
 static std::mutex budget_mutex;
 static std::condition_variable budget_cv;
 static std::atomic_bool budget_reached;
@@ -337,6 +338,10 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     // the game's own opponent is the HMM, true state and all: the search starts from its model
     root_state.reset_opponent();
     adoptOpponentBelief(root_state);
+    root_state.track_belief = Search::root_filter != nullptr;
+    if (root_state.track_belief) {
+        root_state.belief = *Search::root_filter;
+    }
     resetKill(root_state);
 
     time = 0;
@@ -410,6 +415,10 @@ void Search::continueSearch(EmulationGame state) {
     root_state.lines = 2;
     root_state.reset_opponent();
     adoptOpponentBelief(root_state);
+    root_state.track_belief = Search::root_filter != nullptr;
+    if (root_state.track_belief) {
+        root_state.belief = *Search::root_filter;
+    }
     resetKill(root_state);
 
     if (!uct.nodeExists(state.hash())) {

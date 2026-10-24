@@ -3,6 +3,7 @@
 #include "engine/Board.hpp"
 #include "engine/Game.hpp"
 #include "Move.hpp"
+#include "OpponentFilter.hpp"
 
 #include <vector>
 
@@ -11,8 +12,18 @@ namespace Eval {
 	// move_part returns the share rewarding the move itself, on the evaluator's scale.
 	double eval_CC(Game game, Move move, double* move_part = nullptr);
 	// Cold Clear Standard evaluator; bag_left is the bag remaining after the preview queue.
+	// the belief term for one node's moves (eval_CC_standard): the opponent's belief after each move,
+	// cached by what the filter sees of it (whether it clears, its attack)
+	struct BeliefTerm {
+		const OpponentFilter* filter = nullptr;
+		// our garbage meter, which a move that clears nothing tanks
+		int meter = 0;
+		std::array<float, 32> cache;
+		BeliefTerm(const OpponentFilter* filter, int meter);
+		float value(int attack, bool cleared);
+	};
 	double eval_CC_standard(Game game, Move move, const std::vector<PieceType>& bag_left,
-	                        double* move_part = nullptr);
+	                        double* move_part = nullptr, BeliefTerm* belief = nullptr);
 
 	[[maybe_unused]] static bool is_top_quarter(const Board& board);
 

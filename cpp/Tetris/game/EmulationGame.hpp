@@ -1,5 +1,6 @@
 #pragma once
 #include "MarkovOpponent.hpp"
+#include "OpponentFilter.hpp"
 #include "engine/Game.hpp"
 #include "util/rng.hpp"
 
@@ -52,6 +53,12 @@ class EmulationGame {
     Move move;
     RNG rng;
     MarkovOpponent markov;
+    // the search's belief over the HMM opponent's hidden state, filtered along each simulation from
+    // what we'd see of it (our attack, whether we cleared, the garbage that landed), as OpponentFilter
+    // does in real play. set on the search root, carried by every copy
+    bool track_belief = false;
+    OpponentFilter belief;
+
 
     // TETR.IO damage (TetrioS1, the same table as the stadium's TetrioStats), and with it the
     // stadium's rules (Universal-Shaktris-Stadium's VersusGame): only T-spins, scored as the

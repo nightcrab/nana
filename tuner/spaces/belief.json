@@ -1,0 +1,50 @@
+[
+ {
+  "name": "belief_weights[0]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[1]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[2]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[3]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[4]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[5]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[6]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ },
+ {
+  "name": "belief_weights[7]",
+  "default": 0.0,
+  "low": -6000.0,
+  "high": 6000.0
+ }
+]

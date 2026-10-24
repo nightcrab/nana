@@ -69,6 +69,7 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("prior_exponent", c.prior_exponent);
     visit("n_cap", c.n_cap);
     visit("eval", c.eval);
+    visit("belief_weights", c.belief_weights);
     visit("cc_back_to_back", c.cc.back_to_back);
     visit("cc_bumpiness", c.cc.bumpiness);
     visit("cc_bumpiness_sq", c.cc.bumpiness_sq);
