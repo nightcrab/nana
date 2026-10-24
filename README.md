@@ -138,4 +138,4 @@ python -m tuner resume eval1            # after Ctrl-C or a reboot
 6. Information Set Monte Carlo Tree Search, Cowling et al. 2012 (https://eprints.whiterose.ac.uk/id/eprint/75048/1/CowlingPowleyWhitehouse2012.pdf)
 7. An Input Output HMM Architecture, Bengio and Frasconi 1995 (https://www.iro.umontreal.ca/~lisa/bib/pub_subject/language/pointeurs/iohmm-nips7.pdf)
 8. State Aggregation in Monte Carlo Tree Search, Hostetler et al. 2014 (https://ojs.aaai.org/index.php/AAAI/article/view/9066)
-9. Reinforcement Learning via AIXI Approximation, Veness et al. 2010(https://arxiv.org/html/1007.2049v1)
+9. Reinforcement Learning via AIXI Approximation, Veness et al. 2010 (https://arxiv.org/html/1007.2049v1)
