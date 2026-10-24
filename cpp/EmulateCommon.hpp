@@ -21,6 +21,7 @@ inline EmulationGame newGame(uint64_t game_seed, int ramp, float garbage_scale) 
     game.garbage_scale = garbage_scale;
 
     game.rng.PPTRNG = seedFor(game_seed, 0);
+    game.hole_rng = seedFor(game_seed, 3);
     game.rng.makebag();
 
     game.reset_opponent();

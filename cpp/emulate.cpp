@@ -182,12 +182,43 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
         }
         const int attack_before = game.attack;
         const int lines_before = game.lines;
+#if NANA_FUTURE_ORACLE
+        // Verify the search root really predicts the next real transition, including RNGs.
+        // In the garbage-off arm restore the real scale for this check only.
+        EmulationGame prediction = Search::root_state;
+        prediction.garbage_scale = game.garbage_scale;
+        EmulationGame::deterministic_chance = true;
+        prediction.start_from_root();
+        EmulationGame::deterministic_chance = false;
+        // Validate the retained pieces/opponent against reality while supplying the true hole
+        // solely for this assertion, never to the partial oracle's search.
+        if constexpr (NANA_ORACLE_RANDOM_HOLES) prediction.hole_rng = game.hole_rng;
+        prediction.set_move(prediction.specific_move(move));
+        prediction.play_moves();
+        prediction.chance_move();
+#endif
         game.play_moves();
         // what tbp.cpp sees: our attack, whether we cleared, and the meter we tanked if we didn't
         const int attack = game.attack - attack_before;
         const bool cleared = game.lines > lines_before;
         opponent_filter.turn(attack, cleared, cleared ? 0 : std::max(0, meter - attack));
         game.chance_move();
+#if NANA_FUTURE_ORACLE
+        bool exact = prediction.game.queue == game.game.queue
+            && prediction.rng.PPTRNG == game.rng.PPTRNG && prediction.rng.bag == game.rng.bag
+            && prediction.rng.bagiterator == game.rng.bagiterator && prediction.hole_rng == game.hole_rng
+            && prediction.garbage_meter == game.garbage_meter
+            && prediction.last_received == game.last_received
+            && prediction.markov.last_attack == game.markov.last_attack
+            && prediction.markov.deaths == game.markov.deaths;
+        for (int x = 0; x < Board::width; ++x)
+            exact = exact && prediction.game.board.get_column(x) == game.game.board.get_column(x);
+        if (!exact) {
+            std::cerr << "future oracle replay mismatch, seed " << game_seed
+                      << ", piece " << game.ramp_pieces << std::endl;
+            std::exit(3);
+        }
+#endif
         if (opponent_log) {
             game.write_opponent_step(*opponent_log, game_seed);
         }

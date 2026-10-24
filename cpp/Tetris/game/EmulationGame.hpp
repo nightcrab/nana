@@ -14,8 +14,21 @@
 #define NANA_HASH_QUEUE_FRONT 1
 #endif
 
+// Diagnostic builds only: preserve the real future instead of sampling it.
+#ifndef NANA_FUTURE_ORACLE
+#define NANA_FUTURE_ORACLE 0
+#endif
+#ifndef NANA_SEPARATE_HOLES
+#define NANA_SEPARATE_HOLES 0
+#endif
+#ifndef NANA_ORACLE_RANDOM_HOLES
+#define NANA_ORACLE_RANDOM_HOLES 0
+#endif
+static_assert(!NANA_ORACLE_RANDOM_HOLES || (NANA_FUTURE_ORACLE && NANA_SEPARATE_HOLES),
+              "random-hole oracle requires future oracle and separate hole RNG");
+
 // analogous to an APM survival mode
-// simulates a versus game with a highly simplified opponent model
+// simulates a versus game against the opponent HMM (MarkovOpponent)
 class EmulationGame {
    public:
     // plays TETR.IO rules (set_tetrio_rules), or with NANA_RULES=botris Botris damage and the
@@ -40,6 +53,11 @@ class EmulationGame {
     // ours (TETR.IO rules): [i] reaches the opponent i + 1 chance_moves from now, after its piece
     std::vector<int> outgoing_garbage;
     std::vector<int> garbage_meter;
+    // NANA_PHANTOM_GARBAGE (measurement): the meter the search's sampled opponent attacks would fill
+    // if they weren't scaled to nothing. it cancels and tanks like the real one but never lands, and
+    // the hash includes it: the tree splits as with search garbage while every board stays without
+    bool phantom_garbage = false;
+    std::vector<int> phantom_meter;
 
     // can be set if the opponent already has some B2B
     float multiplier = 1.0;
@@ -52,13 +70,21 @@ class EmulationGame {
 
     Move move;
     RNG rng;
+    uint32_t hole_rng = 0;
+    int next_hole() {
+        if constexpr (NANA_SEPARATE_HOLES) {
+            hole_rng = hole_rng * 0x5d588b65 + 0x269ec3;
+            return ((hole_rng >> 16) * Board::width) >> 16;
+        }
+        return rng.getRand(Board::width);
+    }
+    // the opponent
     MarkovOpponent markov;
     // the search's belief over the HMM opponent's hidden state, filtered along each simulation from
     // what we'd see of it (our attack, whether we cleared, the garbage that landed), as OpponentFilter
     // does in real play. set on the search root, carried by every copy
     bool track_belief = false;
     OpponentFilter belief;
-
 
     // TETR.IO damage (TetrioS1, the same table as the stadium's TetrioStats), and with it the
     // stadium's rules (Universal-Shaktris-Stadium's VersusGame): only T-spins, scored as the
@@ -125,7 +151,6 @@ class EmulationGame {
 
     uint32_t hash() const;
 
-    // the opponent model in play
     double opponent_jeopardy() const;
     double opponent_deaths() const;
     bool opponent_dead() const;
@@ -133,10 +158,12 @@ class EmulationGame {
     // fresh chance for a simulation: a new seed, and the pieces left in the current bag in a new
     // order (which pieces are left is known under seven-bag; their order isn't)
     void reseed_chance();
+    // Diagnostic oracle builds retain the root's future instead of reseeding each simulation.
+    static inline bool deterministic_chance = false;
     // a simulation starting from the search root: fresh randomness, and the HMM opponent's hidden
     // state drawn from the root belief. on a copy of the root, never on the shared root itself
     void start_from_root();
-    // a fresh HMM opponent
+    // a fresh opponent
     void reset_opponent();
 
     // one CSV row of what passed between us and the opponent this piece, after play_moves and

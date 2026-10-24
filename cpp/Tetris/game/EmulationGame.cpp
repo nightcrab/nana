@@ -99,6 +99,9 @@ void EmulationGame::chance_move() {
     // simulate opponent
 
     garbage_amount = (int)markov.play();
+    if (phantom_garbage && garbage_amount > 0) {
+        phantom_meter.insert(phantom_meter.begin(), garbage_amount);
+    }
 
     // ours that has waited out the delay reaches it, after the piece it just played (so the stadium
     // rules' tank in receiveAttack goes by that piece). what's left of its attack after its meter
@@ -219,6 +222,24 @@ void EmulationGame::play_moves(){
 
     const bool tetrio = std::holds_alternative<TetrioS1>(game.mode);
 
+    if (phantom_garbage) {
+        // what's left of our attack cancels the phantom meter as it would the real one, without
+        // taking anything from what we send
+        int left = damage;
+        while (left > 0 && !phantom_meter.empty()) {
+            int& incoming = phantom_meter.back();
+            const int cancelled = std::min(incoming, left);
+            incoming -= cancelled;
+            left -= cancelled;
+            if (incoming == 0) {
+                phantom_meter.pop_back();
+            }
+        }
+        if (cleared_lines == 0) {
+            phantom_meter.clear();
+        }
+    }
+
     // zero pass-through: then the garbage still in transit to us, soonest first
     if (tetrio) {
         for (int& incoming : buffered_garbage) {
@@ -246,7 +267,7 @@ void EmulationGame::play_moves(){
             total += garbage;
         }
         if (total > 0) {
-            game.add_garbage(total, rng.getRand(Board::width));
+            game.add_garbage(total, next_hole());
         }
         landed = total;
         garbage_meter.clear();
@@ -261,7 +282,7 @@ void EmulationGame::play_moves(){
 
             int garbage = std::min(incoming, 8 - garbage_used);
 
-            game.add_garbage(garbage, rng.getRand(Board::width));
+            game.add_garbage(garbage, next_hole());
 
             incoming -= garbage;
             garbage_used += garbage;
@@ -399,6 +420,12 @@ std::vector<Move> EmulationGame::legal_moves() {
     return moves;
 }
 
+// NANA_HASH_METER=0 (measurement): merge states differing only in pending garbage.
+// Keep the meter in the hash by default.
+#ifndef NANA_HASH_METER
+#define NANA_HASH_METER 1
+#endif
+
 uint32_t EmulationGame::hash() const {
     Board board = game.board;
     int gheight = board.get_garbage_height();
@@ -416,7 +443,12 @@ uint32_t EmulationGame::hash() const {
         // with nothing held, holding plays the next piece: it decides the node's moves
         hash = fasthash32(&game.queue.front(), sizeof(PieceType), hash);
 #endif
-    for (int garbage : garbage_meter) {
+    if constexpr (NANA_HASH_METER) {
+        for (int garbage : garbage_meter) {
+            hash = fasthash32(&garbage, sizeof(garbage), hash);
+        }
+    }
+    for (int garbage : phantom_meter) {
         hash = fasthash32(&garbage, sizeof(garbage), hash);
     }
     // garbage in transit is left out: no player sees it (at best they infer it)
@@ -457,7 +489,13 @@ void EmulationGame::reset_opponent_rng() {
 }
 
 void EmulationGame::reseed_chance() {
+    if (deterministic_chance) {
+        // Partial oracle: true pieces and opponent RNG, but sample unknown holes.
+        if constexpr (NANA_ORACLE_RANDOM_HOLES) hole_rng = fast_seed();
+        return;
+    }
     rng.PPTRNG = fast_seed();
+    if constexpr (NANA_SEPARATE_HOLES) hole_rng = fast_seed();
     const int left = rng.bagiterator;
     for (int i = (int)rng.bag.size() - 1; i > left; i--) {
         std::swap(rng.bag[i], rng.bag[left + rng.getRand(i - left + 1)]);

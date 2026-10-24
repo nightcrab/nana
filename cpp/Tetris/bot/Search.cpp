@@ -291,6 +291,50 @@ static void resetKill(EmulationGame& root) {
     }
 }
 
+// NANA_SEARCH_GARBAGE=0 (measurement): the opponent sends nothing in the search;
+// garbage already on the meter still comes.
+#ifndef NANA_SEARCH_GARBAGE
+#define NANA_SEARCH_GARBAGE 1
+#endif
+// NANA_PHANTOM_GARBAGE=1 with NANA_SEARCH_GARBAGE=0 (measurement): the attacks are still drawn and
+// hashed through a meter that never lands (EmulationGame::phantom_meter), so the tree splits as with
+// search garbage while the boards and values stay as without
+#ifndef NANA_PHANTOM_GARBAGE
+#define NANA_PHANTOM_GARBAGE 0
+#endif
+static void searchGarbage(EmulationGame& root) {
+    if constexpr (NANA_FUTURE_ORACLE) {
+        EmulationGame::deterministic_chance = true;
+    }
+    if constexpr (!NANA_SEARCH_GARBAGE) {
+        // the sampled opponent's attacks scaled to nothing
+        root.garbage_scale = 0;
+        root.phantom_garbage = NANA_PHANTOM_GARBAGE;
+        root.phantom_meter.clear();
+    }
+}
+
+// NANA_OPPONENT_ORACLE (measurement only, emulation): the search's opponent is the real game's,
+// hidden state and all, instead of the model's fresh one. simulations still draw fresh randomness, so
+// they sample its futures without the model's bias
+#ifndef NANA_OPPONENT_ORACLE
+#define NANA_OPPONENT_ORACLE 0
+#endif
+static void searchOpponent(EmulationGame& root) {
+    if constexpr (NANA_OPPONENT_ORACLE || NANA_FUTURE_ORACLE) {
+        markov::root_belief.active = false;
+    }
+    else {
+        // the game's own opponent is the HMM, true state and all: the search starts from its model
+        root.reset_opponent();
+        adoptOpponentBelief(root);
+    }
+    root.track_belief = Search::root_filter != nullptr;
+    if (root.track_belief) {
+        root.belief = *Search::root_filter;
+    }
+}
+
 // state private to one worker
 struct alignas(64) WorkerLocal {
     // rollouts for new leaves we own, run when there are no messages or given away on request
@@ -336,13 +380,9 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
 
     root_state = state;
     // the game's own opponent is the HMM, true state and all: the search starts from its model
-    root_state.reset_opponent();
-    adoptOpponentBelief(root_state);
-    root_state.track_belief = Search::root_filter != nullptr;
-    if (root_state.track_belief) {
-        root_state.belief = *Search::root_filter;
-    }
+    searchOpponent(root_state);
     resetKill(root_state);
+    searchGarbage(root_state);
 
     time = 0;
 
@@ -413,13 +453,9 @@ void Search::continueSearch(EmulationGame state) {
     root_state.true_attack = state.true_app() * 0;
     root_state.pieces = 0;
     root_state.lines = 2;
-    root_state.reset_opponent();
-    adoptOpponentBelief(root_state);
-    root_state.track_belief = Search::root_filter != nullptr;
-    if (root_state.track_belief) {
-        root_state.belief = *Search::root_filter;
-    }
+    searchOpponent(root_state);
     resetKill(root_state);
+    searchGarbage(root_state);
 
     if (!uct.nodeExists(state.hash())) {
         uct.insertNode(UCTNode(state));
@@ -578,6 +614,8 @@ void Search::endSearch() {
     for (auto& thread : worker_threads) {
 		thread.join();
 	}
+    // Real play resumes with its own chance.
+    EmulationGame::deterministic_chance = false;
 
     // reset stop bool for min wait time
     min_work_bool = false;
