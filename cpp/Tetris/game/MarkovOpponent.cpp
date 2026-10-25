@@ -23,13 +23,13 @@ static void toCdf(std::array<float, N>& row) {
 
 // the model in use is the fit sharpened: every transition row and the attack part of every emission
 // row become p^a renormalised (a = 1: the fit; large a: nearly the argmax), the death probability
-// kept as fitted. the default a = 2 gives about 0.45 bits/piece of 5-piece attack entropy given the
-// state, the encoder's target; the raw fit (a = 1) is nearly uninformative. NANA_MARKOV_SHARPEN=a
-// overrides it (1 for the raw fit). the game's opponent, the search and the filter all share params(),
-// so all get the same model
+// kept as fitted. the default is a = 4; a = 2 gives about 0.45 bits/piece of 5-piece attack entropy
+// given the state, the encoder's target, and the raw fit (a = 1) is nearly uninformative.
+// NANA_MARKOV_SHARPEN=a overrides it (1 for the raw fit). the game's opponent, the search and the
+// filter all share params(), so all get the same model
 static float sharpenExponent() {
     const char* text = std::getenv("NANA_MARKOV_SHARPEN");
-    return text && *text ? (float)std::atof(text) : 2.0f;
+    return text && *text ? (float)std::atof(text) : 4.0f;
 }
 
 template <size_t N>
