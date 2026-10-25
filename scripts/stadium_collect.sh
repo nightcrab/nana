@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# Collect nana-vs-nana games with Universal-Shaktris-Stadium for fitting MarkovOpponent.
-# usage: scripts/stadium_collect.sh [minutes] [pps] [threads per bot]   (defaults 120, 1, 1)
+# Collect games with Universal-Shaktris-Stadium for fitting opponent models. nana plays P1; P2 is
+# nana too, or the TBP bot at $BOT2 (e.g. Cold Clear's cc-tbp built with tetrio_garbage).
+# usage: scripts/stadium_collect.sh [minutes] [pps] [threads per bot] [thinks per move]
+#        (defaults 120, 1, 1, 0; 0 thinks leaves each bot its own budget)
 set -euo pipefail
 
 minutes=${1:-120}
 pps=${2:-1}
 threads=${3:-1}
+thinks=${4:-0}
+bot2=${BOT2:-}
+if [ -n "$bot2" ]; then
+    bot2=$(realpath "$bot2")
+    [ -x "$bot2" ] || { echo "BOT2 $bot2 isn't executable" >&2; exit 1; }
+fi
 cpus=$(nproc)
 stadiums=${STADIUMS:-$(( cpus / (2 * threads) ))}
 root=$(pwd)
@@ -29,29 +37,8 @@ EOF
 
 echo "building stadium_cli"
 rm -rf stadium
-git clone -q --depth 1 https://github.com/shakkar23/Universal-Shaktris-Stadium stadium
+git clone -q --depth 1 https://github.com/nightcrab/Universal-Shaktris-Stadium stadium
 (cd stadium && git log -1 --format="stadium commit %h %s")
-python3 - <<'EOF'
-p = "stadium/src/stadium_cli.cpp"
-s = open(p, newline="").read()
-nl = "\r\n" if "\r\n" in s else "\n"
-anchor = "\t\t\t\tif(game.game_over) {" + nl + "\t\t\t\t\tgame_state = State::GAME_OVER;"
-assert anchor in s, "stadium_cli.cpp changed; update the final-move patch"
-patch = nl.join([
-    "\t\t\t\tif(game.game_over) {",
-    "\t\t\t\t\t// record the final move like any other: its attacks are what killed the loser",
-    "\t\t\t\t\tp1.attack = game.p1_damage_sent;",
-    "\t\t\t\t\tp1.damage_received = game.p2_damage_sent;",
-    "\t\t\t\t\tp1.spun = game.p1_spun;",
-    "\t\t\t\t\tp2.attack = game.p2_damage_sent;",
-    "\t\t\t\t\tp2.damage_received = game.p1_damage_sent;",
-    "\t\t\t\t\tp2.spun = game.p2_spun;",
-    "\t\t\t\t\tgame_states.push_back({ s, p1, p2, game_uuid, move_index });",
-    "\t\t\t\t\tmove_index++;",
-    "\t\t\t\t\tgame_state = State::GAME_OVER;",
-])
-open(p, "w", newline="").write(s.replace(anchor, patch, 1))
-EOF
 (cd stadium/src && gcc -O2 -c sqlite3/sqlite3.c -o sqlite3.o \
     && g++ -O2 -std=c++23 -include variant -I. -IShaktris -ITBP -IUtil -Isqlite3 \
         stadium_cli.cpp TBP/Bot.cpp Shaktris/Game.cpp sqlite3.o -o stadium_cli -lpthread -ldl)
@@ -61,6 +48,8 @@ cat > "$out/config.txt" <<EOF
 minutes $minutes
 pps $pps
 threads per bot $threads
+thinks per move $thinks
+p2 ${bot2:-nana}
 stadiums $stadiums
 rules tetrio (the stadium plays TETR.IO damage whatever -game_type says)
 nana commit $(git rev-parse HEAD) (plus uploaded worktree changes)
@@ -76,14 +65,16 @@ run_stadium() {
     local first=$(( k * 2 * threads ))
     for side in 1 2; do
         local lo=$(( first + (side - 1) * threads ))
+        local exe=$bot
+        [ "$side" = 2 ] && [ -n "$bot2" ] && exe=$bot2
         cat > "$dir/bot$side.sh" <<EOF
 #!/bin/sh
-exec taskset -c $lo-$(( lo + threads - 1 )) "$bot"
+exec taskset -c $lo-$(( lo + threads - 1 )) "$exe"
 EOF
         chmod +x "$dir/bot$side.sh"
     done
     cat > "$dir/stadium_cli_settings.json" <<EOF
-{"num_games": 1000000, "db_path": "$out/stadium_$k.db", "min_nodes": 2000, "pps": $pps}
+{"num_games": 1000000, "db_path": "$out/stadium_$k.db", "min_nodes": 2000, "pps": $pps, "threads": $threads, "thinks": $thinks}
 EOF
     local restarts=0
     while [ "$(date +%s)" -lt "$end" ]; do
@@ -101,6 +92,7 @@ for (( k = 0; k < stadiums; k++ )); do
 done
 wait
 pkill -f "$bot" || true
+[ -z "$bot2" ] || pkill -f "$bot2" || true
 
 python3 - "$out" <<'EOF' | tee "$out/summary.txt"
 import glob, os, sqlite3, sys

@@ -14,3 +14,5 @@
 /tuner_bin/
 /tuner_*.log
 /tuner_*.err
+/scripts/opponent_replay/target/
+/scripts/__pycache__/
