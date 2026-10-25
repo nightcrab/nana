@@ -103,8 +103,11 @@ class EmulationGame {
     void set_move(Move move);
     Move specific_move(Move move);
 
+    // Opp is MarkovOpponent or NoOpponent; the search picks one per run and the environment always uses the default
+    template <class Opp = MarkovOpponent>
     void chance_move();
 
+    template <class Opp = MarkovOpponent>
     void play_moves();
     void objectively_play_moves();
 
@@ -117,8 +120,10 @@ class EmulationGame {
     double opponent_deaths() const;
     bool opponent_dead() const;
     void reset_opponent_rng();
+    template <class Opp = MarkovOpponent>
     void reseed_chance();
     static inline bool deterministic_chance = false;
+    template <class Opp = MarkovOpponent>
     void start_from_root();
     void reset_opponent();
 

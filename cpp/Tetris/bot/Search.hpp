@@ -52,12 +52,17 @@ namespace Search {
 
     void maybeInsertNode(UCTNode node, const int threadIdx);
 
+    // Opp is MarkovOpponent or NoOpponent, chosen once per search from config "opponent"
+    template <class Opp>
     void search(std::stop_token stop, int threadIdx);
 
+    template <class Opp>
     void processJob(const int threadIdx, Msg&& msg);
 
+    template <class Opp>
     Reward rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_board);
 #if !NANA_SUFFIX
+    template <class Opp>
     float leafReward(EmulationGame& state, float max_eval);
 #endif
 

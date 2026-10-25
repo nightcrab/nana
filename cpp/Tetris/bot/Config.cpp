@@ -69,6 +69,7 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("n_cap", c.n_cap);
     visit("depth_cap", c.depth_cap);
     visit("eval", c.eval);
+    visit("opponent", c.opponent);
     visit("belief_weights", c.belief_weights);
     visit("cc_back_to_back", c.cc.back_to_back);
     visit("cc_bumpiness", c.cc.bumpiness);
@@ -166,6 +167,11 @@ void finish(NanaConfig& c) {
     }
     if (c.depth_cap < 0) {
         fail("depth_cap must be nonnegative");
+    }
+    if (!c.opponent) {
+        for (double w : c.belief_weights) {
+            if (w != 0) fail("belief_weights need an opponent; set opponent true or zero them");
+        }
     }
     for (int r = 1; r <= NanaConfig::PRIOR_TABLE; r++) {
         c.prior_weight[r - 1] = (float)std::pow((double)r, -c.prior_exponent);

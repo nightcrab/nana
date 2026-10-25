@@ -108,6 +108,8 @@ Each release contains multiple binaries targeting different hardware. `nana_tbp`
 
 Some of these, such as `threads` can be overridden by a TBP2 frontend but are used otherwise.
 
+`"opponent": false` makes the search ignore the opponent: no garbage is sent in simulations, and the kill reward and the opponent belief terms are off (so it needs `"reward": "app"` and zero `belief_weights`). Garbage already queued against Nana still lands. The search with and without an opponent are both compiled in, so this needs no rebuild. It replaces the old `NANA_SEARCH_GARBAGE=0` build flag. Other tools read the same keys from the file named by `NANA_CONFIG`.
+
 ## Tuning
 
 Nana comes with a PSO-based autotuner. It tunes search hyperparameters and evaluation weights simultaneously.

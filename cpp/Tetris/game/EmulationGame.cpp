@@ -80,6 +80,7 @@ Move EmulationGame::specific_move(Move move) {
     return move;
 };
 
+template <class Opp>
 void EmulationGame::chance_move() {
 #ifdef NANA_SEARCH_FIXTURE
     if (fixture_active) { search_fixture::advance(*this); return; }
@@ -101,11 +102,13 @@ void EmulationGame::chance_move() {
         buffered_garbage.back() = 0;
     }
 
-    int garbage_amount = 0;
+    // garbage already on its way still lands; without an opponent nothing new is sent
+    if constexpr (!Opp::simulated) {
+        last_received = 0;
+        return;
+    }
 
-    // simulate opponent
-
-    garbage_amount = (int)markov.play();
+    int garbage_amount = (int)markov.play();
     if (phantom_garbage && garbage_amount > 0) {
         phantom_meter.insert(phantom_meter.begin(), garbage_amount);
     }
@@ -153,6 +156,10 @@ void EmulationGame::chance_move() {
     }
 };
 
+template void EmulationGame::chance_move<MarkovOpponent>();
+template void EmulationGame::chance_move<NoOpponent>();
+
+template <class Opp>
 void EmulationGame::play_moves(){
 #ifdef NANA_SEARCH_FIXTURE
     if (fixture_active) {
@@ -230,7 +237,7 @@ void EmulationGame::play_moves(){
 
     const bool tetrio = std::holds_alternative<TetrioS1>(game.mode);
 
-    if (phantom_garbage) {
+    if (Opp::simulated && phantom_garbage) {
         int left = damage;
         while (left > 0 && !phantom_meter.empty()) {
             int& incoming = phantom_meter.back();
@@ -255,12 +262,14 @@ void EmulationGame::play_moves(){
     }
 
     // send damage
-    if (tetrio && garbage_delay > 0) {
-        outgoing_garbage.resize(garbage_delay);
-        outgoing_garbage.back() += damage;
-    }
-    else {
-        markov.receiveAttack(damage);
+    if constexpr (Opp::simulated) {
+        if (tetrio && garbage_delay > 0) {
+            outgoing_garbage.resize(garbage_delay);
+            outgoing_garbage.back() += damage;
+        }
+        else {
+            markov.receiveAttack(damage);
+        }
     }
     last_sent = damage;
 
@@ -303,13 +312,16 @@ void EmulationGame::play_moves(){
 
     true_attack += damage;
 
-    if (track_belief && tetrio) {
+    if (Opp::simulated && track_belief && tetrio) {
         belief.turn(sent, cleared_lines > 0, landed);
     }
 
     //game.app = app();
 
 };
+
+template void EmulationGame::play_moves<MarkovOpponent>();
+template void EmulationGame::play_moves<NoOpponent>();
 
 void EmulationGame::objectively_play_moves() {
 
@@ -480,6 +492,7 @@ void EmulationGame::reset_opponent_rng() {
     markov.reset_rng();
 }
 
+template <class Opp>
 void EmulationGame::reseed_chance() {
     if (deterministic_chance) {
         if constexpr (NANA_ORACLE_RANDOM_HOLES) hole_rng = fast_seed();
@@ -491,13 +504,24 @@ void EmulationGame::reseed_chance() {
     for (int i = (int)rng.bag.size() - 1; i > left; i--) {
         std::swap(rng.bag[i], rng.bag[left + rng.getRand(i - left + 1)]);
     }
-    reset_opponent_rng();
+    if constexpr (Opp::simulated) {
+        reset_opponent_rng();
+    }
 }
 
+template void EmulationGame::reseed_chance<MarkovOpponent>();
+template void EmulationGame::reseed_chance<NoOpponent>();
+
+template <class Opp>
 void EmulationGame::start_from_root() {
-    reseed_chance();
-    markov.resample_from_root();
+    reseed_chance<Opp>();
+    if constexpr (Opp::simulated) {
+        markov.resample_from_root();
+    }
 }
+
+template void EmulationGame::start_from_root<MarkovOpponent>();
+template void EmulationGame::start_from_root<NoOpponent>();
 
 void EmulationGame::reset_opponent() {
     markov = MarkovOpponent();

@@ -56,6 +56,8 @@ struct RootOpponent;
 
 class MarkovOpponent {
 public:
+    static constexpr bool simulated = true;
+
     MarkovOpponent() = default;
 
     float meter = 0;
@@ -197,6 +199,12 @@ private:
         state = sample(survive, total);
         return sample(p.emission[state], p.emission[state][markov::DEATH - 1]);
     }
+};
+
+// Search without an opponent: no speculative garbage, no attack bookkeeping, no belief tracking. Code templated
+// on the opponent compiles each of those blocks out under `if constexpr (Opp::simulated)`.
+struct NoOpponent {
+    static constexpr bool simulated = false;
 };
 
 struct RootOpponent {

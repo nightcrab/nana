@@ -136,14 +136,15 @@ static_assert(!NANA_REPLAY_RESTART || NANA_HASH_QUEUE_FRONT, "NANA_REPLAY_RESTAR
 static EmulationGame replay_root(false);
 static uint32_t replay_root_hash = 0;
 
+template <class Opp>
 [[maybe_unused]] static size_t replayPath(const Job& job, uint32_t restart_hash, EmulationGame& state) {
     state = replay_root;
-    state.start_from_root();
+    state.start_from_root<Opp>();
     const size_t depth = job.path.size();
     for (size_t i = 0; i < depth; i++) {
         state.set_move(state.specific_move(job.moves[i].unpack()));
-        state.play_moves();
-        state.chance_move();
+        state.play_moves<Opp>();
+        state.chance_move<Opp>();
         const uint32_t expected = i + 1 < depth ? job.path[i + 1].hash : restart_hash;
         if (state.game_over || state.hash() != expected) {
             return i + 1;
@@ -228,6 +229,37 @@ static void loadRewardTuning() {
     read("NANA_KILL_DISCOUNT", reward_tuning.discount);
 }
 
+#ifndef NANA_OPPONENT_ORACLE
+#define NANA_OPPONENT_ORACLE 0
+#endif
+
+// config "opponent", read once per search: picks which compiled search the workers run
+static bool search_opponent = true;
+
+static void loadSearchOpponent() {
+    search_opponent = config().opponent;
+    if (search_opponent) {
+        return;
+    }
+    if (!cc_search && !reward_tuning.app_only) {
+        std::cerr << "the kill reward needs an opponent: set reward app (NANA_REWARD=app) or opponent true" << std::endl;
+        std::exit(2);
+    }
+    if constexpr (NANA_OPPONENT_ORACLE || NANA_FUTURE_ORACLE) {
+        std::cerr << "the opponent and future oracles need opponent true" << std::endl;
+        std::exit(2);
+    }
+}
+
+static void startFromRoot(EmulationGame& state) {
+    if (search_opponent) {
+        state.start_from_root<MarkovOpponent>();
+    }
+    else {
+        state.start_from_root<NoOpponent>();
+    }
+}
+
 static void adoptOpponentBelief(EmulationGame& root) {
     markov::root_belief.active = false;
     if (Search::root_opponent) {
@@ -247,8 +279,8 @@ static void resetKill(EmulationGame& root) {
     }
 }
 
-#ifndef NANA_SEARCH_GARBAGE
-#define NANA_SEARCH_GARBAGE 1
+#ifdef NANA_SEARCH_GARBAGE
+#error "NANA_SEARCH_GARBAGE was replaced by the config key opponent; set opponent to false in the json instead"
 #endif
 #ifndef NANA_PHANTOM_GARBAGE
 #define NANA_PHANTOM_GARBAGE 0
@@ -263,17 +295,19 @@ static void searchGarbage(EmulationGame& root) {
         root.reseed_chance();
         EmulationGame::deterministic_chance = true;
     }
-    if constexpr (!NANA_SEARCH_GARBAGE || cc_search) {
+    if constexpr (NANA_PHANTOM_GARBAGE || cc_search) {
         root.garbage_scale = 0;
-        root.phantom_garbage = NANA_PHANTOM_GARBAGE && !cc_search;
+        root.phantom_garbage = NANA_PHANTOM_GARBAGE && !cc_search && search_opponent;
         root.phantom_meter.clear();
     }
 }
 
-#ifndef NANA_OPPONENT_ORACLE
-#define NANA_OPPONENT_ORACLE 0
-#endif
 static void searchOpponent(EmulationGame& root) {
+    if (!search_opponent) {
+        markov::root_belief.active = false;
+        root.track_belief = false;
+        return;
+    }
     if constexpr (NANA_OPPONENT_ORACLE || NANA_FUTURE_ORACLE) {
         markov::root_belief.active = false;
     }
@@ -395,6 +429,12 @@ static void resetWorkerLocal(int core_count) {
     }
 }
 
+using Worker = void (*)(std::stop_token, int);
+
+static Worker worker() {
+    return search_opponent ? &Search::search<MarkovOpponent> : &Search::search<NoOpponent>;
+}
+
 void Search::startSearch(const EmulationGame &state, int core_count) {
     //std::cout << "started searching, root hash is: " <<  (int) (state.hash() % 1000) << std::endl;
 
@@ -410,8 +450,9 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     Search::core_count = core_count;
 
     root_state = state;
-    searchOpponent(root_state);
     resetKill(root_state);
+    loadSearchOpponent();
+    searchOpponent(root_state);
     searchGarbage(root_state);
 
     time = 0;
@@ -444,7 +485,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     // Spawn jobs
     for (int i = 0; i < LOAD_FACTOR * core_count; i++) {
         EmulationGame start = root_state;
-        start.start_from_root();
+        startFromRoot(start);
         queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(std::move(start), SELECT), core_count);
     }
 
@@ -455,7 +496,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
 
     // Spawn worker threads
     for (auto& idx : core_indices) {
-        worker_threads[idx] = std::jthread(search, thread_stopper.get_token(), idx);
+        worker_threads[idx] = std::jthread(worker(), thread_stopper.get_token(), idx);
     }
 
     initialised = true;
@@ -490,8 +531,9 @@ void Search::continueSearch(EmulationGame state) {
     root_state.true_attack = state.true_app() * 0;
     root_state.pieces = 0;
     root_state.lines = 2;
-    searchOpponent(root_state);
     resetKill(root_state);
+    loadSearchOpponent();
+    searchOpponent(root_state);
     searchGarbage(root_state);
     depth_baseline.resize(core_count);
     for (DepthBaseline& baseline : depth_baseline) {
@@ -526,7 +568,7 @@ void Search::continueSearch(EmulationGame state) {
     for (int j = 0; j < core_count; j++) {
         for (int i = 0; i < LOAD_FACTOR; i++) {
             EmulationGame start = root_state;
-            start.start_from_root();
+            startFromRoot(start);
             queues[rootOwnerIdx]->enqueue(std::make_unique<Job>(std::move(start), SELECT), core_count);
         }
 
@@ -538,7 +580,7 @@ void Search::continueSearch(EmulationGame state) {
     resetWorkerLocal(core_count);
 
     for (auto& idx : core_indices) {
-        worker_threads[idx] = std::jthread(search, thread_stopper.get_token(), idx);
+        worker_threads[idx] = std::jthread(worker(), thread_stopper.get_token(), idx);
     }
 }
 
@@ -683,7 +725,12 @@ void Search::endSearch() {
                 while (!queues[i]->isempty()) {
                     Msg msg = queues[i]->dequeue();
                     if (msg->type == FLUSH) {
-                        processJob(i, std::move(msg));
+                        if (search_opponent) {
+                            processJob<MarkovOpponent>(i, std::move(msg));
+                        }
+                        else {
+                            processJob<NoOpponent>(i, std::move(msg));
+                        }
                         delivered = true;
                     }
                 }
@@ -961,6 +1008,7 @@ static void notifySimulationDone() {
 // each ancestor the stored action stays with the probability it was sampled with. The job selects at the
 // first node where the draw leaves the stored path (without the stored action, when an action draw left
 // it), or at the settled node itself, which this thread owns.
+template <class Opp>
 [[maybe_unused]] static void restartCC(int threadIdx, Msg&& msg) {
     Job& job = *msg;
     UCT& uct = Search::uct;
@@ -969,7 +1017,7 @@ static void notifySimulationDone() {
 
     EmulationGame& state = job.state;
     state = replay_root;
-    state.start_from_root();
+    state.start_from_root<Opp>();
     size_t keep = depth;
     int exclude = -1;
     for (size_t i = 0; i < depth; i++) {
@@ -979,8 +1027,8 @@ static void notifySimulationDone() {
             break;
         }
         state.set_move(state.specific_move(job.moves[i].unpack()));
-        state.play_moves();
-        state.chance_move();
+        state.play_moves<Opp>();
+        state.chance_move<Opp>();
         const uint32_t expected = i + 1 < depth ? job.path[i + 1].hash : job.child_hash;
         if (state.game_over || state.hash() != expected) {
             keep = i + 1;
@@ -1016,6 +1064,7 @@ static void notifySimulationDone() {
     send(threadIdx, matched ? threadIdx : uct.getOwner(state.hash()), std::move(msg));
 }
 
+template <class Opp>
 void Search::processJob(const int threadIdx, Msg&& msg) {
     Job& job = *msg;
 
@@ -1096,7 +1145,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         uct.stats[threadIdx].nodes++;
 
-        Reward reward = rollout(job.state, threadIdx, job.path.size(), job.parent_board);
+        Reward reward = rollout<Opp>(job.state, threadIdx, job.path.size(), job.parent_board);
 
         uint32_t parentIdx = uct.getOwner(job.path.back().hash);
 
@@ -1122,7 +1171,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         if (state.game_over) {
 
-            Reward reward = rollout(state, threadIdx, job.path.size(), job.parent_board);
+            Reward reward = rollout<Opp>(state, threadIdx, job.path.size(), job.parent_board);
 
             if (job.path.empty()) {
                 notifySimulationDone();
@@ -1235,7 +1284,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             state.set_move(state.specific_move(node.move(action)));
 
             [[maybe_unused]] const int attack_before = state.true_attack;
-            state.play_moves();
+            state.play_moves<Opp>();
 #if NANA_SUFFIX
             {
                 const float step = (float)(state.true_attack - attack_before);
@@ -1243,7 +1292,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 job.steps.push_back(step);
             }
 #endif
-            state.chance_move();
+            state.chance_move<Opp>();
 
             uint32_t new_hash = state.hash();
             job.child_hash = new_hash;
@@ -1305,7 +1354,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         if constexpr (cc_restart) {
             if (settled && !job.path.empty() && job.moves.size() == job.path.size() &&
                 job.probs.size() == job.path.size()) {
-                restartCC(threadIdx, std::move(msg));
+                restartCC<Opp>(threadIdx, std::move(msg));
                 return;
             }
         }
@@ -1317,7 +1366,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.path.clear();
 
             job.state = root_state;
-            job.state.start_from_root();
+            job.state.start_from_root<Opp>();
             job.R = Reward{};
             job.extra_N = 0;
             job.history.clear();
@@ -1423,7 +1472,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 const size_t depth = job.path.size();
                 size_t left = depth + 1;
                 if (job.moves.size() == depth) {
-                    left = replayPath(job, node.id, job.state);
+                    left = replayPath<Opp>(job, node.id, job.state);
                 }
                 else {
                     job.state = std::move(here);
@@ -1468,7 +1517,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 return;
             }
 
-            here.reseed_chance();
+            here.reseed_chance<Opp>();
 
             job.state = std::move(here);
             job.history = rows;
@@ -1505,6 +1554,7 @@ void Search::maybeInsertNode(UCTNode node, const int threadIdx) {
     }
 }
 
+template <class Opp>
 void Search::search(std::stop_token stop, const int threadIdx) {
     pinThreadToCore(threadIdx);
 
@@ -1536,7 +1586,7 @@ void Search::search(std::stop_token stop, const int threadIdx) {
         const JobType type = msg->type;
         const bool top = type == SELECT && msg->path.size() <= 1;
 #endif
-        processJob(threadIdx, std::move(msg));
+        processJob<Opp>(threadIdx, std::move(msg));
 #ifdef NANA_BENCH
         uint64_t cycles = __rdtsc() - start;
         profile.local.job_cycles[type] += cycles;
@@ -1610,6 +1660,7 @@ void Search::search(std::stop_token stop, const int threadIdx) {
 }
 
 
+template <class Opp>
 Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] size_t depth,
                        [[maybe_unused]] float parent_board) {
     // Rollout using eval.
@@ -1684,7 +1735,7 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
 #if NANA_SUFFIX
     const Reward value = stuck ? dead : Return{ 0, 0, max_eval, 1, 0 };
 #else
-    const Reward value = stuck ? 0.0f : leafReward(state, max_eval);
+    const Reward value = stuck ? 0.0f : leafReward<Opp>(state, max_eval);
 #endif
     node.leaf_V = value;
     maybeInsertNode(std::move(node), threadIdx);
@@ -1703,12 +1754,13 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
 #if NANA_SUFFIX
     return Return{ 0, 0, max_eval, 1, 0 };
 #else
-    return leafReward(state, max_eval);
+    return leafReward<Opp>(state, max_eval);
 #endif
 #endif
 }
 
 #if !NANA_SUFFIX
+template <class Opp>
 float Search::leafReward(EmulationGame& state, float max_eval) {
     float reward = 0;
     static const NanaConfig& c = config();
@@ -1717,7 +1769,7 @@ float Search::leafReward(EmulationGame& state, float max_eval) {
         reward = std::max(reward, r);
     }
 
-    if (reward_tuning.app_only) {
+    if (!Opp::simulated || reward_tuning.app_only) {
         return reward;
     }
 
