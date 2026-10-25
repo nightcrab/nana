@@ -66,32 +66,32 @@ struct NanaConfig {
     int steal_temperature = 10;
 
     // eval (Eval::eval_CC): added to the score, which is then mapped by (score + 10000) / 10000
-    double top_half = -16.5645413218119;
-    double top_quarter = -432.6291613236766;
-    double low = -37.06215572728501;
-    double cavity_cells = -265.79340341552916;
-    double cavity_cells_sq = -19.6982738776423;
-    double overhangs = -86.02539921248629;
-    double overhangs_sq = -2.6534539745444334;
-    double covered_cells = -39.17198963527103;
-    double covered_cells_sq = -3.2619455153332986;
-    double bumpiness = -24.92634243869928;
-    double bumpiness_sq = -15.328488400239728;
-    double height = -48.080897303757666;
-    double row_transitions = -14.964650227838822;
-    double counting = 92.92030228516562;
-    double perfect_clear = 298.7240888057252;
-    double wasted_t = -64.64391867938255;
-    std::array<double, 10> well_columns = { 32.670890192719575, 8.052404721512303, -5.624856536146098,
-                                            70.57963476394846,  27.060074108181887, 7.992944512649059,
-                                            60.30654631101932,  12.59843587982423, -7.048157352276725,
-                                            17.660732897688735 };
-    std::array<double, 5> clears = { 0, -9.410517988786523, -29.610419738097477, -75.97211687640842,
-                                     587.5389313536086 };
-    std::array<double, 4> tspins = { 0, 78.50966110273028, 367.1433218304415, 193.4661682079611 };
+    double top_half = -50.809334726527226;
+    double top_quarter = -630.2445620700462;
+    double low = -33.44361147332671;
+    double cavity_cells = -349.58985804116384;
+    double cavity_cells_sq = -25.400362612478148;
+    double overhangs = -132.6695694448751;
+    double overhangs_sq = -1.1524309867331013;
+    double covered_cells = -30.498162474880733;
+    double covered_cells_sq = -7.8721414742404825;
+    double bumpiness = -25.761192630778556;
+    double bumpiness_sq = -28.108590764188037;
+    double height = -45.15022159907045;
+    double row_transitions = -24.575704740846128;
+    double counting = 61.9347727280756;
+    double perfect_clear = 229.5585551568744;
+    double wasted_t = -48.3875036786517;
+    std::array<double, 10> well_columns = { 22.206568640471783, 23.75351666383591, -9.705152993022665,
+                                            64.4055163819902,   38.01976098740804, 33.32048980372693,
+                                            84.8998702340318,   36.54866592169482, -17.853911656640292,
+                                            6.390785928250345 };
+    std::array<double, 5> clears = { 0, 329.40179942811164, -2.9680199204562143, -98.8208607848226,
+                                     695.6269810587003 };
+    std::array<double, 4> tspins = { 0, 80.51857794910987, 159.46297822832895, 325.85611242217686 };
 
     // PUCT (UCTNode::c_puct): c = ln((N + c_base + 1) / c_base) + c_init * (1 + depth / depth_step)
-    double c_init = 1.8;
+    double c_init = 1.25;
     double c_base = 19652;
     int depth_step = 3;
     // priors: the eval's rank r gets weight r^-prior_exponent, normalised
@@ -103,15 +103,15 @@ struct NanaConfig {
     int depth_cap = 0;
     // the eval scoring every move: "nana" (eval_CC, the weights above) or "cc" (Cold Clear's Standard
     // evaluator with its default weights, Eval::eval_CC_standard)
-    std::string eval = "cc";
+    std::string eval = "nana";
     // the CC eval's term over the search's belief about the HMM opponent (EmulationGame::belief): the
     // belief a move leaves, one piece ahead, weighed per hidden state. in CC score units; 0 = off
     std::array<double, 8> belief_weights{};
     CCWeights cc;
 
     // rollout score: app_weight * APP + eval_weight * the best eval of the leaf's moves
-    double app_weight = 1.0 / 3.0;
-    double eval_weight = 0.5;
+    double app_weight = 0.6421088128536776;
+    double eval_weight = 0.9756232465113018;
 
     // r^-prior_exponent for ranks 1..PRIOR_TABLE (index rank - 1); computed when loaded
     static constexpr int PRIOR_TABLE = 1024;
