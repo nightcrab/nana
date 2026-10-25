@@ -15,8 +15,8 @@ mkdir -p "$out"
 echo "building nana's tbp bot"
 git submodule update --init --recursive
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF > /dev/null
-cmake --build build --target tbp_tetris -j "$cpus" > /dev/null
-bot="$root/build/cpp/tbp_tetris"
+cmake --build build --target nana_tbp -j "$cpus" > /dev/null
+bot="$root/build/cpp/nana_tbp"
 python3 - "$root/build/cpp/nana.json" "$threads" <<'EOF'
 import json, os, sys
 path = sys.argv[1]

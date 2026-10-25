@@ -74,7 +74,7 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 
 | Executable | Description |
 |---|---|
-| `tbp_tetris` | Backend for [TBP](https://github.com/tetris-bot-protocol) (JSON over stdin/stdout). |
+| `nana_tbp` | Backend for [TBP](https://github.com/tetris-bot-protocol) (JSON over stdin/stdout). |
 | `nana_interactive` | Steps through the bot in a window and shows its search statistics. On Linux it needs X11, OpenGL and libpng. |
 | `nana_emulate` | Plays emulated games (`EmulationGame`) against the HMM opponent model and reports attack per piece. Used by the tuner and the strength scripts. |
 | `nana_bench` | Fixed-position search benchmark with profiling counters (built with `NANA_BENCH`). |
@@ -86,16 +86,16 @@ CMake options (pass with `-D`):
 * `NANA_GUI=OFF` skips `nana_interactive` to run headless.
 * `NANA_MIMALLOC=OFF` uses the system allocator instead of mimalloc.
 * `CMAKE_CXX_FLAGS="-DNANA_MPMCTS=0"` builds TDS-UCT instead of the default MP-MCTS.
-* `NANA_MARCH=<level>` sets the `-march` of every executable except a launcher-built `tbp_tetris` (default `native`).
-* `NANA_VARIANTS="<level>;<level>;..."` builds `tbp_tetris` for several ISA levels (see below).
+* `NANA_MARCH=<level>` sets the `-march` of every executable except a launcher-built `nana_tbp` (default `native`).
+* `NANA_VARIANTS="<level>;<level>;..."` builds `nana_tbp` for several ISA levels (see below).
 
 ### Portable Build
 
 Distributed via Github releases, there are some portable Nana pre-compiled binaries for Windows and Linux.
 
-Each release contains multiple binaries targeting different hardware. `tbp_tetris` uses the optimal version of Nana based on your detected hardware.
+Each release contains multiple binaries targeting different hardware. `nana_tbp` uses the optimal version of Nana based on your detected hardware.
 
-`tbp_tetris` reads `nana.json` beside the executable, which can adjust Nana's default settings. It looks like this:
+`nana_tbp` reads `nana.json` beside the executable, which can adjust Nana's default settings. It looks like this:
 
 ```json
 {

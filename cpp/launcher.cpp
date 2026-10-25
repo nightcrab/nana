@@ -1,4 +1,4 @@
-// runs the best tbp_tetris ISA variant this CPU supports
+// runs the best nana_tbp ISA variant this CPU supports
 #include "Tetris/bot/Config.hpp"
 #include <cstdio>
 #include <cstdlib>
