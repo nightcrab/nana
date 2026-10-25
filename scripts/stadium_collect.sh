@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
-# Collect nana-vs-nana games for fitting MarkovOpponent: runs Universal-Shaktris-Stadium's stadium_cli
-# in parallel, each bot pinned to its own cpu, until the time budget runs out. Each stadium writes a
-# SQLite database that scripts/train_markov_opponent.py reads directly.
-#
+# Collect nana-vs-nana games with Universal-Shaktris-Stadium for fitting MarkovOpponent.
 # usage: scripts/stadium_collect.sh [minutes] [pps] [threads per bot]   (defaults 120, 1, 1)
-#
-# env:
-#   STADIUMS   stadiums to run at once (default: cpus / (2 * threads per bot))
-#
-# Run it on EC2 with scripts/run_ec2_bench.sh:
-#   WORKTREE=1 SCRIPT=stadium_collect.sh MAX_MINUTES=150 scripts/run_ec2_bench.sh <host> <key> master 120 1 1
-# Results land in results/stadium-<timestamp>/: one stadium_<k>.db per stadium and summary.txt.
 set -euo pipefail
 
 minutes=${1:-120}
@@ -27,7 +17,6 @@ git submodule update --init --recursive
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF > /dev/null
 cmake --build build --target tbp_tetris -j "$cpus" > /dev/null
 bot="$root/build/cpp/tbp_tetris"
-# All stadium bots use the same settings; TBP reads these beside its executable.
 python3 - "$root/build/cpp/nana.json" "$threads" <<'EOF'
 import json, os, sys
 path = sys.argv[1]
@@ -42,7 +31,6 @@ echo "building stadium_cli"
 rm -rf stadium
 git clone -q --depth 1 https://github.com/shakkar23/Universal-Shaktris-Stadium stadium
 (cd stadium && git log -1 --format="stadium commit %h %s")
-# upstream skips the game's final move when logging, but its attacks are what kill the loser
 python3 - <<'EOF'
 p = "stadium/src/stadium_cli.cpp"
 s = open(p, newline="").read()
@@ -64,7 +52,6 @@ patch = nl.join([
 ])
 open(p, "w", newline="").write(s.replace(anchor, patch, 1))
 EOF
-# its CMakeLists needs SDL2 for every target, so build the cli directly
 (cd stadium/src && gcc -O2 -c sqlite3/sqlite3.c -o sqlite3.o \
     && g++ -O2 -std=c++23 -include variant -I. -IShaktris -ITBP -IUtil -Isqlite3 \
         stadium_cli.cpp TBP/Bot.cpp Shaktris/Game.cpp sqlite3.o -o stadium_cli -lpthread -ldl)
@@ -82,8 +69,6 @@ cat "$out/config.txt"
 
 end=$(( $(date +%s) + minutes * 60 ))
 
-# one stadium: two bots on their own cpus, restarted if the stadium dies (it throws on an invalid
-# placement) until the time is up. games are written to the database as they finish
 run_stadium() {
     local k=$1
     local dir="$out/stadium_$k"
@@ -103,7 +88,6 @@ EOF
     local restarts=0
     while [ "$(date +%s)" -lt "$end" ]; do
         local left=$(( end - $(date +%s) ))
-        # SIGINT: the stadium closes the database; a game in progress is lost
         (cd "$dir" && timeout -s INT "$left" "$stadium" "$dir/bot1.sh" "$dir/bot2.sh" > /dev/null 2>> "$dir/stderr.log") || true
         [ "$(date +%s)" -lt "$end" ] && restarts=$(( restarts + 1 ))
         sleep 1
@@ -116,7 +100,6 @@ for (( k = 0; k < stadiums; k++ )); do
     run_stadium "$k" &
 done
 wait
-# bots whose stadium was interrupted exit on end of input; make sure
 pkill -f "$bot" || true
 
 python3 - "$out" <<'EOF' | tee "$out/summary.txt"

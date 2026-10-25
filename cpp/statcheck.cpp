@@ -1,4 +1,3 @@
-// Exact-reference diagnostics of the real HMM sampler and expectimax backup classes.
 #include "Tetris/game/MarkovOpponent.hpp"
 #include "Tetris/game/OpponentFilter.hpp"
 #include "Tetris/bot/UCT.hpp"
@@ -31,8 +30,6 @@ void diagnostic(const std::string& name, Json detail) {
     detail["status"] = "diagnostic";
     results.push_back(detail);
 }
-// Simultaneous Bernstein bounds, with a predeclared union bound over <=10,000 cells.
-// Fixed sample sizes; no optional stopping. The guarantee assumes independent trials.
 void histogram(const std::string& name, const std::vector<double>& p,
                const std::vector<int>& counts, int n) {
     constexpr double family_alpha = 0.001;
@@ -68,8 +65,6 @@ uint32_t trialSeed(uint64_t trial, uint64_t stream) {
     return uint32_t(fast_seed_detail::mix(trial + 0x9e3779b97f4a7c15ULL * (stream+1)) >> 32);
 }
 
-// Enumerate hidden transitions AND emission-dependent since/meter/death updates, not
-// just products of marginal attack distributions. Compare the 9x9 joint distribution.
 void samplerTests(int n, uint64_t seed) {
     const auto& p = markov::params();
     for (int context = 0; context < 13; ++context) {
@@ -131,7 +126,6 @@ void samplerTests(int n, uint64_t seed) {
         record("sampler/cancellation/"+std::to_string(context),cancellation);
     }
     markov::root_belief.active = false;
-    // Exercise the actual restart seeding path, rather than only direct seeds.
     fast_seed_reset(seed);
     std::vector<int> counts(K,0);
     MarkovOpponent base;
@@ -165,7 +159,6 @@ UCTNode node(int actions) {
     return n;
 }
 void backupTests(int samples, uint64_t seed) {
-    // Known child values: probability weighting must converge at both <=8 and >8 children.
     std::mt19937_64 rng(seed);
     for (int k : {2,8,17}) {
         std::vector<double> weights(k), values(k);
@@ -175,22 +168,19 @@ void backupTests(int samples, uint64_t seed) {
         std::discrete_distribution<int> draw(weights.begin(),weights.end());
         ChildTable t;
         for (int i=0;i<samples;++i) { const int c=draw(rng); t.put(c+1,value(values[c]),1); }
-        // Hoeffding for [0,1] values, same predeclared family bound as histograms.
         const double bound=std::sqrt(std::log(2*10000/0.001)/(2*samples));
         record("backup/fixed-values/"+std::to_string(k),std::abs(mean(t)-target)<bound,
                {{"estimate",mean(t)},{"exact",target},{"bound",bound}});
     }
-    // A two-level enumerated tree: max is AFTER chance expectation at the root.
     auto n=node(2);
     n.report(0,11,value(0),3,false); n.report(0,12,value(1),1,false);
     n.report(1,21,value(0.4),4,false);
     record("backup/tiny-tree-best-action",n.best==1 && std::abs(rewardScalar(n.value())-0.4)<1e-6);
-    n.report(0,11,value(0.8),1,false); // child 11 changes value for all its prior visits
+    n.report(0,11,value(0.8),1,false);
     record("backup/latest-child-propagates",n.best==0 && std::abs(rewardScalar(n.value())-0.84)<1e-5);
     n.report(0,11,value(0),1,false);
     record("backup/decreasing-best-rescans",n.best==1 && std::abs(rewardScalar(n.value())-0.4)<1e-6);
 
-    // Diagnostic counterexamples: these expose assumptions, not full-search bug verdicts.
     ChildTable draws, effort;
     for (int i=0;i<1000;++i) {
         const bool rare=i%10==0;

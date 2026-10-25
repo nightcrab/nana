@@ -1,4 +1,5 @@
 #include "UCT.hpp"
+#include "CCTrace.hpp"
 #include "Config.hpp"
 #include "Util/MPSC.hpp"
 #include "Util/Distribution.hpp"
@@ -40,7 +41,6 @@ static float quick_sqrt(const float x)
 	return x * u.x * (1.5f - xhalf * u.x * u.x);// Newton step, repeating increases accuracy 
 }
 
-// N and R are scaled by this before each update, so N levels off at n_cap
 static double decay() {
 	static const double d = 1.0 - 1.0 / config().n_cap;
 	return d;
@@ -57,14 +57,12 @@ void EdgeStats::addCarried(float reward) {
 	R += reward;
 }
 
-// Q, the average return
 float EdgeStats::Q() const {
 	return R / N;
 }
 
 Return stepUp(Return v, float step) {
 	constexpr float gamma = (float)NANA_SUFFIX_DISCOUNT;
-	// the edge's own move: its attack and one piece for each return that made it
 	const float moved = v.n - v.n_dead;
 	v.A = gamma * v.A + moved * step;
 	v.L = gamma * v.L + moved;
@@ -73,7 +71,6 @@ Return stepUp(Return v, float step) {
 
 float rewardScalar(const Return& r) {
 	static const NanaConfig& c = config();
-	// the attack rate of the returns that lived; those that died are worth 0
 	const float rate = r.L > 0 ? r.A / r.L : 0.0f;
 	return (float)c.app_weight * rate * (r.n - r.n_dead) + (float)c.eval_weight * r.E;
 }
@@ -149,7 +146,6 @@ float UCTNode::armValue(size_t i, Reward& V) const {
 		return 0.0f;
 	}
 #if NANA_SUFFIX
-	// this edge's own move, as climb adds it
 	s = stepUp(s, cold[i].step_attack);
 #endif
 	V = scaled(s, 1.0f / n);
@@ -157,7 +153,6 @@ float UCTNode::armValue(size_t i, Reward& V) const {
 }
 
 static bool counts(const ChildTable& t) {
-	// N_MIN 1: any result, even one scaled down by tree reuse
 	return NANA_EXPECTIMAX_MIN_N <= 1 ? t.completed > 0 : t.completed >= NANA_EXPECTIMAX_MIN_N;
 }
 
@@ -167,14 +162,12 @@ Reward UCTNode::report(size_t i, uint32_t child, Reward V, float k, bool fresh, 
 	}
 	ChildTable& t = cold[i].children;
 #ifdef NANA_SEARCH_FIXTURE
-    // Negative control: the harness must catch biased backup weights while draws stay correct.
     if (search_fixture::inject_weights && child == search_fixture::hash_base+2) k *= 4;
 #endif
 	t.put(child, V, k);
 	t.completed = fresh ? t.completed * (float)decay() + k : t.completed + k;
 	Reward arm;
 	const float q = armValue(i, arm);
-	// R / N reads as Q once N's virtual losses are back, as with averaged returns
 	edge_stats[i].R = q * t.completed;
 
 	if (counts(t)) {
@@ -217,7 +210,6 @@ void UCTNode::updateTime(size_t i, int newtime) {
 	if (time(i) != newtime) {
 		EdgeStats& edge = stats(i);
 		edge.N = edge.N / 5;
-		// (the CC search's R is a value, not a sum of returns)
 		if constexpr (!cc_search) {
 			edge.R = edge.R / 5;
 		}
@@ -230,7 +222,6 @@ void UCTNode::updateTime(size_t i, int newtime) {
 		s.n_dead /= 5;
 #endif
 #if NANA_EXPECTIMAX
-		// Q is a ratio, unchanged; only the weight R carries is scaled with N
 		cold[i].children.completed /= 5;
 		if ((int)i == best && !counts(cold[i].children)) {
 			rescanBest();
@@ -254,8 +245,6 @@ UCTNode::UCTNode(const EmulationGame &state) {
     if (state.fixture_active) { search_fixture::initialize(*this, state); return; }
 #endif
 	std::vector<Piece> raw_actions = state.placements();
-	// the smeared movegen occasionally yields a placement with a mino off the board (seen at x = -1),
-	// which place_piece would write outside the board's columns
 	std::erase_if(raw_actions, [&](const Piece& piece) {
 		return Shaktris::Utility::collides(state.game.board, piece);
 	});
@@ -271,14 +260,12 @@ UCTNode::UCTNode(const EmulationGame &state) {
 
 	int gheight = state.game.board.get_garbage_height();
 
-	// Cold Clear's evaluator wants the pieces left in the bag after the queue
 	static const bool use_cc_eval = config().eval == "cc";
 	std::vector<PieceType> bag_left;
 	if (use_cc_eval) {
 		bag_left.assign(state.rng.bag.begin() + std::min<size_t>(state.rng.bagiterator, state.rng.bag.size()), state.rng.bag.end());
 	}
 
-	// the term over our belief about the HMM opponent, when it has weights and the search tracks one
 	static const bool belief_weighted = [] {
 		for (double w : config().belief_weights) {
 			if (w != 0) return true;
@@ -308,7 +295,6 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		c.move = PackedMove::pack(Move(raw_action, false));
 		c.eval = eval;
 		c.move_reward = (float)move_reward;
-		// the minos must follow from type and rotation for packing to be lossless
 #ifndef NDEBUG
 		const Move unpacked = c.move.unpack();
 		assert(std::memcmp(&unpacked.piece.minos, &raw_action.minos, sizeof(raw_action.minos)) == 0);
@@ -399,7 +385,6 @@ size_t UCTNode::select_uct(int depth) {
 */
 float UCTNode::c_puct(float node_N, int depth) {
 	static const NanaConfig& c = config();
-	// NANA_C_INIT_SCALE: a build-time multiple of the configured c_init, for strength variants
 #ifndef NANA_C_INIT_SCALE
 #define NANA_C_INIT_SCALE 1
 #endif
@@ -436,8 +421,6 @@ size_t UCTNode::select(int depth) {
 	return best_action;
 }
 
-// keeps row.edges[1..] the strongest edges seen so far, by p, strongest first.
-// best[] holds their priorities; ties keep the earlier edge
 static void offerCompetitor(HistoryRow& row, float* best, uint32_t capacity, float p, const EdgeStats& edge) {
 	uint32_t i = row.count - 1;
 	if (i == capacity && p <= best[i - 1]) {
@@ -463,8 +446,6 @@ size_t UCTNode::selectWithCompetitors(int depth, HistoryRow& row) const {
 	float highest_priority = -2.0;
 	float c = c_puct(N, depth);
 
-	// historyRow runs after the virtual loss, so it ranks with the node's N + 1. keep one
-	// more than it records, since the edge we pick (which it skips) may be among them
 	const float hist_N = N + 1;
 	const float hist_c = c_puct(hist_N, depth);
 	constexpr uint32_t capacity = HISTORY_COMPETITORS + 1;
@@ -481,7 +462,6 @@ size_t UCTNode::selectWithCompetitors(int depth, HistoryRow& row) const {
 			highest_priority = p;
 		}
 
-		// same insertion as offerCompetitor, tracking which edge each slot holds
 		float h = priority(hist_c, hist_N, edge.R, edge.N, edge.prior);
 		uint32_t k = ranked_count;
 		if (k == capacity && h <= best[k - 1]) {
@@ -504,7 +484,6 @@ size_t UCTNode::selectWithCompetitors(int depth, HistoryRow& row) const {
 		ranked_ids[k] = i;
 	}
 
-	// drop the chosen edge, keep the top HISTORY_COMPETITORS of the rest
 	row.count = 1;
 	for (uint32_t k = 0; k < ranked_count && row.count < 1 + HISTORY_COMPETITORS; k++) {
 		if (ranked_ids[k] == best_action) {
@@ -525,7 +504,6 @@ HistoryRow UCTNode::historyRow(uint32_t hash, size_t chosen_id, int depth) const
 	row.edges[0] = { chosen.R, chosen.N, chosen.prior };
 	row.count = 1;
 
-	// keep the strongest siblings; the rest are unlikely to overtake before we're back
 	float c = c_puct(N, depth);
 	float best[HISTORY_COMPETITORS];
 	for (size_t i = 0; i < actionCount(); i++) {
@@ -558,6 +536,11 @@ float UCTNode::ccValue() const {
 }
 
 size_t UCTNode::select_CC(RNG& rng) const {
+#if NANA_CC_LOCKSTEP
+	if (cc_trace::select_hook) {
+		return cc_trace::select_hook(*this);
+	}
+#endif
 	static thread_local std::vector<std::pair<float, uint32_t>> ranked;
 	static thread_local std::vector<double> weights;
 	ranked.clear();
@@ -574,22 +557,33 @@ size_t UCTNode::select_CC(RNG& rng) const {
 	weights.clear();
 	double total = 0;
 	for (size_t rank = 0; rank < ranked.size(); rank++) {
-		// eval_CC is a score / 10000: Cold Clear weighs in score units
 		const double e = std::floor((ranked[rank].first - worst) * 10000.0) + 10;
 		const double w = std::floor(e * e / (double)(rank * rank + 1));
 		weights.push_back(w);
 		total += w;
 	}
-	// a 32-bit uniform draw from two 16-bit ones (getRand(n) takes n up to 2^16)
+#if NANA_CC_LOCKSTEP
+	const double u = cc_trace::uniform();
+#else
 	const double u = ((double)rng.getRand(1u << 16) * 65536.0 + (double)rng.getRand(1u << 16)) / 4294967296.0;
+#endif
 	double target = u * total;
+	size_t pick = ranked.size() - 1;
 	for (size_t rank = 0; rank < ranked.size(); rank++) {
 		target -= weights[rank];
 		if (target < 0) {
-			return ranked[rank].second;
+			pick = rank;
+			break;
 		}
 	}
-	return ranked.back().second;
+#if NANA_CC_LOCKSTEP
+	cc_trace::Step step{ id, {}, u, (uint32_t)pick };
+	for (size_t rank = 0; rank < ranked.size(); rank++) {
+		step.ranked.push_back({ ranked[rank].second, ranked[rank].first, weights[rank] });
+	}
+	cc_trace::steps.push_back(std::move(step));
+#endif
+	return ranked[pick].second;
 }
 
 size_t UCTNode::select_SOR(RNG &rng) {
@@ -622,13 +616,11 @@ bool UCT::nodeExists(uint32_t nodeID) {
 
 
 UCTNode& UCT::getNode(uint32_t nodeID, int threadIdx) {
-	// shards are owner-only, which is what makes the lock-free access safe
 	assert(getOwner(nodeID) == (uint32_t)threadIdx);
 
 	return getNode(nodeID);
 };
 
-// owner or singlethreaded version
 UCTNode& UCT::getNode(uint32_t nodeID) {
 	auto& right = nodes_right[nodeID % workers].obj_;
 
@@ -637,7 +629,6 @@ UCTNode& UCT::getNode(uint32_t nodeID) {
 		return it->second;
 	}
 
-	// move from left side to right side
 	auto& left = nodes_left[nodeID % workers].obj_;
 	auto left_it = left.find(nodeID);
 	insertNode(std::move(left_it->second));

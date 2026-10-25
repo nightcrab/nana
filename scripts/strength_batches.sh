@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
-# Run strength_ladder.sh in batches of fresh seeds, so a long test can be watched (and stopped)
-# as it goes: batch k plays seeds FIRST_SEED + k*GAMES onward, into its own results directory,
-# and strength_report.py pools any set of finished batches.
-#
+# Run strength_ladder.sh in batches of fresh seeds.
 # usage: scripts/strength_batches.sh [NAME=value ...]
-#   BATCHES      how many batches [3]
-#   GAMES        games per config per batch [100]
-#   FIRST_SEED   first batch's first seed [0]
-#   anything else (MULTS, PAR_THREADS, HORIZON, BASE_MS, LF1, ...) goes to every batch
-#
-# A batch is finished once results/<dir>/summary.txt exists; batches.txt lists them in order.
-# Builds once, before the first batch.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

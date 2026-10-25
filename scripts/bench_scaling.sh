@@ -1,25 +1,6 @@
 #!/usr/bin/env bash
 # Thread-scaling benchmark for MP-MCTS (optionally against TDS-UCT) on a many-core Linux machine.
-#
 # usage: scripts/bench_scaling.sh [max_threads] [reps] [ms_per_run]
-#   THREADS="1 4 8 16 32" overrides the thread counts (default 1, 2, 4, ... max_threads)
-#   BUILDS="mp"           builds to run: mp (NANA_MPMCTS=1), tds (NANA_MPMCTS=0) or "tds mp".
-#                         TDS-UCT is root-bound and only worth running for a specific reason.
-#   TARGET=1              also run 1 thread for N x ms_per_run at each thread count N (0 = skip).
-#                         N threads build about the tree 1 thread builds in N times as long, and
-#                         simulations slow down as the tree grows, so N x that run's rate is the
-#                         fair target for N threads rather than N x the short 1-thread rate.
-#                         Costs reps x (sum of N > 1) x ms_per_run per test and build.
-#
-# Builds nana_bench (headless, Release) once per build and runs both position tests at
-# 1, 2, 4, ... threads up to max_threads, interleaving the builds so clock and thermal
-# drift hit them equally. Also runs nana_msgbench scale, which shows how much plain work
-# slows per thread as cores are added.
-#
-# Writes results/<host>-<date>/{runs.csv,summary.txt,scale.txt}.
-# Needs cmake, a C++23 compiler (gcc 13+ or clang 17+) and python3 for the summary.
-# Run it with nothing else on the machine; prefer instances without SMT (e.g. AWS c7a),
-# or set max_threads to the physical core count.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -59,12 +40,10 @@ fi
 
 field() { grep "^$1" <<< "$2" | head -1 | awk -F': ' '{print $2}' | tr -d '%'; }
 
-# run <build> <test> <threads> <rep> <ms>: one search, appended to runs.csv
 run() {
     local bin=${!1}
     local o wait
     o=$("$bin" "$3" "$5" "$2")
-    # mean wait over the per-thread profile rows
     wait=$(awk '/^ +[0-9]+ +[0-9.]+%/ { gsub("%", "", $2); s += $2; c++ } END { if (c) printf "%.1f", s / c }' <<< "$o")
     echo "$1,$2,$3,$4,$5,$(field 'simulations / second' "$o"),$(field 'nodes / second' "$o"),$wait,$(field 'tree depth' "$o"),$(field 'restarts' "$o"),$(field 'root backprops' "$o")" >> "$out/runs.csv"
     echo "test $2  threads $3  ms $5  rep $4  $1 done"
@@ -76,7 +55,6 @@ for test in 0 1; do
         for ((r = 1; r <= reps; r++)); do
             for build in "${builds[@]}"; do
                 run "$build" "$test" "$n" "$r" "$ms"
-                # target for n threads: 1 thread searching n times as long
                 if [ "$target" = 1 ] && [ "$n" -gt 1 ]; then
                     run "$build" "$test" 1 "$r" $((n * ms))
                 fi
@@ -85,7 +63,6 @@ for test in 0 1; do
     done
 done
 
-# plain-work slowdown per thread as cores are added (no search), pinned like the workers
 first=${builds[0]}
 "$(dirname "${!first}")/nana_msgbench" scale "$max_threads" | tee "$out/scale.txt"
 

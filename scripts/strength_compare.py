@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Compare two strength runs config by config, e.g. a build change against the plain build.
+"""Compare two strength runs config by config.
 
     strength_compare.py --a DIR [DIR ...] --b DIR [DIR ...] [--a-name plain] [--b-name new]
-
-Each side's DIRs are pooled (as in strength_report.py). For every config both sides played,
-prints B / A as a ratio of means over the seeds both played, with a paired 95% bootstrap
-interval: APP@H, attack per piece actually played, deaths before H and sims/move.
 """
-
 import argparse
 import math
 import pathlib

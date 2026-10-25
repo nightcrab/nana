@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """Random search over the work-requesting and stealing heuristics, scored by simulations/s.
 
-The heuristics only decide which thread runs a rollout and when, so throughput at a
-fixed load factor is a fair objective. steal_chiplet_penalty only acts on a machine with more
-than one L3 (EC2's EPYC, not the laptop), so tune on the machine the values are for. Each trial runs both bench positions; the
-current defaults are re-run every few trials so clock/thermal drift can be divided out.
-The best trials are then re-run with more repetitions next to the defaults.
-
 usage: python3 scripts/tune_requesting.py --bench build-bench-mp1/cpp/nana_bench --threads 32
 """
 import argparse
@@ -19,7 +13,6 @@ import subprocess
 import sys
 import time
 
-# RequestTuning's defaults (cpp/Tetris/bot/Search.cpp)
 DEFAULTS = {"message_weight": 1, "rollout_weight": 30, "low_water": 30, "give_margin": 3,
             "backoff_iterations": 64, "steal_chiplet_penalty": 30, "steal_topk": 4, "steal_temperature": 10}
 ENV = {
@@ -35,11 +28,7 @@ ENV = {
 
 
 def sample(rng):
-    """One random configuration. Everything but backoff_iterations and steal_topk is in work
-    units, so it scales with the rollout weight. A message is the unit (1), or 0 to count only
-    rollouts as load: any other message weight just rescales all of them together."""
     rollout_weight = round(math.exp(rng.uniform(math.log(5), math.log(120))))
-    # 0 = always ask the most loaded thread kept
     temperature = 0 if rng.random() < 0.2 else math.exp(rng.uniform(math.log(0.05), math.log(2)))
     return {
         "message_weight": rng.choice((0, 1)),
@@ -85,7 +74,6 @@ def run(args, config, test):
 
 
 def evaluate(args, config, reps, writer, label):
-    """Median simulations/s per test over reps, combined as a geometric mean over tests."""
     per_test = []
     waits = []
     for test in (0, 1):
@@ -116,7 +104,6 @@ def main():
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--out", default=f"results/tune-{time.strftime('%Y%m%d-%H%M%S')}")
     args = p.parse_args()
-    # Windows won't launch a relative path with forward slashes
     args.bench = os.path.abspath(args.bench)
 
     os.makedirs(args.out, exist_ok=True)
@@ -126,9 +113,8 @@ def main():
     writer = csv.DictWriter(log, fieldnames=fields)
     writer.writeheader()
 
-    # search: random configurations, with the defaults re-run every few trials
-    baselines = []  # (trial index, score)
-    trials = []     # (trial index, config, raw score, wait)
+    baselines = []
+    trials = []
     for i in range(args.trials):
         if i % args.baseline_every == 0:
             score, _ = evaluate(args, DEFAULTS, args.reps, writer, "baseline")
@@ -141,13 +127,11 @@ def main():
         print(f"[{i:3d}] {score / 1e3:9.1f}k  wait {wait:5.1f}%  {key(config)}", flush=True)
 
     def relative(i, score):
-        # divide by the nearest baseline in time, to take out drift
         nearest = min(baselines, key=lambda b: abs(b[0] - i))
         return score / nearest[1]
 
     ranked = sorted(trials, key=lambda t: relative(t[0], t[2]), reverse=True)
 
-    # confirm: the best few, interleaved with the defaults, with more repetitions
     confirmed = []
     for i, config, _, _ in ranked[:args.confirm]:
         base, base_wait = evaluate(args, DEFAULTS, args.confirm_reps, writer, "confirm-baseline")

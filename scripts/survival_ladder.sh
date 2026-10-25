@@ -1,20 +1,6 @@
 #!/usr/bin/env bash
 # Playing-strength benchmark: survival time of TDS-UCT vs MP-MCTS at a ladder of think times.
-#
 # usage: scripts/survival_ladder.sh [threads] [games] [ms_list] [ramp] [chunk]
-#   threads  workers per game (default 8, one chiplet on the 32-core EC2 box)
-#   games    games per (build, think time), on seeds 0..games-1 (default 100)
-#   ms_list  think times per move, comma separated (default 10,25,50,100)
-#   ramp     nana_emulate --ramp: pieces until incoming garbage doubles (default 0 = off)
-#   chunk    games per nana_emulate run (default 10)
-#
-# Builds nana_emulate twice (NANA_MPMCTS=0 and 1, headless, Release). Runs nproc / threads
-# games at once, each pinned with taskset to its own block of cpus; that assumes no SMT
-# and that consecutive cpus share an L3 (true on AWS c7a). Both builds play the same
-# seeds, interleaved, so drift hits both equally and they can be compared seed by seed.
-#
-# Writes results/<host>-<date>-survival/{<build>-ms<ms>.jsonl,summary.txt}.
-# Needs cmake, a C++23 compiler (gcc 13+ or clang 17+), taskset and python3.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -49,7 +35,6 @@ mkdir -p "$out/parts"
     env | grep '^NANA_' || true
 } > "$out/machine.txt"
 
-# tasks interleave builds and think times; task k goes to slot k % slots
 tasks=()
 for ((seed = 0; seed < games; seed += chunk)); do
     n=$(( games - seed < chunk ? games - seed : chunk ))

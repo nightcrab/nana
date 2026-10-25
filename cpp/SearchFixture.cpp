@@ -21,7 +21,6 @@ void initialize(UCTNode& n, const EmulationGame& state) {
 }
 void advance(EmulationGame& state) {
     const auto& choices=model->nodes.at(state.fixture_node).actions.at(state.fixture_action);
-    // Same uniform source as production game RNG; probabilities are quantized to 16 bits.
     const double u=state.rng.getRand(65536)/65536.0;
     double cdf=0;
     size_t selected=choices.size()-1;

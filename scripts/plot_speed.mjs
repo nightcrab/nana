@@ -1,13 +1,5 @@
 // Plot a speed_scaling.sh sweep as a self-contained HTML page (no dependencies).
-//
 // usage: node scripts/plot_speed.mjs <results dir or runs.csv> [out.html]
-//   default out: speed.html next to runs.csv
-//
-// Two charts on one thread axis: simulations / second (median of reps, whiskers min-max, dashed
-// line = linear scaling from the 1-thread median) and efficiency (speedup / threads). Faint
-// verticals mark where workers start filling the next L3 group (8 cores per chiplet on the
-// EC2 EPYC; set CHIPLET=0 to hide them). Hover for values; a table view is underneath.
-// speed.html#sims or #eff shows just that chart (for screenshots, e.g. the README's).
 import fs from "node:fs";
 import path from "node:path";
 
@@ -162,7 +154,7 @@ const maxN = Math.max(...series.flatMap(s => s.points.map(p => p.n)));
 const fmtK = v => v === 0 ? "0" : v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : Math.round(v / 1e3) + "k";
 
 function chart(host, { height, yMin, yMax, yTicks, yFmt, value, range, ideal, endLabel }) {
-  if (!host) return;  // hidden by #sims / #eff
+  if (!host) return;
   const W = 960, H = height, m = { l: 64, r: 96, t: 12, b: 36 };
   const svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img" }, host);
   const x = n => m.l + (n - 0.5) / maxN * (W - m.l - m.r);
@@ -200,7 +192,6 @@ function chart(host, { height, yMin, yMax, yTicks, yFmt, value, range, ideal, en
     el("path", { d: s.points.map((p, k) => (k ? "L" : "M") + x(p.n) + " " + y(value(p))).join(""), fill: "none",
       stroke: colors[i], "stroke-width": 2, "stroke-linejoin": "round" }, svg);
   });
-  // direct labels at the right end, nudged apart if they'd collide
   const ends = series.map((s, i) => ({ i, p: s.points[s.points.length - 1] }))
     .map(e => ({ ...e, ly: y(value(e.p)) })).sort((a, b) => a.ly - b.ly);
   for (let k = 1; k < ends.length; k++) ends[k].ly = Math.max(ends[k].ly, ends[k - 1].ly + 15);
@@ -209,7 +200,6 @@ function chart(host, { height, yMin, yMax, yTicks, yFmt, value, range, ideal, en
     t.textContent = endLabel(e.p);
     el("tspan", { fill: "var(--text-secondary)", "font-weight": 400 }, t).textContent = " " + names[e.i];
   }
-  // hover: crosshair snapped to the nearest thread count, all series in one tooltip
   const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--muted)", "stroke-width": 1, visibility: "hidden" }, svg);
   const dots = series.map((s, i) => el("circle", { r: 4.5, fill: colors[i], stroke: "var(--surface-1)",
     "stroke-width": 2, visibility: "hidden" }, svg));

@@ -23,19 +23,16 @@
 namespace {
 
 struct LogicalCpu {
-    int group = 0;  // processor group (Windows only)
-    int number = 0; // cpu number within the group
+    int group = 0;
+    int number = 0;
 };
 
 struct Topology {
-    // logical cpus in physical-core-first order
     std::vector<LogicalCpu> order;
-    // parallel to order: which last-level (L3) cache each cpu shares, e.g. its chiplet
     std::vector<int> l3_group;
     int cores = 0;
 };
 
-// cores[i] holds core i's logical cpus; interleave them into physical-core-first order
 Topology interleave(const std::vector<std::vector<LogicalCpu>>& cores) {
     Topology topology;
     topology.cores = (int)cores.size();
@@ -64,7 +61,6 @@ Topology readTopology() {
         return {};
     }
 
-    // only use cpus the process is allowed on (group 0 masks; fine below 64 cpus)
     DWORD_PTR process_mask = 0, system_mask = 0;
     GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
 
@@ -89,7 +85,6 @@ Topology readTopology() {
     return interleave(cores);
 }
 
-// id of the L3 cache each logical cpu shares, keyed by (group, number)
 std::vector<int> readL3Groups(const std::vector<LogicalCpu>& cpus) {
     std::vector<int> ids(cpus.size(), 0);
     DWORD length = 0;
@@ -125,7 +120,6 @@ void pin(const LogicalCpu& cpu) {
 
 #else
 
-// "0,16" or "0-1" style cpu lists
 std::vector<int> parseCpuList(const std::string& list) {
     std::vector<int> cpus;
     std::stringstream ss(list);
@@ -146,7 +140,6 @@ Topology readTopology() {
         return {};
     }
 
-    // group allowed cpus by their sibling list, which identifies the physical core
     std::map<std::string, std::vector<LogicalCpu>> by_core;
     for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
         if (!CPU_ISSET(cpu, &allowed)) continue;
@@ -162,12 +155,10 @@ Topology readTopology() {
     for (auto& [siblings, core] : by_core) {
         cores.push_back(core);
     }
-    // keep cores in cpu order, so worker 0 is on the lowest core
     std::sort(cores.begin(), cores.end(), [](const auto& a, const auto& b) { return a[0].number < b[0].number; });
     return interleave(cores);
 }
 
-// id of the L3 cache each logical cpu shares, from the cache index whose level is 3
 std::vector<int> readL3Groups(const std::vector<LogicalCpu>& cpus) {
     std::vector<int> ids(cpus.size(), 0);
     std::map<std::string, int> by_shared_list;
@@ -199,9 +190,6 @@ void pin(const LogicalCpu& cpu) {
 
 #endif
 
-// NANA_PIN_LAYOUT=spread: deal workers round-robin across L3 groups (worker 0 on the first
-// group, worker 1 on the second, ...) instead of filling one group before the next. for
-// measuring what crossing chiplets costs at a fixed thread count
 void spreadAcrossL3(Topology& t) {
     int groups = 0;
     for (int g : t.l3_group) groups = std::max(groups, g + 1);
@@ -237,7 +225,7 @@ const Topology& topology() {
     return topology;
 }
 
-} // namespace
+}
 
 void pinThreadToCore(int index) {
     const Topology& t = topology();
@@ -266,7 +254,6 @@ bool restrictProcessToCpu(int cpu) {
 #ifdef _WIN32
     return SetProcessAffinityMask(GetCurrentProcess(), DWORD_PTR(1) << cpu) != 0;
 #else
-    // only the main thread exists yet, and the threads it starts inherit its mask
     cpu_set_t set;
     CPU_ZERO(&set);
     CPU_SET(cpu, &set);

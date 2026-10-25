@@ -1,22 +1,7 @@
-// survival benchmark: plays seeded games against the emulated opponent with a fixed think
-// time per move and reports how long the bot survives. games are reproducible per seed apart
-// from the search itself (pieces, garbage holes and the opponent come from the game's seed),
-// so two configs played on the same seeds can be compared game by game.
-//
+// survival benchmark: seeded games against the emulated opponent
 // usage: nana_emulate [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
 //                  [--opponent-log FILE]
 //                  [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]
-//
-// prints one JSON line per game to stdout and a summary to stderr.
-// the games are played against MarkovOpponent, which the search models too. --opponent-log writes what passed
-// between the bot and the opponent each piece, to fit MarkovOpponent with
-// scripts/train_markov_opponent.py.
-// --sims N searches each move for N simulations instead of --ms milliseconds. with --threads 1 and
-// --search-seed 1 (the search's randomness seeded from the game seed) a game then replays exactly,
-// so tuner/ can compare configs on identical games. --cpu K runs the process on logical cpu K only,
-// for running games side by side. --print-config prints the NANA_CONFIG in effect as JSON and exits.
-// --garbage-scale X multiplies the opponent's garbage (0.5 = half, 0 = none), for the search too.
-// on Linux, run several at once on separate chiplets with e.g. taskset -c 8-15.
 
 #include "EmulateCommon.hpp"
 #include "EmulationGame.hpp"
@@ -37,7 +22,6 @@
 #include <thread>
 
 #ifdef _WIN32
-// windows sleeps in ~15.6 ms ticks by default, which overshoots short think times by ~6 ms
 extern "C" __declspec(dllimport) unsigned __stdcall timeBeginPeriod(unsigned period);
 #pragma comment(lib, "winmm")
 #endif
@@ -47,12 +31,9 @@ struct Options {
     int games = 10;
     int ms = 50;
     uint64_t seed = 0;
-    // pieces until the opponent's garbage is doubled (0 = no ramp)
     int ramp = 0;
-    // games still alive here are cut off (counted as survived, not died)
     int max_pieces = 2000;
     std::string opponent_log;
-    // simulations per move instead of ms (0 = use ms)
     uint64_t sims = 0;
     bool search_seed = false;
     int cpu = -1;
@@ -64,25 +45,19 @@ struct GameResult {
     int pieces = 0;
     bool died = false;
     uint64_t simulations = 0;
-    // MP-MCTS: backprops that restarted below the root, reached it, or were sent on up by the leaky gate
     uint64_t restarts = 0;
     uint64_t root_backprops = 0;
     uint64_t leaks = 0;
-    // selects that stopped at the depth cap
     uint64_t depth_capped = 0;
     uint64_t illegal_moves = 0;
     uint64_t replay_matched = 0;
     uint64_t replay_diverged = 0;
     uint64_t replay_diverge_depth = 0;
     uint64_t flushes = 0;
-    // NANA_FLUSH_AT_END: moves whose choice the parked buffers' hidden visits would change, and the
-    // share of the root's visits that were hidden, summed over moves
     uint64_t flush_searches = 0;
     uint64_t flush_changed = 0;
     double hidden_share = 0;
     double think_seconds = 0;
-    // where think time goes beyond searching: starting the workers, waking late from
-    // the sleep, and stopping them (which waits for at least one finished simulation)
     double start_seconds = 0;
     double oversleep_seconds = 0;
     double stop_seconds = 0;
@@ -94,8 +69,6 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
 
     GameResult result;
     bool first = true;
-    // what the search's root knows of the opponent, as under TBP1: a filter over the attacks we see
-    // land (the simulated opponents have no board to encode)
     OpponentFilter opponent_filter;
     RootOpponent root_opponent;
     Search::root_opponent = &root_opponent;
@@ -114,14 +87,11 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
             break;
         }
 
-        // with no legal placement the search can't run a simulation (its jobs end at the root), so a
-        // simulation budget would wait out its timeout: it's lost, as when the search finds no move
         if (options.sims > 0 && UCTNode(game).actionCount() == 0) {
             game.game_over = true;
             continue;
         }
 
-        // the budget is wall time per move, including starting and stopping the workers
         auto start = clock::now();
         root_opponent = opponent_filter.root();
         if (first) {
@@ -158,7 +128,6 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
         result.oversleep_seconds += seconds(woke - std::max(deadline, started));
         result.stop_seconds += seconds(end - woke);
 
-        // every simulation ends in exactly one rollout
         for (const WorkerStatistics& stats : Search::uct.stats) {
             result.simulations += stats.deferred;
             result.restarts += stats.restarts;
@@ -173,7 +142,6 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
         }
 
         if (move.null_move) {
-            // nothing searched at the root: no legal placement left
             game.game_over = true;
             continue;
         }
@@ -186,22 +154,17 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
         const int attack_before = game.attack;
         const int lines_before = game.lines;
 #if NANA_FUTURE_ORACLE
-        // Verify the search root really predicts the next real transition, including RNGs.
-        // In the garbage-off arm restore the real scale for this check only.
         EmulationGame prediction = Search::root_state;
         prediction.garbage_scale = game.garbage_scale;
         EmulationGame::deterministic_chance = true;
         prediction.start_from_root();
         EmulationGame::deterministic_chance = false;
-        // Validate the retained pieces/opponent against reality while supplying the true hole
-        // solely for this assertion, never to the partial oracle's search.
         if constexpr (NANA_ORACLE_RANDOM_HOLES) prediction.hole_rng = game.hole_rng;
         prediction.set_move(prediction.specific_move(move));
         prediction.play_moves();
         prediction.chance_move();
 #endif
         game.play_moves();
-        // what tbp.cpp sees: our attack, whether we cleared, and the meter we tanked if we didn't
         const int attack = game.attack - attack_before;
         const bool cleared = game.lines > lines_before;
         opponent_filter.turn(attack, cleared, cleared ? 0 : std::max(0, meter - attack));
@@ -313,7 +276,6 @@ int main(int argc, const char** argv) {
 
     for (int i = 0; i < options.games; i++) {
         uint64_t game_seed = options.seed + i;
-        // before the game's state exists: constructing it draws seeds too
         fast_seed_reset(options.search_seed ? (uint64_t)seedFor(game_seed, 2) | 1 : 0);
         EmulationGame game = newGame(game_seed, options.ramp, options.garbage_scale);
         GameResult result = playGame(game, options, game_seed, opponent_log ? &opponent_log : nullptr);
@@ -335,7 +297,6 @@ int main(int argc, const char** argv) {
             << ",\"attack\":" << game.attack
             << ",\"true_attack\":" << game.true_attack
             << ",\"lines\":" << game.lines
-            // before the ramp scales it
             << ",\"opponent_attack\":" << game.markov.total_damage
             << ",\"opponent_deaths\":" << game.markov.deaths
             << ",\"sims_per_move\":" << result.simulations / moves
@@ -356,8 +317,6 @@ int main(int argc, const char** argv) {
             << "}" << std::endl;
     }
 
-    // with cut-off games, pieces / deaths is the maximum-likelihood mean survival
-    // (exponential lifetimes); without any it is just the mean
     std::cerr << EmulationGame::rules() << " rules, games " << options.games << ", died " << deaths
         << ", mean pieces " << (double)total_pieces / options.games
         << ", pieces per death " << (deaths ? (double)total_pieces / deaths : 0.0)

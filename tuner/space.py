@@ -1,15 +1,3 @@
-"""The parameters being tuned, and the map between them and the optimiser's unit cube.
-
-A space is a JSON list of entries:
-    {"name": "height", "default": -46, "low": -150, "high": 0}
-    {"name": "clears[1]", "default": -1700, "low": -3400, "high": 0}   # one element of an array key
-    {"name": "c_base", "default": 19652, "low": 2000, "high": 200000, "log": true}
-    {"name": "depth_step", "default": 3, "low": 1, "high": 8, "integer": true}
-
-Names are NANA_CONFIG keys (see cpp/Tetris/bot/Config.hpp), with [i] for array elements. The
-optimiser works in [0, 1]^d; `log` entries are uniform in log space (low and high must be positive).
-"""
-
 import json
 import math
 import re
@@ -78,16 +66,12 @@ class Space:
         return [p.to_unit(p.default) for p in self.params]
 
     def values(self, unit):
-        """{name: value} for a point in the unit cube."""
         return {p.name: p.from_unit(u) for p, u in zip(self.params, unit)}
 
     def unit(self, values):
-        """A point in the unit cube for {name: value}; missing names take their defaults."""
         return [p.to_unit(values.get(p.name, p.default)) for p in self.params]
 
     def config(self, values, base=None):
-        """A NANA_CONFIG dict: `base` (a full config, e.g. from nana_emulate --print-config) with these
-        values written over it. Array elements are written into a copy of the base array."""
         out = json.loads(json.dumps(base)) if base else {}
         for p in self.params:
             if p.name not in values:
@@ -101,7 +85,6 @@ class Space:
         return out
 
     def extend(self, other):
-        """A space with other's parameters added (for --add-params); existing names are kept."""
         have = set(self.names())
         return Space([p.spec() for p in self.params] + [p.spec() for p in other.params if p.name not in have])
 

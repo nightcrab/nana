@@ -4,16 +4,6 @@
 #include <cstdint>
 #include <random>
 
-// cheap seeds for reseeding simulation RNGs.
-// RNG::new_seed() constructs a std::random_device per call, which on Linux can mean a
-// syscall or a slow, chip-wide RDSEED; the search reseeds on every simulation restart,
-// which made the root's owner a serial bottleneck. this draws from a per-thread
-// splitmix64 that only touches std::random_device once per thread.
-//
-// fast_seed_reset(seed) makes it deterministic: every thread restarts from seed, mixed with the
-// order threads first draw after the reset. with one search thread (and the main thread), a game
-// then replays exactly, which tuner/ relies on to compare configs on the same games.
-// fast_seed_reset(0) goes back to random_device.
 namespace fast_seed_detail {
 inline std::atomic<uint64_t> base{ 0 };
 inline std::atomic<uint64_t> epoch{ 0 };

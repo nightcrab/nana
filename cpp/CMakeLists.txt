@@ -7,7 +7,6 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris/game)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris/bot)
 
-# only for its source list: the engine cores below compile ShakTris themselves, once per ISA level
 add_subdirectory("Tetris/game/ShakTrisLib" EXCLUDE_FROM_ALL)
 get_target_property(SHAKTRIS_DIR ShakTris SOURCE_DIR)
 get_target_property(SHAKTRIS_SOURCES ShakTris SOURCES)
@@ -37,8 +36,6 @@ set(TETRIS_SOURCES
 set(NANA_ICON "icon.rc")
 
 
-# mimalloc for operator new/delete. glibc malloc grows per-thread heaps with mprotect,
-# which serialises on the process' mmap lock: it cost ~25% at 32 threads on Linux
 option(NANA_MIMALLOC "Use mimalloc for C++ allocations" ON)
 
 if(NANA_MIMALLOC)
@@ -52,13 +49,10 @@ if(NANA_MIMALLOC)
         GIT_TAG v3.5.4
         GIT_SHALLOW TRUE)
     FetchContent_MakeAvailable(mimalloc)
-    # Util/Allocator.cpp swaps in mimalloc's operator new/delete
     add_compile_definitions(NANA_MIMALLOC)
     link_libraries(mimalloc-static)
 endif()
 
-# the graphical nana_interactive needs X11, OpenGL and libpng on Linux;
-# turn it off to build only the bots and benches on a headless machine
 option(NANA_GUI "Build the graphical nana_interactive" ON)
 
 if(NANA_GUI AND UNIX AND NOT APPLE)
@@ -68,20 +62,12 @@ if(NANA_GUI AND UNIX AND NOT APPLE)
 endif()
 
 
-# Nana is built for an ISA level picked by -march (native, x86-64, x86-64-v3, znver5, ...).
-# NANA_MARCH is the level of the benches, the emulator and the interactive build.
-# NANA_VARIANTS builds tbp_tetris once per listed level, as tbp_tetris-<level>, and makes tbp_tetris
-# a launcher that runs the best one the CPU supports (launcher.cpp). For releases, e.g.
-# -DNANA_VARIANTS="znver5;x86-64-v3;x86-64"
 set(NANA_MARCH "native" CACHE STRING "-march for the benches, emulator and interactive build")
 set(NANA_VARIANTS "" CACHE STRING "ISA levels to build tbp_tetris for, behind a launcher")
-# the levels launcher.cpp can detect
 set(NANA_KNOWN_VARIANTS znver5 znver4 x86-64-v4 x86-64-v3 x86-64-v2 x86-64)
 
-# the compile options for an ISA level
 function(nana_arch_flags out march)
     if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        # cl.exe has no -march, only the nearest /arch
         if(march MATCHES "^(x86-64-v4|znver[45])$")
             set(${out} "/arch:AVX512" PARENT_SCOPE)
         elseif(march MATCHES "^(native|x86-64-v3)$")
@@ -96,11 +82,9 @@ function(nana_arch_flags out march)
     endif()
 endfunction()
 
-# Nana's and ShakTris' sources for one ISA level, linked into each executable that uses them
 function(nana_add_core name march)
     add_library(${name} OBJECT ${TETRIS_SOURCES} ${SHAKTRIS_SOURCES})
     nana_arch_flags(flags ${march})
-    # public: the executable's own source is built for the same level
     target_compile_options(${name} PUBLIC ${flags})
     target_include_directories(${name} PUBLIC ${SHAKTRIS_DIR})
     set_property(TARGET ${name} PROPERTY CXX_STANDARD 23)
@@ -120,13 +104,10 @@ if(NANA_GUI)
     nana_add_executable(nana_interactive nana_core "interactive.cpp")
 endif()
 nana_add_executable(nana_bench nana_core_bench "bench.cpp")
-# the same bench without the NANA_BENCH profiling; prints only simulations / second
 nana_add_executable(nana_speed nana_core "bench.cpp")
 nana_add_executable(nana_msgbench nana_core "msgbench.cpp")
 nana_add_executable(nana_emulate nana_core "emulate.cpp")
-# nana_emulate's games played by any TBP bot (Cold Clear, or nana's own tbp_tetris)
 nana_add_executable(nana_emulate_tbp nana_core "emulate_tbp.cpp")
-# scores positions with the ported Cold Clear eval, for cold-clear's eval_dump to check
 nana_add_executable(nana_eval_dump nana_core "eval_dump.cpp")
 
 option(NANA_STATCHECK "Build exact-reference sampling and backup diagnostics" OFF)
@@ -142,6 +123,17 @@ if(NANA_SEARCHCHECK)
     nana_add_executable(nana_searchcheck nana_core_searchcheck "searchcheck.cpp")
 endif()
 
+# nana_cctree: the CC search's whole tree on one position, for scripts/cc_tree_compare.py to set
+# against Cold Clear's. NANA_CCTREE_LOAD_FACTOR 1 runs one simulation at a time, as Cold Clear does on one thread
+option(NANA_CCTREE "Build nana_cctree, CC-search tree dumps for comparing with Cold Clear" OFF)
+set(NANA_CCTREE_LOAD_FACTOR 1 CACHE STRING "jobs in flight in nana_cctree's search")
+if(NANA_CCTREE)
+    nana_add_core(nana_core_cctree ${NANA_MARCH})
+    target_compile_definitions(nana_core_cctree PUBLIC NANA_CC_SEARCH=1 NANA_CC_LOCKSTEP=1
+        NANA_LOAD_FACTOR=${NANA_CCTREE_LOAD_FACTOR})
+    nana_add_executable(nana_cctree nana_core_cctree "cctree.cpp")
+endif()
+
 if(NANA_VARIANTS)
     foreach(variant IN LISTS NANA_VARIANTS)
         if(NOT variant IN_LIST NANA_KNOWN_VARIANTS)
@@ -152,7 +144,6 @@ if(NANA_VARIANTS)
         target_compile_definitions(tbp_tetris-${variant} PRIVATE TBP TBP2)
     endforeach()
 
-    # built for the compiler's default level, so it runs anywhere
     add_executable(tbp_tetris "launcher.cpp" "Tetris/bot/Config.cpp" ${NANA_ICON})
     list(JOIN NANA_VARIANTS "," variants)
     target_compile_definitions(tbp_tetris PRIVATE "NANA_VARIANTS=\"${variants}\"")

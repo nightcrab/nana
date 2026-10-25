@@ -1,6 +1,4 @@
 #pragma once
-// Only the optional searchcheck core includes this adapter. Scheduling, selection,
-// restart replay, virtual loss, message handling, and backups remain production code.
 #include <array>
 #include <atomic>
 #include <cstdint>

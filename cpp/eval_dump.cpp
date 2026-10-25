@@ -1,8 +1,4 @@
-// Positions and their scores under Eval::eval_CC_standard, to check the port against Cold Clear's own
-// evaluator (cold-clear's eval_dump, which reads these lines). Plays seeded games greedily with the
-// ported eval and, before every move, writes the position and the score of each placement of the
-// current piece (no hold): "value" the board's score and "acc" the move's reward, in Cold Clear's units.
-//
+// dumps positions scored by Eval::eval_CC_standard, to check the port against Cold Clear
 // usage: nana_eval_dump [--games K] [--seed S] [--pieces P]
 
 #include "EmulateCommon.hpp"

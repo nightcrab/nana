@@ -27,7 +27,6 @@
 #include <x86intrin.h>
 #endif
 #ifdef NANA_BENCH
-// time spent in rollout (expansion + eval), which runs inside SELECT and EXPAND jobs
 static thread_local uint64_t tl_rollout_cycles = 0;
 static thread_local uint64_t tl_rollout_count = 0;
 #endif
@@ -82,17 +81,12 @@ bool Search::initialised = false;
 int Search::time = 0;
 Search::FlushStats Search::flush_stats;
 
-// jobs in flight per worker
 #ifndef NANA_LOAD_FACTOR
 #define NANA_LOAD_FACTOR 6
 #endif
 constexpr int LOAD_FACTOR = NANA_LOAD_FACTOR;
 
-// selects past this depth are treated as leaves; a safety net for cycles in the state graph
 constexpr size_t MAX_PATH_DEPTH = 64;
-// nodes this many moves below the root are leaves: config depth_cap, or NANA_DEPTH_CAP for builds
-// that fix it (strength variants), or the environment variable NANA_DEPTH_CAP in builds that don't
-// (measurement: one binary for a sweep); 0 = no cap
 #ifndef NANA_DEPTH_CAP
 #define NANA_DEPTH_CAP 0
 #endif
@@ -109,20 +103,11 @@ static size_t leafDepth() {
     return depth;
 }
 
-// 1 = MP-MCTS: backprops stop and restart selection where every ancestor would choose the same path.
-// 0 = TDS-UCT: every backprop goes to the root
 #ifndef NANA_MPMCTS
 #define NANA_MPMCTS !NANA_CC_SEARCH
 #endif
 static_assert(!cc_search || !NANA_MPMCTS, "the CC search needs NANA_MPMCTS=0: its restarts assume PUCT");
 
-// leaky gate for MP-MCTS restarts (notes/leaky-gate-mp-mcts.md): a leak carries a backprop on up
-// although every ancestor would still choose its path, delivering what's parked below them.
-// when a would-be restart leaks:
-// 0 = never
-// 1 = with probability NANA_LEAK_P
-// 2 = once the node's parked visits would reach NANA_LEAK_K
-// 3 = once they'd reach NANA_LEAK_EPS x the node's visits (0 = always: every backprop reaches the root)
 #ifndef NANA_LEAK
 #define NANA_LEAK 0
 #endif
@@ -136,41 +121,18 @@ static_assert(!cc_search || !NANA_MPMCTS, "the CC search needs NANA_MPMCTS=0: it
 #define NANA_LEAK_EPS 0.05
 #endif
 
-// a restart at node X parks its reward for X's parent edge, and the root's edge to its favoured
-// child only gets the parked results when the root's choice moves away from that child. so when a
-// search ends, the root's statistics (which bestMove reads) can miss much of the search, and tree
-// reuse starts the next search from them. like TDS-df-UCT forcing every job back to the root when
-// its search ends (Yoshizoe et al. 2011), at the end of each search (workers stopped):
-// 0 = leave the buffers parked (the original behaviour)
-// 1 = walk every parked buffer up its parent chain to the root first
-// 2 = only measure what that would change (Search::flush_stats), leave the buffers parked
 #ifndef NANA_FLUSH_AT_END
 #define NANA_FLUSH_AT_END 1
 #endif
 
-// restarts in a stochastic game: "every ancestor would choose the same edge" only means a fresh
-// select would take the same moves. the chance between them (the next piece past the preview, the
-// opponent's garbage, both in the hash) could still take it to other nodes, and the state a restart
-// resumes from (the job's snapshot) is one sampled future: the hidden queue, the opponent's stack.
-// so on restart:
-// 1 = replay the path's moves from the search root with fresh chance, as a fresh select would. if it
-//     reaches the restart node, restart there with the replayed state; if it leaves the path at
-//     depth k, send a SELECT with the replayed state to the node it reached, and a FLUSH that carries
-//     this result and the abandoned buffers up to depth k - 1. a node's moves must then be legal in
-//     any state reaching it: NANA_HASH_QUEUE_FRONT
-// 0 = resume from the snapshot (the original behaviour)
 #ifndef NANA_REPLAY_RESTART
 #define NANA_REPLAY_RESTART 1
 #endif
 static_assert(!NANA_REPLAY_RESTART || NANA_HASH_QUEUE_FRONT, "NANA_REPLAY_RESTART needs NANA_HASH_QUEUE_FRONT");
 
-// the search root as the workers start (root_state's rng is reseeded by workers on root backprops)
 static EmulationGame replay_root(false);
 static uint32_t replay_root_hash = 0;
 
-// play the job's path from the search root with fresh chance. returns the depth of the first node
-// the replay doesn't reach (path.size() + 1 if it reaches restart_hash after the whole path), with
-// the replayed state at that depth in state
 [[maybe_unused]] static size_t replayPath(const Job& job, uint32_t restart_hash, EmulationGame& state) {
     state = replay_root;
     state.start_from_root();
@@ -187,32 +149,13 @@ static uint32_t replay_root_hash = 0;
     return depth + 1;
 }
 
-// load balancing is lock-free work requesting: each node is only touched by its owner,
-// so the only work that can move between threads is a rollout (expansion + eval).
-// owners queue rollouts for new leaves, and threads running low ask others for one.
-
-// work requesting: queued work is scored in work units, a queued message being 1.
-// the thresholds are in the same units, so they can be tuned together.
-// they only decide which thread runs a rollout and when, not what the search computes,
-// so they're safe to tune for throughput. each can be overridden by an environment
-// variable (NANA_LOW_WATER=60 etc., see loadTuning), read when a search starts.
 struct RequestTuning {
-    // a queued message
     int message_weight = 1;
-    // a rollout (expansion + eval): about 30 messages' worth on the bench profile
     int rollout_weight = 30;
-    // ask for work once our queued work drops below this; we ask before running dry,
-    // so the answer arrives while we're still busy
     int low_water = 30;
-    // give a rollout away if, without it, we'd still have this much more work than the requester
     int give_margin = 3;
-    // after a REQUEST comes back unanswered, go round the loop this many times before asking again
     int backoff_iterations = 64;
 
-    // who to ask: score each thread by the load it last reported, minus this penalty if it
-    // shares a different L3 cache (chiplet) than the requester, since the rollout's data
-    // would then cross chiplets; keep the best steal_topk and sample one with Gumbel-max
-    // at steal_temperature (0 = always the best)
     int steal_chiplet_penalty = 30;
     int steal_topk = 4;
     int steal_temperature = 10;
@@ -251,13 +194,6 @@ static void loadTuning() {
     tuning.steal_topk = std::clamp(tuning.steal_topk, 1, MAX_STEAL_TOPK);
 }
 
-// what a rollout is worth. kill (the default): with r our own score (APP and eval, squashed into
-// [0, 1) by x / (x + scale)) and K the expected discounted kill of the opponent (along the path,
-// then the HMM's death_value from the leaf), the value is K' + (1 - K') r with K' = (1 - lambda) K:
-// a kill is worth 1, less lambda of the way back to r. app: APP and eval only, the opponent's death
-// ignored, for the APP strength benchmarks. set from the environment when a search starts:
-// NANA_REWARD=kill|app, NANA_REWARD_SCALE, NANA_KILL_LAMBDA, NANA_KILL_DISCOUNT (only when the HMM
-// has no fitted discount, as with the placeholder model)
 struct RewardTuning {
     bool app_only = NANA_SUFFIX;
     float scale = 0.25f;
@@ -280,7 +216,6 @@ static void loadRewardTuning() {
         reward_tuning.app_only = std::strcmp(text, "app") == 0;
     }
     auto read = [](const char* name, float& value) {
-        // an empty variable counts as unset (atof would read it as 0)
         if (const char* text = std::getenv(name); text && *text) {
             value = (float)std::atof(text);
         }
@@ -290,8 +225,6 @@ static void loadRewardTuning() {
     read("NANA_KILL_DISCOUNT", reward_tuning.discount);
 }
 
-// carry the HMM opponent on from what the caller knows of the real one, if anything, and publish the
-// belief for the simulations to sample from; otherwise the opponent starts fresh
 static void adoptOpponentBelief(EmulationGame& root) {
     markov::root_belief.active = false;
     if (Search::root_opponent) {
@@ -300,7 +233,6 @@ static void adoptOpponentBelief(EmulationGame& root) {
     }
 }
 
-// count the opponent's death from the search root, in the discount the reward uses
 static void resetKill(EmulationGame& root) {
     loadRewardTuning();
     const float fitted = markov::params().discount;
@@ -312,14 +244,9 @@ static void resetKill(EmulationGame& root) {
     }
 }
 
-// NANA_SEARCH_GARBAGE=0 (comparison only; always so in the CC search): the opponent sends nothing in
-// the search, as Cold Clear assumes; garbage already on the meter still comes
 #ifndef NANA_SEARCH_GARBAGE
 #define NANA_SEARCH_GARBAGE 1
 #endif
-// NANA_PHANTOM_GARBAGE=1 with NANA_SEARCH_GARBAGE=0 (measurement): the attacks are still drawn and
-// hashed through a meter that never lands (EmulationGame::phantom_meter), so the tree splits as with
-// search garbage while the boards and values stay as without
 #ifndef NANA_PHANTOM_GARBAGE
 #define NANA_PHANTOM_GARBAGE 0
 #endif
@@ -329,22 +256,17 @@ static void searchGarbage(EmulationGame& root) {
         EmulationGame::deterministic_chance = true;
     }
     if constexpr (cc_search) {
-        // one future for the whole search, drawn here (not the real game's)
         EmulationGame::deterministic_chance = false;
         root.reseed_chance();
         EmulationGame::deterministic_chance = true;
     }
     if constexpr (!NANA_SEARCH_GARBAGE || cc_search) {
-        // the sampled opponent's attacks scaled to nothing
         root.garbage_scale = 0;
         root.phantom_garbage = NANA_PHANTOM_GARBAGE && !cc_search;
         root.phantom_meter.clear();
     }
 }
 
-// NANA_OPPONENT_ORACLE (measurement only, emulation): the search's opponent is the real game's,
-// hidden state and all, instead of the model's fresh one. simulations still draw fresh randomness, so
-// they sample its futures without the model's bias
 #ifndef NANA_OPPONENT_ORACLE
 #define NANA_OPPONENT_ORACLE 0
 #endif
@@ -353,7 +275,6 @@ static void searchOpponent(EmulationGame& root) {
         markov::root_belief.active = false;
     }
     else {
-        // the game's own opponent is the HMM, true state and all: the search starts from its model
         root.reset_opponent();
         adoptOpponentBelief(root);
     }
@@ -363,10 +284,6 @@ static void searchOpponent(EmulationGame& root) {
     }
 }
 
-// NANA_BELIEF_LOG (measurement only): every expansion's surprise, the leaf's best eval less what its
-// parent made of the board its move left, with the leaf's depth and the belief's prediction of the
-// opponent's next hidden state, one CSV line each to $NANA_BELIEF_LOG_FILE: what belief_weights should
-// predict, over the states the search explores
 #ifndef NANA_BELIEF_LOG
 #define NANA_BELIEF_LOG 0
 #endif
@@ -397,28 +314,16 @@ static void logBelief(const EmulationGame& state, size_t depth, float surprise) 
 }
 #endif
 
-// state private to one worker
 struct alignas(64) WorkerLocal {
-    // rollouts for new leaves we own, run when there are no messages or given away on request
     std::vector<Msg> pending;
-    // last load each thread told us about, piggybacked on their messages (work units)
     std::vector<int> load_view;
     bool request_outstanding = false;
-    // we ran out of work since our last REQUEST was sent
     bool ran_dry = false;
-    // loop iterations left before we may request again
     int request_backoff = 0;
 };
 
 static std::vector<WorkerLocal> worker_local;
 
-// NANA_DEPTH_BASELINE: some of what a leaf scores comes with time, not with the moves that got
-// there (garbage landing, a bad piece), so lines look worse the further they're expanded. a leaf
-// scores its eval less the mean step, at each depth down to it, from what the parent thought of the
-// board its move left to what the child scores: the time-driven part averages out, and each line
-// still pays for doing worse than the average step. paired (child against its own parent), so which
-// lines the search chose to deepen doesn't leak in. each worker keeps its own; the next search
-// shifts them up a ply and halves their weight
 #ifndef NANA_DEPTH_BASELINE
 #define NANA_DEPTH_BASELINE !NANA_CC_SEARCH
 #endif
@@ -428,7 +333,6 @@ struct alignas(64) DepthBaseline {
 
     float mean(size_t d) const { return count[d] > 0 ? (float)(sum[d] / count[d]) : 0.0f; }
 
-    // record a leaf at depth d scoring raw, and return what it scores instead
     float correct(size_t d, float raw, float parent_board) {
         d = std::min(d, MAX_PATH_DEPTH);
         sum[d] += raw - parent_board;
@@ -440,7 +344,6 @@ struct alignas(64) DepthBaseline {
         return raw - drift;
     }
 
-    // the root moved a piece down: depth d+1 of the last search is depth d of this one
     void shift() {
         for (size_t d = 0; d < MAX_PATH_DEPTH; d++) {
             sum[d] = sum[d + 1] * 0.5;
@@ -451,10 +354,6 @@ struct alignas(64) DepthBaseline {
 };
 static std::vector<DepthBaseline> depth_baseline;
 
-// a new root's edges start on the same footing as a new leaf's (level mode: the root is depth 0's
-// one sample; paired mode corrects nothing at depth 0)
-
-// which L3 cache (chiplet) each worker's core shares; workers are pinned by index
 static std::vector<int> worker_l3_group;
 
 static void resetWorkerLocal(int core_count) {
@@ -569,9 +468,6 @@ void Search::continueSearch(EmulationGame state) {
         uct.insertNode(UCTNode(state));
     }
     else if (uct.getNode(state.hash()).actionCount() == 0) {
-        // node hashes ignore garbage rows, so the tree may hold a node for another state with this
-        // hash that had no legal placement. kept as the root, the search would think we're lost and
-        // its jobs would end at the root: the real root's moves replace it
         UCTNode fresh(state);
         if (fresh.actionCount() > 0) {
             uct.getNode(state.hash()) = std::move(fresh);
@@ -612,7 +508,6 @@ void Search::continueSearch(EmulationGame state) {
     }
 }
 
-// the root edge bestMove would pick, with optional extra visits and rewards per edge
 static size_t mostVisited(const UCTNode& root, const std::vector<float>* extra_N = nullptr,
                           const std::vector<float>* extra_R = nullptr) {
     float biggest_N = 0;
@@ -630,10 +525,6 @@ static size_t mostVisited(const UCTNode& root, const std::vector<float>* extra_N
     return best;
 }
 
-// NANA_FLUSH_AT_END: every parked buffer belongs to all edges from its node's parent up to the
-// root. walk each one up the recorded parent chain, recording what reaches the root's edges and,
-// with apply, adding it to every edge on the way (as the backprops that never came would have).
-// only called with the workers stopped, so it may touch every shard
 static void flushParked(bool apply) {
     using Search::uct;
     const uint32_t root_hash = Search::root_state.hash();
@@ -658,7 +549,6 @@ static void flushParked(bool apply) {
     for (UCTNode* node : parked) {
         const float N = (float)node->N_buffer;
 #if NANA_EXPECTIMAX
-        // only visits are parked; the value is the node's own
         Reward R = node->value();
 #else
         Reward R = node->R_buffer;
@@ -696,7 +586,6 @@ static void flushParked(bool apply) {
         }
     }
 
-    // compare with the root as it was (with apply, the root already has the hidden visits)
     std::vector<float> minus_N(hidden_N.size()), minus_R(hidden_R.size());
     for (size_t i = 0; i < hidden_N.size(); i++) {
         minus_N[i] = -hidden_N[i];
@@ -731,7 +620,6 @@ void Search::endSearch() {
     for (auto& thread : worker_threads) {
 		thread.join();
 	}
-    // the real game, played between searches, has its own chance
     EmulationGame::deterministic_chance = false;
 
 
@@ -742,8 +630,6 @@ void Search::endSearch() {
     thread_stopper = std::stop_source();
 
     if constexpr (NANA_REPLAY_RESTART) {
-        // FLUSH messages still queued hold results that are in no buffer yet: deliver them first
-        // (workers are joined, so this thread may consume every queue)
         bool delivered = true;
         while (delivered) {
             delivered = false;
@@ -769,7 +655,6 @@ void Search::endSearch() {
     }
 
     queues.clear();
-    // rollouts still pending are dropped with the rest of the in-flight jobs
     worker_local.clear();
 
     //std::cout << "stopped searching" << std::endl;
@@ -829,7 +714,6 @@ void Search::printStatistics() {
         sum.depth_capped += s.depth_capped;
     }
 
-    // MP-MCTS
     uint64_t history_nodes = 0;
     uint64_t history_rows = 0;
     for (auto* side : { &uct.nodes_left, &uct.nodes_right }) {
@@ -851,8 +735,6 @@ void Search::printStatistics() {
     std::cout << "depth capped: " << sum.depth_capped << std::endl;
     std::cout << "nodes storing history: " << history_nodes << " (" << history_rows * sizeof(HistoryRow) / 1024 << " KiB)" << std::endl;
     std::cout << "deferred rollouts: " << sum.deferred << std::endl;
-    // every simulation ends in exactly one rollout, so this counts simulations even when
-    // MP-MCTS restarts skip select steps (which makes nodes / second incomparable)
     std::cout << "simulations / second: " << sum.deferred / (ms / 1000000) << std::endl;
     std::cout << "requests: " << sum.requests << std::endl;
     std::cout << "answered: " << sum.gave << std::endl;
@@ -865,10 +747,6 @@ void Search::printStatistics() {
 #endif
 
 #ifdef NANA_BENCH
-    // per-thread time split; wait includes polling and flushing the queues
-    // rollout (expansion + eval) runs inside select and expand jobs, so it overlaps those columns
-    // queue us: how long messages waited in this thread's queue; top: share of this thread's
-    // time spent selecting at the root or depth 1
     std::printf("thread    wait  select  backprop  expand   put | rollout |   jobs/s | ns/job: select backprop expand    put rollout | queue us   top\n");
     for (int i = 0; i < (int)uct.stats.size(); i++) {
         const WorkerStatistics& s = uct.stats[i];
@@ -878,7 +756,6 @@ void Search::printStatistics() {
         uint64_t jobs = 0;
         for (int t = 0; t < JOB_TYPE_COUNT; t++) jobs += s.job_count[t];
         auto pct = [&](uint64_t c) { return 100.0 * c / total; };
-        // the thread was alive for the whole search, so total cycles ~ ms
         auto ns = [&](int t) { return s.job_count[t] ? (double)s.job_cycles[t] / total * ms * 1000.0 / s.job_count[t] : 0.0; };
         double rollout_ns = s.rollout_count ? (double)s.rollout_cycles / total * ms * 1000.0 / s.rollout_count : 0.0;
         double queue_us = s.queue_count ? (double)s.queue_cycles / total * ms / s.queue_count : 0.0;
@@ -890,13 +767,11 @@ void Search::printStatistics() {
 #endif
 }
 
-// how much work this thread already has queued, in work units
 static int myLoad(int threadIdx) {
     return (int)worker_local[threadIdx].pending.size() * tuning.rollout_weight
         + (int)Search::queues[threadIdx]->buffered() * tuning.message_weight;
 }
 
-// every message carries the sender's load, so receivers learn everyone's load for free
 static void send(int from, int to, Msg&& msg) {
     msg->sender = (uint16_t)from;
     msg->sender_load = myLoad(from);
@@ -910,11 +785,6 @@ static uint64_t allThreadsMask() {
     return Search::core_count >= 64 ? ~0ull : (1ull << Search::core_count) - 1;
 }
 
-// pick which thread to ask for a rollout on the requester's behalf, from the candidates mask,
-// using the chooser's picture of everyone's load. score = reported load, minus a penalty for
-// a different L3 cache than the requester; keep the top k; then Gumbel-max sample among them,
-// i.e. pick with probability proportional to exp(score / temperature).
-// asking only unvisited threads each hop still visits every thread at most once
 static int chooseVictim(int chooser, int requester, uint64_t candidates) {
     const WorkerLocal& local = worker_local[chooser];
     const int n = Search::core_count;
@@ -926,8 +796,6 @@ static int chooseVictim(int chooser, int requester, uint64_t candidates) {
     Candidate top[MAX_STEAL_TOPK];
     int count = 0;
 
-    // start from a random thread so equal scores (e.g. all 0 at startup) aren't always
-    // resolved towards the lowest indices
     int start = (int)(fast_seed() % (uint32_t)n);
     for (int step = 0; step < n; step++) {
         int j = (start + step) % n;
@@ -938,13 +806,11 @@ static int chooseVictim(int chooser, int requester, uint64_t candidates) {
             score -= (float)tuning.steal_chiplet_penalty;
         }
 
-        // insert into the small top-k list, kept sorted best first
         int i;
         if (count < tuning.steal_topk) {
             i = count++;
         }
         else if (score > top[count - 1].score) {
-            // replaces the worst one kept
             i = count - 1;
         }
         else {
@@ -966,7 +832,6 @@ static int chooseVictim(int chooser, int requester, uint64_t candidates) {
     int chosen = top[0].thread;
     float best = -INFINITY;
     for (int i = 0; i < count; i++) {
-        // standard Gumbel noise from a uniform in (0, 1)
         float u = ((float)(fast_seed() >> 8) + 0.5f) * (1.0f / 16777216.0f);
         float value = top[i].score / (float)tuning.steal_temperature - std::log(-std::log(u));
         if (value > best) {
@@ -977,7 +842,6 @@ static int chooseVictim(int chooser, int requester, uint64_t candidates) {
     return chosen;
 }
 
-// ask for a rollout before we run out, so the answer lands while we're still busy
 static void maybeRequest(int threadIdx) {
     WorkerLocal& local = worker_local[threadIdx];
     if (local.request_outstanding || Search::core_count < 2) {
@@ -1005,17 +869,13 @@ static void maybeRequest(int threadIdx) {
     send(threadIdx, target, std::move(request));
 }
 
-// give a rollout if that evens out the load, otherwise pass the request on
 static void handleRequest(int threadIdx, Msg&& msg) {
     Job& request = *msg;
     WorkerLocal& local = worker_local[threadIdx];
     int requester = request.requester;
 
-    // without the rollout we give, we must still have give_margin more work than the requester,
-    // so work only flows downhill and can't bounce back and forth
     int requester_load = request.requester_load;
     if (!local.pending.empty() && myLoad(threadIdx) - tuning.rollout_weight >= requester_load + tuning.give_margin) {
-        // give away the oldest one
         Msg rollout = std::move(local.pending.front());
         local.pending.erase(local.pending.begin());
         rollout->is_reply = true;
@@ -1032,21 +892,17 @@ static void handleRequest(int threadIdx, Msg&& msg) {
 
     uint64_t unvisited = allThreadsMask() & ~request.visited;
     if (unvisited == 0) {
-        // everyone was asked
         request.type = NO_WORK;
         send(threadIdx, requester, std::move(msg));
         return;
     }
 
-    // same choice as the first hop, from our own picture of the load, scored for the requester
     int next = chooseVictim(threadIdx, requester, unvisited);
     request.visited |= 1ull << next;
     Search::uct.stats[threadIdx].forwards++;
     send(threadIdx, next, std::move(msg));
 }
 
-// tell the main thread a simulation has completed; it only needs telling once per search,
-// so later simulations skip the mutex entirely
 static void notifySimulationDone() {
     if (!min_work_bool.load(std::memory_order_relaxed)) {
         // extra scope to prevent notifying the main thread while holding the lock
@@ -1060,11 +916,9 @@ static void notifySimulationDone() {
 }
 
 void Search::processJob(const int threadIdx, Msg&& msg) {
-    // the job lives on the heap and belongs to whoever holds msg: don't touch it after sending
     Job& job = *msg;
 
     if (job.type == FLUSH) {
-        // path.back() is the node whose edge gets the carried result; the last entry is the top
         uct.stats[threadIdx].flushes++;
         UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
         EdgeStats& edge = node.stats(job.path.back().actionID);
@@ -1076,8 +930,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         edge.N += job.extra_N;
         node.N += job.extra_N;
         if (job.path.size() == 1) {
-            // the top: the diverged select's virtual visit goes through this edge too, and the
-            // ancestors above still owe all of it, so park it here
             edge.N += 1;
             node.N += 1;
             if (node.id != replay_root_hash) {
@@ -1089,7 +941,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             return;
         }
         job.child_hash = job.path.back().hash;
-        // this node is being left too: its own parked results belong to the edge above
         job.R += node.R_buffer;
         job.extra_N += node.N_buffer;
         node.R_buffer = Reward{};
@@ -1112,7 +963,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
     }
 
     if (job.type == NO_WORK) {
-        // nobody had a rollout to spare
         WorkerLocal& local = worker_local[threadIdx];
         local.request_outstanding = false;
         local.request_backoff = tuning.backoff_iterations;
@@ -1132,8 +982,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.is_reply = false;
         }
 
-        // a rollout task: it may not be our state, so don't look it up; treat it as a leaf.
-        // rollout sends the new node to its owner, and the reward goes to the parent's owner
         uct.stats[threadIdx].nodes++;
 
         Reward reward = rollout(job.state, threadIdx, job.path.size(), job.parent_board);
@@ -1158,8 +1006,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         int depth = state.pieces;
 
         uint32_t hash = state.hash();
-        // A diverged restart replay can arrive with the abandoned backprop's child_hash.
-        // Terminal and newly expanded leaves must report the state they actually reached.
         job.child_hash = hash;
 
         if (state.game_over) {
@@ -1167,7 +1013,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             Reward reward = rollout(state, threadIdx, job.path.size(), job.parent_board);
 
             if (job.path.empty()) {
-                // the root itself is lost: nothing to search, but don't leave endSearch waiting
                 notifySimulationDone();
                 return;
             }
@@ -1176,7 +1021,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             uint32_t parentIdx = uct.getOwner(parent_hash);
 
-            // reuse this job as the backprop job and send it back to our parent
             job.R = reward;
             job.extra_N = 0;
             job.depth = state.pieces;
@@ -1189,7 +1033,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         bool exists = uct.nodeExists(hash);
         if (exists && job.path.size() >= leafDepth()) {
-            // safety net for cycles: treat it as a leaf
             uct.stats[threadIdx].depth_capped++;
             exists = false;
         }
@@ -1206,7 +1049,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             }
 
             if (node.actionCount() == 0) {
-                // no legal placement: lost, like topping out. run it again as a terminal state
                 state.game_over = true;
                 send(threadIdx, threadIdx, std::move(msg));
                 return;
@@ -1224,12 +1066,10 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             }
 #endif
 
-            // MP-MCTS: busy nodes keep the freshest history for the path that reached them
             if (NANA_MPMCTS && node.N >= HISTORY_MIN_VISITS) {
                 node.history = job.history;
             }
 
-            // MP-MCTS with PUCT: the select scan also collects the history row's competitors
             constexpr bool single_pass = NANA_MPMCTS;
             if constexpr (single_pass) {
                 action = node.selectWithCompetitors(depth, row);
@@ -1249,10 +1089,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             node.updateTime(action, time);
 
-            // remember how this choice looked, and where we were, in case we restart here
             if constexpr (NANA_MPMCTS) {
                 if constexpr (single_pass) {
-                    // the competitors came from the select scan; the rest is after the virtual loss
                     row.hash = hash;
                     row.chosen = (uint32_t)action;
                     row.node_N = node.N;
@@ -1296,7 +1134,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             // Get the owner of the updated state based on the hash
             uint32_t ownerIdx = uct.getOwner(new_hash);
 
-            // reuse this job for the next select step
             job.path.push_back(HashActionPair(hash, (int)action));
 
             uct.stats[threadIdx].deepest_node = std::max(uct.stats[threadIdx].deepest_node, (uint64_t)job.path.size());
@@ -1304,8 +1141,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             send(threadIdx, ownerIdx, std::move(msg));
         }
         else {
-            // a new leaf we own: queue its rollout so an idle thread can ask for it.
-            // whoever runs it sends the reward to the parent's owner
             uct.stats[threadIdx].deferred++;
             job.type = EXPAND;
             worker_local[threadIdx].pending.push_back(std::move(msg));
@@ -1317,18 +1152,14 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
         EdgeStats& edge = node.stats(job.path.back().actionID);
 
-        // Undo Virtual Loss by adding R. from here on, reward is what goes to the parent's edge
         Reward reward = job.R;
-        // the CC search: this node's value didn't change, so nothing above it does
         [[maybe_unused]] bool settled = false;
 #if NANA_EXPECTIMAX
-        // the child's value replaces its last at this edge; ours goes up
         reward = node.report(job.path.back().actionID, job.child_hash, job.R, 1.0f + job.extra_N, true);
 #elif NANA_SUFFIX
         reward = node.climb(job.path.back().actionID, reward, false);
 #else
         if constexpr (cc_search) {
-            // the edge is worth its move's reward plus its child's value, and this node its best edge
             const float before = node.ccValue();
             edge.R = reward <= CC_DEAD ? CC_DEAD : node.cold[job.path.back().actionID].move_reward + reward;
             reward = node.ccValue();
@@ -1339,11 +1170,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 #endif
 
-        // simulations that restarted below us weren't counted on the way down
         edge.N += job.extra_N;
         node.N += job.extra_N;
 
-        // from here on R is this node's value
         job.child_hash = job.path.back().hash;
         job.path.pop_back();
         if (!job.moves.empty()) {
@@ -1357,13 +1186,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             if (job.path.empty()) {
                 uct.stats[threadIdx].root_backprops++;
             }
-            // (a CC search backprop that settled below the root stops there: its selection draws
-            // from the root again, as a restart further down would oversample this subtree)
             job.path.clear();
 
-            // reuse this job for a fresh select from the root;
-            // copy-assigning keeps the existing vector capacity. the copy gets fresh randomness and
-            // its own draw of the opponent: workers never write the shared root_state
             job.state = root_state;
             job.state.start_from_root();
             job.R = Reward{};
@@ -1376,8 +1200,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             notifySimulationDone();
 
-            // A settled CC backup may stop below the root, on a different shard's owner.
-            // Fresh selection must return to the root's owner before accessing its node.
             if constexpr (cc_search) {
                 send(threadIdx, uct.getOwner(root_state.hash()), std::move(msg));
             }
@@ -1389,7 +1211,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 
         if constexpr (!NANA_MPMCTS) {
-            // what goes to the parent's edge (the same reward, unless the backup changes it on the way)
             job.R = reward;
             send(threadIdx, uct.getOwner(job.path.back().hash), std::move(msg));
             return;
@@ -1399,9 +1220,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         EmulationGame here = std::move(job.snapshots.back());
         job.snapshots.pop_back();
 
-        // MP-MCTS: would every ancestor still send a simulation down to us?
-        // take the history rows for our path, preferring the fresher copies this node keeps,
-        // and update them as if this reward had gone all the way up
         static thread_local std::vector<HistoryRow> rows;
         rows = job.history;
         for (size_t i = 0; i < rows.size() && i < node.history.size(); i++) {
@@ -1413,7 +1231,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         bool still_chosen = true;
 #if NANA_SUFFIX
-        // each ancestor's edge would get the reward plus the moves between, whose steps are on the job
         {
             Return v = reward;
             for (size_t j = rows.size(); j-- > 0;) {
@@ -1435,11 +1252,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 #endif
 
-        // visits this node would have parked, counting this one, if it restarted here
         [[maybe_unused]] const int parked = node.N_buffer + job.extra_N + 1;
         bool leak = false;
         if constexpr (NANA_LEAK == 1) {
-            // getRand(n) is (16-bit draw * n) >> 16 in 32 bits, so n must stay at or below 2^16
             constexpr uint32_t scale = 1u << 16;
             leak = still_chosen && uct.rng[threadIdx].getRand(scale) < (uint32_t)(NANA_LEAK_P * scale);
         }
@@ -1454,18 +1269,11 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 
         if (still_chosen && !leak) {
-            // the ancestors would just send a simulation straight back here, so start it here.
-            // park the reward for the next backprop that leaves this node, plus a visit for
-            // the restarted simulation, which the ancestors haven't counted
-            // (NANA_EXPECTIMAX parks only the visits: whichever backprop leaves here next carries
-            // this node's value as it is then)
             if constexpr (!NANA_EXPECTIMAX) {
                 node.R_buffer += reward;
             }
             node.N_buffer += job.extra_N + 1;
 
-            // the restarted simulation is also a visit through every ancestor in the history,
-            // otherwise their Q never moves and we'd restart here forever
             for (HistoryRow& row : rows) {
                 row.edges[0].N += 1;
                 row.node_N += 1;
@@ -1474,9 +1282,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             uct.stats[threadIdx].restarts++;
             uct.stats[threadIdx].restart_depth += job.path.size();
 
-            // a simulation finished here too. when every ancestor keeps its choice (forced
-            // moves, or all alternatives lost) no backprop may reach the root for the rest of
-            // the search, and endSearch would wait forever
             notifySimulationDone();
 
             if (node.N >= HISTORY_MIN_VISITS) {
@@ -1490,12 +1295,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     left = replayPath(job, node.id, job.state);
                 }
                 else {
-                    // no move record to replay (shouldn't happen): restart from the snapshot
                     job.state = std::move(here);
                 }
                 if (left <= depth) {
-                    // a fresh select would have left the path at depth `left`: undo the restart's
-                    // parking here and send this result, with what's parked, up to depth left - 1
                     if constexpr (!NANA_EXPECTIMAX) {
                         node.R_buffer -= reward;
                     }
@@ -1514,9 +1316,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     flush->path.assign(job.path.begin() + (left - 1), job.path.end());
                     send(threadIdx, uct.getOwner(flush->path.back().hash), std::move(flush));
 
-                    // the select carries on from the node the replay reached, keeping the
-                    // path above it (the rows already have its visit through those depths)
-                    // (erase, not resize: shrinking with resize needs default-constructible elements)
                     job.path.erase(job.path.begin() + left, job.path.end());
                     job.moves.erase(job.moves.begin() + left, job.moves.end());
                     job.steps.erase(job.steps.begin() + std::min(left, job.steps.size()), job.steps.end());
@@ -1546,7 +1345,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.extra_N = 0;
             job.type = SELECT;
 
-            // we own this node, so the select starts with us
             send(threadIdx, threadIdx, std::move(msg));
             return;
         }
@@ -1555,7 +1353,6 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             node.history = rows;
         }
 
-        // carry up anything parked here
         job.R = reward + node.R_buffer;
         job.extra_N += node.N_buffer;
         node.R_buffer = Reward{};
@@ -1578,11 +1375,9 @@ void Search::maybeInsertNode(UCTNode node, const int threadIdx) {
 }
 
 void Search::search(std::stop_token stop, const int threadIdx) {
-    // one worker per physical core before any core gets two
     pinThreadToCore(threadIdx);
 
 #ifdef NANA_BENCH
-    // accumulate locally and publish on exit, so profiling doesn't add shared writes
     struct Profile {
         WorkerStatistics& out;
         WorkerStatistics local;
@@ -1628,7 +1423,6 @@ void Search::search(std::stop_token stop, const int threadIdx) {
         }
 
         if (simulation_limit != 0 && simulationsSoFar() >= simulation_limit) {
-            // endSearch waits for a finished simulation, which a tiny budget may not have yet
             {
                 std::scoped_lock lock(min_work_mutex);
                 min_work_bool = true;
@@ -1650,7 +1444,6 @@ void Search::search(std::stop_token stop, const int threadIdx) {
 
         maybeRequest(threadIdx);
 
-        // messages first: they're cheap, and other threads' simulations wait on them
         if (has_message) {
             Msg msg = queues[threadIdx]->dequeue();
             Job& job = *msg;
@@ -1659,11 +1452,9 @@ void Search::search(std::stop_token stop, const int threadIdx) {
             }
 #ifdef NANA_BENCH
             if (job.sent_at) {
-                // TSCs are synchronised across cores on current x86; clamp in case they aren't quite
                 int64_t queued = (int64_t)(__rdtsc() - job.sent_at);
                 profile.local.queue_cycles += queued > 0 ? queued : 0;
                 profile.local.queue_count++;
-                // jobs are reused; only time them again if they go through send()
                 job.sent_at = 0;
             }
 #endif
@@ -1673,7 +1464,6 @@ void Search::search(std::stop_token stop, const int threadIdx) {
             run(std::move(msg), t0);
         }
         else if (!local.pending.empty()) {
-            // our own newest rollout, while its state is still in cache
             Msg msg = std::move(local.pending.back());
             local.pending.pop_back();
             run(std::move(msg), t0);
@@ -1716,7 +1506,6 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
     }
 #endif
 
-    // NANA_SUFFIX: nothing lies below a leaf yet, so only its eval (or its death) goes up
     [[maybe_unused]] const Return dead{ 0, 0, 0, 1, 1 };
 
     if (state.game_over) {
@@ -1735,7 +1524,6 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
         max_eval = std::max(max_eval, node.eval(i));
     }
 
-    // no legal placement: as lost as topping out
     const bool stuck = node.actionCount() == 0;
 
 #if NANA_BELIEF_LOG
@@ -1752,8 +1540,6 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
 
 #if !NANA_SUFFIX && !NANA_EXPECTIMAX
     if constexpr (cc_search) {
-        // Cold Clear's expansion: the node is worth its best move's eval (the move's reward and the
-        // board it leaves), dead if it has none
         float value = CC_DEAD;
         for (size_t i = 0; i < node.actionCount(); i++) {
             value = std::max(value, node.eval(i));
@@ -1764,7 +1550,6 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
 #endif
 
 #if NANA_EXPECTIMAX
-    // the node is worth its rollout until its arms have results back
 #if NANA_SUFFIX
     const Reward value = stuck ? dead : Return{ 0, 0, max_eval, 1, 0 };
 #else
@@ -1793,7 +1578,6 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
 }
 
 #if !NANA_SUFFIX
-// a leaf's reward, from the game so far and the best eval among its moves
 float Search::leafReward(EmulationGame& state, float max_eval) {
     float reward = 0;
     static const NanaConfig& c = config();
@@ -1806,7 +1590,6 @@ float Search::leafReward(EmulationGame& state, float max_eval) {
         return reward;
     }
 
-    // a spike the opponent hasn't tanked yet
     if (state.opponent_jeopardy() > 15) {
         reward += state.opponent_jeopardy() / 20;
     }
@@ -1828,7 +1611,6 @@ Move Search::bestMove() {
     for (size_t i = 0; i < root.actionCount(); i++) {
         const EdgeStats& action = root.stats(i);
         if constexpr (cc_search) {
-            // Cold Clear plays the best value, not the most visited
             if (best_move.null_move || action.R > biggest_R) {
                 biggest_R = action.R;
                 best_move = root.move(i);

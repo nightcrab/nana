@@ -7,14 +7,10 @@
 #include <ostream>
 #include <queue>
 
-// node hashes include the next piece when nothing is held: holding then plays that piece, so it
-// decides the node's moves. 0 = leave it out (the original hash, under which one node can stand for
-// states with different hold placements)
 #ifndef NANA_HASH_QUEUE_FRONT
 #define NANA_HASH_QUEUE_FRONT 1
 #endif
 
-// Diagnostic builds only: preserve the real future instead of sampling it.
 #ifndef NANA_FUTURE_ORACLE
 #define NANA_FUTURE_ORACLE 0
 #endif
@@ -28,17 +24,10 @@ static_assert(!NANA_ORACLE_RANDOM_HOLES || (NANA_FUTURE_ORACLE && NANA_SEPARATE_
               "random-hole oracle requires future oracle and separate hole RNG");
 
 // analogous to an APM survival mode
-// simulates a versus game against the opponent HMM (MarkovOpponent)
 class EmulationGame {
    public:
-    // plays TETR.IO rules (set_tetrio_rules), or with NANA_RULES=botris Botris damage and the
-    // original garbage rules
-    // Search placeholders skip rule loading before the executable selects its configuration.
     explicit EmulationGame(bool apply_rules = true);
-    // the ruleset games are played with: "tetrio" or "botris" (from NANA_RULES, or TBP configuration)
     static const char* rules();
-    // the garbage delay new games start with: TBP rules' garbage_delay (set_garbage_delay), else
-    // NANA_GARBAGE_DELAY, else the ruleset's (0 for tetrio, 1 for botris)
     static int default_garbage_delay();
     static void set_garbage_delay(int delay);
 
@@ -49,18 +38,10 @@ class EmulationGame {
     int fixture_action = 0;
 #endif
 
-    // turns an attack spends in transit before it joins the receiver's meter, as in the stadium's
-    // VersusGame: 0 lands it the turn it's sent. under TETR.IO rules our attacks wait as long, and
-    // garbage in transit can be cancelled; botris (default 1) only delays the opponent's
     int garbage_delay = 0;
-    // the opponent's attacks in transit: [i] joins the meter i + 1 chance_moves from now
     std::vector<int> buffered_garbage;
-    // ours (TETR.IO rules): [i] reaches the opponent i + 1 chance_moves from now, after its piece
     std::vector<int> outgoing_garbage;
     std::vector<int> garbage_meter;
-    // NANA_PHANTOM_GARBAGE (measurement): the meter the search's sampled opponent attacks would fill
-    // if they weren't scaled to nothing. it cancels and tanks like the real one but never lands, and
-    // the hash includes it: the tree splits as with search garbage while every board stays without
     bool phantom_garbage = false;
     std::vector<int> phantom_meter;
 
@@ -83,41 +64,22 @@ class EmulationGame {
         }
         return rng.getRand(Board::width);
     }
-    // the opponent
     MarkovOpponent markov;
-    // the search's belief over the HMM opponent's hidden state, filtered along each simulation from
-    // what we'd see of it (our attack, whether we cleared, the garbage that landed), as OpponentFilter
-    // does in real play. set on the search root, carried by every copy
     bool track_belief = false;
     OpponentFilter belief;
 
-    // TETR.IO damage (TetrioS1, the same table as the stadium's TetrioStats), and with it the
-    // stadium's rules (Universal-Shaktris-Stadium's VersusGame): only T-spins, scored as the
-    // stadium validates them (see placements), an attack cancels the meter and then garbage in
-    // transit, and a piece that clears no lines tanks the whole meter at once (one hole), not 8 lines
     void set_tetrio_rules();
 
-    // the opponent's death along the search path, for the search's reward: kill_value is
-    // sum over its pieces t of P(alive before t) P(dies at t) discount^t, kill_survival P(alive now)
-    // and kill_weight discount^(pieces so far). the HMM gives P(dies at t) exactly (expected_death)
     float kill_value = 0;
     float kill_survival = 1;
     float kill_weight = 1;
     float kill_discount = 1;
-    // start counting from here; expected: the HMM plays on as if it survived and reports the odds
     void reset_kill(float discount, bool expected);
-    // the expected discounted kill, from the path and the HMM's death_value from here on
     float expected_kill() const;
 
-    // survival-mode garbage ramp: the opponent's garbage is scaled by
-    // 1 + ramp_pieces / garbage_ramp (0 = off). the search plays the same ramp
     int garbage_ramp = 0;
-    // pieces placed this game; unlike pieces, the search doesn't reset it at each root
     int ramp_pieces = 0;
-    // fraction of a line owed from scaling, so the ramp is exact without using the rng
     float ramp_carry = 0;
-    // the opponent's garbage times this (1 = as sent), before the ramp. tuner/ eases it for
-    // searches too weak to survive full pressure; the search plays the same scale
     float garbage_scale = 1;
 
     int pieces = 0;
@@ -127,9 +89,7 @@ class EmulationGame {
     // does not count cancelling
     int true_attack = 0;
 
-    // damage sent to the opponent by the last move, after cancelling, for logging
     int last_sent = 0;
-    // damage the opponent sent in the last chance_move, after the ramp, for logging
     int last_received = 0;
 
     bool game_over = false;
@@ -148,9 +108,6 @@ class EmulationGame {
     void play_moves();
     void objectively_play_moves();
 
-    // the placements of the current and hold pieces. under TETR.IO rules a T's spin is the one the
-    // stadium grants (its Game::validate_spin): the best a rotation onto the placement from a state
-    // reachable from spawn scores by the three-corner rule, and other pieces don't spin
     std::vector<Piece> placements() const;
     std::vector<Move> legal_moves();
 
@@ -160,20 +117,11 @@ class EmulationGame {
     double opponent_deaths() const;
     bool opponent_dead() const;
     void reset_opponent_rng();
-    // fresh chance for a simulation: a new seed, and the pieces left in the current bag in a new
-    // order (which pieces are left is known under seven-bag; their order isn't)
     void reseed_chance();
-    // set while the CC search (NANA_CC_SEARCH) runs: reseed_chance does nothing, so every simulation
-    // plays the one future the search root drew
     static inline bool deterministic_chance = false;
-    // a simulation starting from the search root: fresh randomness, and the HMM opponent's hidden
-    // state drawn from the root belief. on a copy of the root, never on the shared root itself
     void start_from_root();
-    // a fresh opponent
     void reset_opponent();
 
-    // one CSV row of what passed between us and the opponent this piece, after play_moves and
-    // chance_move: the training data for scripts/train_markov_opponent.py
     static void write_opponent_header(std::ostream& out);
     void write_opponent_step(std::ostream& out, uint64_t game_id) const;
 };

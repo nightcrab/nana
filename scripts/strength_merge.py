@@ -2,12 +2,7 @@
 """Merge strength_ladder.sh task outputs into one file per config.
 
     strength_merge.py DIR BASE_MS
-
-Reads DIR/parts/<config>-seed<seed>.jsonl, where config is t<threads>-x<multiple>-lf<load
-factor>[-v<variant>], and writes DIR/<config>.jsonl sorted by seed, with config, mult, base_ms,
-load_factor and variant ("" for the plain build) added to every game.
 """
-
 import collections
 import glob
 import json
@@ -23,13 +18,11 @@ def main():
         name = re.sub(r"-seed\d+\.jsonl$", "", os.path.basename(path))
         match = re.fullmatch(r"t(\d+)-x(\d+)-lf(\d+)(?:-v([\w.-]+))?", name)
         mult, lf, variant = int(match[2]), int(match[3]), match[4] or ""
-        # utf-8-sig: PowerShell's Out-File may start the file with a byte order mark
         for line in open(path, encoding="utf-8-sig"):
             if line.startswith("{"):
                 try:
                     game = json.loads(line)
                 except json.JSONDecodeError as error:
-                    # e.g. two processes wrote the file at once; drop the game rather than the run
                     print(f"skipping a corrupt line in {path}: {error}", file=sys.stderr)
                     continue
                 game.update(config=name, mult=mult, base_ms=base_ms, load_factor=lf, variant=variant)

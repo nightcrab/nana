@@ -1,17 +1,7 @@
-// survival benchmark for any TBP bot: nana_emulate's seeded games (same pieces, garbage holes and
-// emulated opponent per seed, via EmulateCommon.hpp), played by an external bot over TBP2 instead of
-// nana's own search, so other bots (Cold Clear) and nana itself can be compared on identical games.
-//
+// survival benchmark for any TBP bot, on nana_emulate's seeded games
 // usage: nana_emulate_tbp --bot PATH [--thinks N | --ms T] [--games K] [--seed S] [--max-pieces P]
 //                         [--threads N] [--cpu K] [--ramp R] [--garbage-scale X]
 //                         [--no-bag 1]  (start without the randomizer's bag state)
-//
-// --thinks N: exactly N thinks (search iterations) per move, sent as `thinks` in rules; the bot must
-// advertise set_thinks. otherwise --ms T: the bot gets T ms per move before `suggest`.
-// prints one JSON line per game to stdout (the fields nana_emulate prints that apply) and a summary
-// to stderr. the protocol: rules once, then per game start; each move suggest, then play and
-// new_piece, or a fresh start when the move tanked garbage (as the stadium does); stop between games
-// and quit at the end. a suggestion that isn't a legal placement ends the game as a loss.
 
 #include "EmulateCommon.hpp"
 #include "EmulationGame.hpp"
@@ -38,7 +28,6 @@
 #include <unistd.h>
 #endif
 
-// a bot's process, spoken to one JSON line at a time over its stdin and stdout
 class BotProcess {
    public:
     void start(const std::string& path) {
@@ -86,7 +75,6 @@ class BotProcess {
         close(from_child[1]);
         write_fd = to_child[1];
         read_fd = from_child[0];
-        // a bot that dies mid-write shouldn't kill us
         signal(SIGPIPE, SIG_IGN);
 #endif
     }
@@ -110,7 +98,6 @@ class BotProcess {
         }
     }
 
-    // the next line the bot writes
     std::string receive() {
         while (true) {
             const size_t end = pending.find('\n');
@@ -210,7 +197,6 @@ static const char* spinName(spinType s) {
     return s == spinType::normal ? "full" : s == spinType::mini ? "mini" : "none";
 }
 
-// TBP boards are 40 rows of 10, bottom row first (Cold Clear insists on all 40)
 static nlohmann::json boardJson(const Board& board) {
     nlohmann::json rows = nlohmann::json::array();
     for (int y = 0; y < 40; y++) {
@@ -246,7 +232,6 @@ static nlohmann::json playerJson(const EmulationGame& game) {
     return player;
 }
 
-// the emulated opponent has no board to show
 static nlohmann::json opponentJson() {
     nlohmann::json player;
     player["board"] = boardJson(Board{});
@@ -258,7 +243,6 @@ static nlohmann::json opponentJson() {
     return player;
 }
 
-// without the bag (--no-bag), Cold Clear doesn't speculate past the queue
 static bool send_bag = true;
 
 static nlohmann::json startJson(const EmulationGame& game) {
@@ -268,7 +252,6 @@ static nlohmann::json startJson(const EmulationGame& game) {
         start["opponents"] = nlohmann::json::array({ opponentJson() });
         return start;
     }
-    // which pieces are left in the bag after the queue, in a fixed order (theirs is the rng's secret)
     nlohmann::json bag = nlohmann::json::array();
     const auto left_begin = game.rng.bag.begin() + game.rng.bagiterator;
     for (PieceType type : { PieceType::S, PieceType::Z, PieceType::J, PieceType::L, PieceType::T, PieceType::O, PieceType::I }) {
@@ -290,8 +273,6 @@ static std::array<std::pair<int, int>, 4> cells(const Piece& piece) {
     return out;
 }
 
-// the legal placement the suggested move describes: same piece on the same cells. its spin is what the
-// game scores, the suggestion's if a placement there earns it, else the next lesser (full, mini, none)
 static bool legalPlacement(const EmulationGame& game, const nlohmann::json& suggested, Piece& out) {
     const nlohmann::json& location = suggested["location"];
     const PieceType type = pieceType(location["type"].get<std::string>());
@@ -311,14 +292,12 @@ static bool legalPlacement(const EmulationGame& game, const nlohmann::json& sugg
             rank++;
         }
         const int claimed_rank = claimed == spinType::normal ? 0 : claimed == spinType::mini ? 1 : 2;
-        // scored as claimed if possible, else as the best spin below the claim
         if (rank >= claimed_rank && rank < found_rank) {
             out = placement;
             found_rank = rank;
             found = true;
         }
         else if (!found && rank < claimed_rank) {
-            // only a better spin than claimed is available there: the placement still exists, unspun
             out = placement;
             out.spin = spinType::null;
             found_rank = 2;
@@ -404,7 +383,6 @@ static GameResult playGame(BotProcess& bot, EmulationGame& game, const Options& 
 
         Piece piece(PieceType::I);
         if (!suggestion.contains("moves") || suggestion["moves"].empty()) {
-            // no move: the bot forfeits
             result.died = true;
             break;
         }
@@ -416,7 +394,6 @@ static GameResult playGame(BotProcess& bot, EmulationGame& game, const Options& 
             break;
         }
 
-        // the board this move leaves without garbage: anything else means garbage landed
         Game expected = game.game;
         expected.place_piece(piece);
         expected.board.clearLines();
@@ -458,7 +435,6 @@ int main(int argc, const char** argv) {
             << " [--cpu K] [--ramp R] [--garbage-scale X]" << std::endl;
         return 1;
     }
-    // the bot inherits the cpu
     if (options.cpu >= 0 && !restrictProcessToCpu(options.cpu)) {
         std::cerr << "can't restrict the process to cpu " << options.cpu << std::endl;
         return 1;

@@ -7,7 +7,6 @@
     python -m tuner status NAME
     python -m tuner check NAME          health checks only
 """
-
 import argparse
 import json
 import os
@@ -25,7 +24,6 @@ def run_dir(name):
 
 
 def describe(directory):
-    """one line on what a run holds, for the overwrite question"""
     try:
         with open(os.path.join(directory, "state.json")) as f:
             state = json.load(f)
@@ -41,7 +39,6 @@ def describe(directory):
 
 
 def clear_existing(directory, overwrite):
-    """an existing run under this name is deleted if the user says so (or --overwrite)"""
     if not os.path.exists(os.path.join(directory, "run.json")):
         return
     question = f"{directory} already holds a run ({describe(directory)}). Overwrite it? [y/N] "
@@ -50,7 +47,7 @@ def clear_existing(directory, overwrite):
             raise SystemExit(f"{directory} already holds a run; pass --overwrite, use resume, or another name")
         try:
             answer = input(question)
-        except EOFError:  # no one to answer (on Windows even NUL passes isatty)
+        except EOFError:
             answer = ""
         if answer.strip().lower() not in ("y", "yes"):
             raise SystemExit("\nkept it; use resume to continue it, or another name")

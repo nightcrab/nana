@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 # Keep the full nana_bench output (including the per-thread profile) for a few runs.
-#
 # usage: scripts/profile_run.sh [threads] [reps] [ms_per_run] [build dir]
-#   threads    one or more thread counts, comma separated (default: 1 and the core count)
-#   build dir  a build containing cpp/nana_bench (default: build-bench-mp1, from bench_scaling.sh)
-#
-# Writes results/profile-<host>-<date>/t<threads>-test<n>-rep<r>.txt
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

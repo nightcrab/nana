@@ -2,19 +2,7 @@
 """Plot a strength_ladder.sh / strength_batches.sh run for the README, light and dark.
 
     plot_strength.py DIR [DIR ...] [--out docs]
-
-Writes <out>/strength-effort-{light,dark}.png and <out>/strength-speedup-{light,dark}.png:
-
-  effort   APP@H against simulations per move, for the two ways of spending more search:
-           1 thread thinking longer, and more threads at the base think time. The vertical gap
-           between them is the strength a parallel simulation loses against a sequential one.
-  speedup  against threads: ideal, simulations per move over 1 thread, and strength speedup
-           (the 1-thread think time with the same APP@H, from the straight-line fit of ln APP@H
-           against log2 think time that strength_report.py prints), with a 95% bootstrap band.
-
-Same palette and layout as scripts/plot_speed.mjs, so they sit together in the README.
 """
-
 import argparse
 import math
 import pathlib
@@ -134,14 +122,12 @@ def plot_effort(path, t, f, ladder, parallel, meta):
         ax.plot(xs, [d["app"] for d in data], color=colour, linewidth=2, zorder=3)
         ax.scatter(xs, [d["app"] for d in data], s=64, color=colour, edgecolors=t["surface"], linewidths=2, zorder=4)
     def other_at(data, x):
-        # the other series' value at x, interpolated in log x (None outside its range)
         for a, b in zip(data, data[1:]):
             if a["sims"] <= x <= b["sims"]:
                 w = math.log(x / a["sims"]) / math.log(b["sims"] / a["sims"])
                 return a["app"] + w * (b["app"] - a["app"])
         return None
 
-    # each label goes on the side away from the other series, so close points don't collide
     for data, other, text in ((ladder, parallel, lambda d: f"{parse(d['name'])[1]}x"),
                               (parallel, ladder, lambda d: f"{parse(d['name'])[0]} threads")):
         for d in data[1:]:

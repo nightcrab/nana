@@ -2,17 +2,8 @@
 """Summarise nana_emulate survival runs.
 
     survival_summary.py RUN.jsonl [RUN.jsonl ...]
-        mean survival per run, with a bootstrap 95% interval
-
     survival_summary.py --paired A.jsonl B.jsonl
-        B relative to A on the seeds both played: ratio of mean survival with a
-        paired bootstrap interval, which cancels out how hard each seed is
-
-Survival is pieces placed before topping out. Games cut off at max_pieces count as
-survived; when any are cut off the mean is also given as pieces / deaths, the
-maximum-likelihood mean for exponential lifetimes.
 """
-
 import argparse
 import json
 import random

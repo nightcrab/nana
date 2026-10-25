@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 # Start, stop or check the benchmark instance, or open a shell on it.
-#
 # usage: scripts/ec2.sh start|stop|status|ssh
-#
-# needs the AWS CLI with credentials allowed ec2:StartInstances, ec2:StopInstances and
-# ec2:DescribeInstances on the instance. The instance stops itself after 10 idle minutes
-# (/usr/local/bin/idle-shutdown.sh on it), so a start without a job costs at most that.
-#
-# the instance comes from the environment (keep these out of the repository):
-#   NANA_EC2_INSTANCE  instance id
-#   NANA_EC2_REGION    its region
-#   NANA_EC2_HOST      user@address for ssh
-#   NANA_EC2_KEY       the ssh key file
 set -euo pipefail
 
 INSTANCE=${NANA_EC2_INSTANCE:?set NANA_EC2_INSTANCE to the instance id}

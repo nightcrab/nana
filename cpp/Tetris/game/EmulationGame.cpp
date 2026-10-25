@@ -29,7 +29,6 @@ const char* EmulationGame::rules() {
 }
 
 namespace {
-// -1 until TBP rules set it
 int tbp_garbage_delay = -1;
 }
 
@@ -93,7 +92,6 @@ void EmulationGame::chance_move() {
 
     const bool tetrio = std::holds_alternative<TetrioS1>(game.mode);
 
-    // the opponent's attack that has waited out the delay joins the meter
     if (garbage_delay > 0) {
         buffered_garbage.resize(garbage_delay);
         if (buffered_garbage.front() > 0) {
@@ -112,9 +110,6 @@ void EmulationGame::chance_move() {
         phantom_meter.insert(phantom_meter.begin(), garbage_amount);
     }
 
-    // ours that has waited out the delay reaches it, after the piece it just played (so the stadium
-    // rules' tank in receiveAttack goes by that piece). what's left of its attack after its meter
-    // first cancels ours in transit, soonest first
     if (tetrio && garbage_delay > 0) {
         outgoing_garbage.resize(garbage_delay);
         for (int& garbage : outgoing_garbage) {
@@ -150,7 +145,6 @@ void EmulationGame::chance_move() {
 
     if (garbage_amount > 0) {
         if (garbage_delay == 0) {
-            // both players move at once: it meets our next piece's attack, and is tanked after it
             garbage_meter.insert(garbage_meter.begin(), garbage_amount);
         }
         else {
@@ -185,7 +179,6 @@ void EmulationGame::play_moves(){
 
     // but we need to keep track of combo and b2b because cancelling
 
-    // TETR.IO rewards only T-spins; move generation also flags other pieces' spins.
     spinType spin = move.piece.spin;
     if (std::holds_alternative<TetrioS1>(game.mode) && move.piece.type != PieceType::T) {
         spin = spinType::null;
@@ -213,7 +206,6 @@ void EmulationGame::play_moves(){
 
 
     int damage = game.damage_sent(cleared_lines, spin, pc);
-    // what the belief sees: our attack before cancelling, and what then lands
     const int sent = damage;
     int landed = 0;
 
@@ -239,8 +231,6 @@ void EmulationGame::play_moves(){
     const bool tetrio = std::holds_alternative<TetrioS1>(game.mode);
 
     if (phantom_garbage) {
-        // what's left of our attack cancels the phantom meter as it would the real one, without
-        // taking anything from what we send
         int left = damage;
         while (left > 0 && !phantom_meter.empty()) {
             int& incoming = phantom_meter.back();
@@ -256,7 +246,6 @@ void EmulationGame::play_moves(){
         }
     }
 
-    // zero pass-through: then the garbage still in transit to us, soonest first
     if (tetrio) {
         for (int& incoming : buffered_garbage) {
             const int cancelled = std::min(damage, incoming);
@@ -277,7 +266,6 @@ void EmulationGame::play_moves(){
 
     // combo block
     if (cleared_lines == 0 && tetrio) {
-        // the whole meter at once, one hole
         int total = 0;
         for (int garbage : garbage_meter) {
             total += garbage;
@@ -330,18 +318,13 @@ void EmulationGame::objectively_play_moves() {
 
 
 namespace {
-// best spin (spinType) a rotation lands each T state with: [rotation][x][y] of its centre
 using SpinTable = std::array<std::array<std::array<uint8_t, Board::height>, Board::width>, 4>;
 
-// the stadium's Game::validate_spin for every T placement at once: every state reachable from spawn
-// by shift, SRS rotation and sonic drop, and the three-corner spin (srs_rotate, the same code as the
-// stadium's Game::rotate) of each rotation that succeeds, the best kept per state
 void t_spins(const Board& board, SpinTable& best) {
     const Piece spawn(PieceType::T);
     if (Shaktris::Utility::collides(board, spawn)) {
         return;
     }
-    // a T's centre is one of its minos, so every state's is on the board
     std::array<std::array<std::array<bool, Board::height>, Board::width>, 4> visited{};
     std::vector<Piece> open;
     open.reserve(128);
@@ -360,7 +343,6 @@ void t_spins(const Board& board, SpinTable& best) {
             Piece next = piece;
             next.spin = spinType::null;
             srs_rotate(board, next, dir);
-            // a failed rotation leaves the piece where it was
             if (next.rotation == piece.rotation) {
                 continue;
             }
@@ -379,8 +361,6 @@ void t_spins(const Board& board, SpinTable& best) {
     }
 }
 
-// a spin needs three of a T's corners filled (srs_rotate). off the board counts as filled here, so
-// this never misses one
 bool spin_corners(const Board& board, const Piece& piece) {
     int filled = 0;
     for (int dx : { -1, 1 }) {
@@ -397,11 +377,9 @@ bool spin_corners(const Board& board, const Piece& piece) {
 std::vector<Piece> EmulationGame::placements() const {
     std::vector<Piece> pieces = game.get_possible_piece_placements();
     if (!std::holds_alternative<TetrioS1>(game.mode)) {
-        // Botris rewards any piece's spin: the movegen's (immobile placements)
         return pieces;
     }
 
-    // the movegen marks immobile placements as spins; the stadium only grants T-spins, by rotation
     bool candidates = false;
     for (Piece& piece : pieces) {
         piece.spin = spinType::null;
@@ -414,7 +392,6 @@ std::vector<Piece> EmulationGame::placements() const {
     SpinTable best{};
     t_spins(game.board, best);
     for (Piece& piece : pieces) {
-        // (the movegen occasionally yields a placement off the board: never reachable, so no spin)
         if (piece.type == PieceType::T && piece.position.x >= 0 && piece.position.x < (int)Board::width &&
             piece.position.y >= 0 && piece.position.y < (int)Board::height) {
             piece.spin = (spinType)best[piece.rotation][piece.position.x][piece.position.y];
@@ -436,8 +413,6 @@ std::vector<Move> EmulationGame::legal_moves() {
     return moves;
 }
 
-// NANA_HASH_METER=0 (measurement): merge states differing only in pending garbage.
-// Keep the meter in the hash by default.
 #ifndef NANA_HASH_METER
 #define NANA_HASH_METER 1
 #endif
@@ -459,7 +434,6 @@ uint32_t EmulationGame::hash() const {
         hash = fasthash32(&*game.hold, sizeof(*game.hold), hash);
 #if NANA_HASH_QUEUE_FRONT
     else
-        // with nothing held, holding plays the next piece: it decides the node's moves
         hash = fasthash32(&game.queue.front(), sizeof(PieceType), hash);
 #endif
     if constexpr (NANA_HASH_METER) {
@@ -470,7 +444,6 @@ uint32_t EmulationGame::hash() const {
     for (int garbage : phantom_meter) {
         hash = fasthash32(&garbage, sizeof(garbage), hash);
     }
-    // garbage in transit is left out: no player sees it (at best they infer it)
     return hash;
 }
 
@@ -509,7 +482,6 @@ void EmulationGame::reset_opponent_rng() {
 
 void EmulationGame::reseed_chance() {
     if (deterministic_chance) {
-        // Partial oracle: true pieces and opponent RNG, but sample unknown holes.
         if constexpr (NANA_ORACLE_RANDOM_HOLES) hole_rng = fast_seed();
         return;
     }
@@ -540,7 +512,6 @@ void EmulationGame::reset_kill(float discount, bool expected) {
 }
 
 float EmulationGame::expected_kill() const {
-    // death_value is in the same discount from the next piece on
     const float ahead = markov.death_value();
     return std::clamp(kill_value + kill_survival * kill_weight * ahead, 0.0f, 1.0f);
 }

@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
-"""Report a strength_ladder.sh run: attack per piece per config, the 1-thread think-time
-curve, and where each parallel config lands on it.
+"""Report a strength_ladder.sh run.
 
     strength_report.py DIR [DIR ...] [--plot out.png] [--dark]
-
-Several DIRs (reruns on fresh seed ranges) are pooled per config; a seed played twice keeps
-the later run.
-
-Every game runs for a fixed horizon H (nana_emulate --max-pieces) or until the bot dies.
-Headline metric, APP@H: attack / H, so pieces lost to an early death count as sending
-nothing. Attack includes lines that cancelled incoming garbage, as in standard APP; true APP@H
-counts only garbage actually sent, which is what the search's reward uses. Also reported:
-how many games reached H.
-
-Intervals are 95% bootstrap over seeds. Comparisons are paired: every config plays the same
-seeds, so resampling seeds jointly cancels out how hard each seed is.
-
-Effective multiple of a parallel config: the 1-thread think time, as a multiple of the base,
-with the same APP@H (log-linear interpolation on the ladder's means). Sims multiple: the same
-read off the ladder's sims/move instead. Their ratio is the strength efficiency: how much of
-the extra search the parallel config turns into play.
 """
-
 import argparse
 import collections
 import json
@@ -55,7 +36,6 @@ def parse(name):
 
 
 def variant(name):
-    """the build variant (strength_ladder.sh VARIANTS), "" for the plain build"""
     return NAME.fullmatch(name)[4] or ""
 
 
@@ -75,8 +55,6 @@ def interval(samples):
 
 
 def crossing(ladder, value):
-    """log2 multiple at which the ladder (sorted [(mult, y)]) first reaches value;
-    -inf below its start, inf if it never gets there."""
     if value <= ladder[0][1]:
         return -math.inf if value < ladder[0][1] else math.log2(ladder[0][0])
     for (m0, y0), (m1, y1) in zip(ladder, ladder[1:]):
@@ -160,9 +138,6 @@ def main():
             print(f"{name:<12} {f'x{r:.3f} [{lo:.3f}, {hi:.3f}]':>22} {f'x{tr:.3f} [{tlo:.3f}, {thi:.3f}]':>22}"
                   f" {f'{wins}/{n}':>10}")
 
-        # APP@H = attack rate over the pieces played x the share of the horizon played. the
-        # first is the precise measure of search quality; early deaths are mostly luck (they
-        # barely repeat by seed), so they're where most of APP@H's noise comes from
         print(f"\nbreakdown, paired against {BASELINE}: attack per piece actually played, and deaths before H")
         print(f"{'config':<12} {'attack rate':>22} {'deaths':>8} {'deaths, baseline':>17} {'died in both':>13}")
         base = configs[BASELINE]
@@ -215,8 +190,6 @@ def main():
 
 
 def variants_report(configs, names, rng):
-    """each build variant against the control at the same thread count: the "default" (or "off") variant if it
-    was played, else the plain build. paired over common seeds"""
     groups = {}
     for name in names:
         if variant(name):
@@ -230,7 +203,6 @@ def variants_report(configs, names, rng):
         print(f"{'config':<20} {'seeds':>5} {'APP@H':>22} {'attack rate':>22} {'deaths':>11} {'sims/move':>10}"
               f" {'restarts':>9} {'to root':>8} {'leaks':>7}")
         mean_of = lambda games, k: statistics.fmean(g.get(k, math.nan) for g in games)
-        # attack per piece actually played, as in the breakdown table
         per_piece = lambda games: sum(g["attack"] for g in games) / max(sum(g["pieces"] for g in games), 1)
         for name in [control] + [n for n in group if n != control]:
             seeds = sorted(set(configs[control]) & set(configs[name]))
@@ -258,7 +230,6 @@ def variants_report(configs, names, rng):
 
 
 def line_fit(points):
-    """least-squares (intercept, slope) of [(x, y)]"""
     n = len(points)
     mx = sum(x for x, _ in points) / n
     my = sum(y for _, y in points) / n
@@ -268,10 +239,6 @@ def line_fit(points):
 
 
 def fit_report(configs, ladder_names, parallel, rng):
-    """Effective multiples from a straight-line fit of ln APP@H against log2 think-time multiple
-    over the whole ladder. Uses every rung, so it's steadier than interpolating between the two
-    rungs around a config. Sims multiples are still interpolated: sims/move are precise, and sims/s
-    fall a little as the tree grows, so they aren't quite a straight line in log time."""
     seeds = sorted(set.intersection(*(set(configs[n]) for n in ladder_names + parallel)))
     sims = lambda g: g["sims_per_move"]
 
@@ -314,7 +281,6 @@ def plot(out, dark, base_ms, horizon, names, ladder_names, parallel, stats, resu
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
 
-    # same roles as scripts/plot_scaling.py; series 1-3 of the reference palette
     if dark:
         surface, ink, muted, grid = "#1a1a19", "#ffffff", "#c3c2b7", "#2c2c2a"
         colours = {"ladder": "#3987e5", "parallel": "#d95926", "lf1": "#199e70"}
@@ -347,7 +313,6 @@ def plot(out, dark, base_ms, horizon, names, ladder_names, parallel, stats, resu
         a.grid(True, color=grid, linewidth=0.8)
         a.set_axisbelow(True)
 
-    # per-game values, jittered sideways (in log2 x) so the spread is visible
     jitter = random.Random(2)
     for name in names:
         xs = [x_of(name) * 2 ** jitter.uniform(-0.05, 0.05) for _ in stats[name]["values"]]
@@ -364,7 +329,6 @@ def plot(out, dark, base_ms, horizon, names, ladder_names, parallel, stats, resu
                     label=None if role(name) in shown else label(name))
         shown.add(role(name))
 
-    # where each parallel config meets the ladder
     for name in parallel:
         eff = results.get(name, (math.nan,))[0]
         if math.isfinite(eff):
@@ -386,7 +350,6 @@ def plot(out, dark, base_ms, horizon, names, ladder_names, parallel, stats, resu
     ax.set_title("APP@H: mean with 95% CI, dots are single games", color=ink, loc="left", fontsize=11)
     ax.legend(frameon=False, loc="lower right", labelcolor=ink)
 
-    # how precise each mean is: the case for more games where the bar is long
     y = list(range(len(names)))
     widths = [pct(50 * (stats[n]["high"] - stats[n]["low"]), stats[n]["mean"]) for n in names]
     widths = [0 if math.isnan(w) else w for w in widths]

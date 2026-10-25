@@ -32,7 +32,6 @@ std::array<float, ENCODER_FEATURES> boardFeatures(const Board& board, int combo,
         const int filled = std::popcount(col[x]);
         holes += h - filled;
         if (h > filled) {
-            // filled cells from the lowest hole up
             const int lowest_hole = std::countr_one(col[x]);
             covered += std::popcount(col[x] >> lowest_hole);
         }

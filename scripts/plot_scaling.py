@@ -1,17 +1,8 @@
 """Plot thread scaling from a bench_scaling.sh runs.csv.
 
 usage: python scripts/plot_scaling.py <runs.csv or results dir> [out.png] [--builds mp,tds] [--linear]
-  --builds  which builds to plot (default mp; TDS-UCT is root-bound and no longer benchmarked by default)
+  --builds  which builds to plot (default mp)
   --linear  linear axes from 0 instead of log2, so efficiency loss shows as the gap to the dashed line
-
-One column per position test, rows for simulations/s and nodes/s. Points are the
-median of reps, whiskers the min-max. Dotted lines are linear scaling from each build's
-own 1-thread median. Dashed lines, when the sweep ran with TARGET=1, are the measured
-target: N x the rate of 1 thread searching N times as long, which grows the same size of
-tree and so accounts for simulations slowing as the tree grows. The label at the last
-point is its speedup and, with a target, the share of the target reached. By default
-both axes are log2, so a straight line at the dotted slope is perfect scaling.
-Nodes/s is not comparable between builds (MP-MCTS restarts skip select hops).
 """
 import argparse
 import collections
@@ -50,7 +41,6 @@ def main():
     out = args.out or csv_path.with_name("scaling-linear.png" if args.linear else "scaling.png")
 
     rows = list(csv.DictReader(open(csv_path)))
-    # sweeps before TARGET have no ms column; otherwise the scaling runs share the shortest ms
     has_ms = rows and "ms" in rows[0]
     base_ms = min(int(r["ms"]) for r in rows) if has_ms else None
     data = collections.defaultdict(list)
@@ -91,7 +81,6 @@ def main():
                 if ns[-1] in target and ns[-1] != ns[0]:
                     speedup += f", {100 * med[-1] / target[ns[-1]]:.0f}% of target"
                 ends.append((med[-1], ns[-1], speedup if len(builds) == 1 else f"{name.split('-')[0]} {speedup}"))
-            # speedup labels, nudged apart in endpoint order so coincident endpoints stay readable
             for i, (y, x, text) in enumerate(sorted(ends)):
                 dy = 0 if len(ends) == 1 else (12 * i / (len(ends) - 1) - 6)
                 ax.annotate(text, (x, y), xytext=(7, dy), textcoords="offset points", va="center",

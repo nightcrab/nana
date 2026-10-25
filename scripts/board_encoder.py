@@ -1,28 +1,8 @@
 """Does the opponent's board tell us its HMM state beyond what its damage does?
 
-Two-stage experiment on stadium games, before committing to anything bigger:
-  1. the fitted MarkovOpponent (damage only, unchanged) gives smoothed posteriors gamma_t(z) over each
-     player's hidden state, from forward-backward over the whole game;
-  2. an encoder q(z | board_t), softmax regression on a few board features, is trained on those soft
-     labels (cross-entropy) on 80% of the games;
-  3. on the other 20%, beliefs over z_t at each piece are compared by how well they predict what
-     happens next:
-       prior      the states' average posterior: knows nothing
-       filter     the damage-only forward filter, P(z_t | attacks before t): what a root filter knows
-       encoder    q(z_t | board_t): the board alone
-       combined   filter * encoder / prior: both (board and history assumed independent given z)
-     scored by the log-likelihood of the next 1 and 5 emissions (attack bins or death), and of whether
-     the player dies within 10 pieces (the quantity the search's kill reward uses).
-
-It also fits a second head, q(since_t | board_t): the opponent's pieces-since-its-last-attack counter,
-an input to the HMM that the search's root can't observe (logged directly, so hard labels).
-
 usage: python scripts/board_encoder.py STADIUM.db [...] [--model cpp/Tetris/game/MarkovOpponentParams.hpp]
                                        [--out cpp/Tetris/game/OpponentEncoderParams.hpp]
        python scripts/board_encoder.py --placeholder [--out ...]     an encoder nana switches off
---out writes the encoder for nana (cpp/Tetris/game/OpponentEncoder.hpp), fitted on all the games after
-the held-out report. --parity FILE writes sample boards with their features, for checking that nana
-computes the same features (cpp OpponentEncoder::boardFeatures).
 """
 
 import argparse
@@ -36,13 +16,12 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 import train_markov_opponent as m
 
-# the order nana's OpponentEncoder::boardFeatures computes them in
 FEATURES = ["max_height", "mean_height", "min_height", "holes", "covered", "bumpiness", "max_well",
             "row_transitions", "combo", "b2b", "top_quarter"]
 
 
 def board_features(blob, combo, b2b):
-    b = np.frombuffer(blob, dtype=np.uint8).reshape(20, 10).astype(bool)  # [y][x], y = 0 at the bottom
+    b = np.frombuffer(blob, dtype=np.uint8).reshape(20, 10).astype(bool)
     filled_rows = b.any(axis=1)
     heights = np.array([(np.max(np.nonzero(b[:, x])[0]) + 1) if b[:, x].any() else 0 for x in range(10)])
     holes = 0
@@ -51,7 +30,6 @@ def board_features(blob, combo, b2b):
         h = heights[x]
         empty_below = h - int(b[:h, x].sum())
         holes += empty_below
-        # filled cells above the column's lowest hole
         col = b[:h, x]
         if empty_below:
             lowest_hole = int(np.argmin(col))
@@ -66,8 +44,6 @@ def board_features(blob, combo, b2b):
 
 
 def load_boards(paths, players=(1, 2), raw=None):
-    """{(file_index, game_id, player): [features per step]}, steps exactly as load_stadium builds them.
-    raw: a list to collect (board blob, combo, b2b, features) samples into, for --parity."""
     out = {}
     for file_index, path in enumerate(paths):
         db = sqlite3.connect(path)
@@ -95,7 +71,6 @@ def load_boards(paths, players=(1, 2), raw=None):
 
 
 def fingerprint(model):
-    """sum over the emission table (rows renormalised) of (index + 1) * p, as nana's hmmFingerprint"""
     flat = model.emission.reshape(-1)
     return float(np.sum(np.arange(1, len(flat) + 1) * flat))
 
@@ -148,7 +123,6 @@ def softmax(x):
 
 
 def fit_encoder(X, gamma, l2=1e-3, steps=2000, lr=0.05):
-    """Softmax regression on soft labels: minimise -sum gamma log softmax(X W + b), with Adam."""
     n, d = X.shape
     S = gamma.shape[1]
     W = np.zeros((d, S))
@@ -170,7 +144,6 @@ def fit_encoder(X, gamma, l2=1e-3, steps=2000, lr=0.05):
 
 
 def filter_priors(model, games, jb):
-    """P(z_t | emissions before t, inputs up to t) for every step: the damage-only filter's belief."""
     G, T = games.mask.shape
     A = model.transition()
     B = model.emission
@@ -192,22 +165,15 @@ def filter_priors(model, games, jb):
 
 
 def received_filter(model, games):
-    """The filter nana runs under TBP1 (cpp OpponentFilter), on stadium games: for each player (the
-    opponent), from the other player's (our) view: our attack each turn, whether our piece cleared lines
-    (approximated by our attack being positive: the databases don't log line clears), and the garbage
-    we received under the stadium's netting. Returns P(state of each piece | what we saw before it),
-    like filter_priors but without ever seeing the opponent's attack directly."""
     G, T = games.mask.shape
     S, D = m.STATES, m.SINCE
-    A = model.transition()  # [action, jeopardy, since, from, to]
-    B = model.emission       # [state, emission]
+    A = model.transition()
+    B = model.emission
     value = model.attack_value
-    # our attack on turn t is the opponent's input at its piece t + 1
     ours = np.zeros((G, T))
     ours[:, :-1] = games.sent[:, 1:]
     cleared = ours > 0
     o = games.attack
-    # what we'd receive: track our true meter with the opponent's true attack
     received = np.zeros((G, T))
     meter = np.zeros(G)
     for t in range(T):
@@ -221,16 +187,14 @@ def received_filter(model, games):
     last_ours = np.zeros(G, dtype=int)
     for t in range(T):
         fresh = games.fresh[:, t]
-        # predict
         pred = np.zeros((G, S, D))
         for sc in range(D):
-            At = A[np.minimum(last_ours, m.ACTIONS - 1), 0, sc]  # [G, from, to]
+            At = A[np.minimum(last_ours, m.ACTIONS - 1), 0, sc]
             pred[:, :, sc] = np.einsum("gi,gij->gj", joint[:, :, sc], At)
         init = np.zeros((S, D))
         init[:, 0] = model.initial
         pred = np.where(fresh[:, None, None], init[None], pred)
         belief[:, t] = pred.sum(axis=2)
-        # likelihood of what we saw for each emission
         like = np.zeros((G, m.EMISSIONS))
         for e in range(m.ATTACKS):
             land = np.round(np.maximum(0.0, est_meter + value[e] - ours[:, t]))
@@ -238,8 +202,7 @@ def received_filter(model, games):
             if e == m.ATTACKS - 1:
                 ok |= (received[:, t] > 0) & (received[:, t] >= land)
             like[:, e] = np.where(cleared[:, t], 1.0, ok.astype(float))
-        # update over (state, emission), moving since on
-        w = pred[:, :, :, None] * (B[None, :, None, :] * like[:, None, None, :])  # [G, S, D, E]
+        w = pred[:, :, :, None] * (B[None, :, None, :] * like[:, None, None, :])
         nxt = np.zeros((G, S, D))
         nxt[:, :, 0] += w[:, :, :, 1:m.ATTACKS].sum(axis=(2, 3))
         stay = w[:, :, :, 0]
@@ -247,7 +210,6 @@ def received_filter(model, games):
         nxt[:, :, D - 1] += stay[:, :, D - 1]
         total = nxt.sum(axis=(1, 2))
         ok = total > 0
-        # when nothing fits, fall back to the prediction (learn nothing from the emission)
         nxt = np.where(ok[:, None, None], nxt / np.where(ok, total, 1)[:, None, None], pred)
         emitted = w.sum(axis=(1, 2)) / np.where(ok, total, 1)[:, None]
         expected_land = sum(emitted[:, e] * np.maximum(0.0, est_meter + value[e] - ours[:, t]) for e in range(m.ATTACKS))
@@ -258,8 +220,6 @@ def received_filter(model, games):
 
 
 def k_step_loglik(model, games, jb, belief, k):
-    """log P(emissions t..t+k-1 | belief over z_t, the inputs), for every step with k steps ahead in
-    the same game (others NaN)."""
     G, T = games.mask.shape
     A = model.transition()
     B = model.emission
@@ -349,7 +309,6 @@ def main():
     for i, name in enumerate(FEATURES):
         print(f"  {name:20s} " + " ".join(f"{w:+.2f}" for w in W[i]))
 
-    # the since head: hard labels, the counter as logged before each piece
     since_onehot = np.eye(m.SINCE)[games.since]
     W_since, b_since, loss_since = fit_encoder(norm(X_train), since_onehot[train_steps])
     since_marginal = since_onehot[train_steps].mean(axis=0)
@@ -371,8 +330,6 @@ def main():
     beliefs = {"prior": prior, "filter": filt, "encoder": enc, "combined": combined,
                "received (TBP1)": received, "received+encoder": received_enc}
 
-    # death within 10 pieces, from the installed model's death table? the header holds a discounted
-    # table, so refit P(dies within 10) per state on the training games
     table, _ = m.death_value(model, games.subset(np.where(~test)[0]), jb[~test], horizon=10)
     G_, T_ = games.mask.shape
     dead = games.dead & games.mask
@@ -394,7 +351,6 @@ def main():
         for k in (1, 5):
             ll = k_step_loglik(model, games, jb, bel, k)
             row.append(np.nanmean(ll[test_steps]) / k)
-        # P(dies within 10) = sum over z_t of belief(z_t) * the table for z_t and the next piece's buckets
         pd =np.sum(bel * table[:, next_j, next_s].transpose(1, 2, 0), axis=2)
         pd = np.clip(pd, 1e-6, 1 - 1e-6)
         dl = np.where(label, np.log(pd), np.log(1 - pd))[known].mean()
@@ -402,14 +358,12 @@ def main():
         print(f"{name:18s} {row[0]:9.4f} {row[1]:9.4f} {row[2]:10.4f}")
 
     if args.out:
-        # the encoder for nana: both heads refitted on every game
         X_all = F[games.mask]
         mu, sd = X_all.mean(axis=0), X_all.std(axis=0) + 1e-9
         Xn = (X_all - mu) / sd
         W_all, b_all, _ = fit_encoder(Xn, gamma[games.mask])
         Ws_all, bs_all, _ = fit_encoder(Xn, since_onehot[games.mask])
         source = f"{len(args.dbs)} stadium databases, model {os.path.basename(args.model)}"
-        # the heads' average outputs, for turning an output into evidence (divide by these)
         state_prior = softmax(Xn @ W_all + b_all).mean(axis=0)
         since_prior = softmax(Xn @ Ws_all + bs_all).mean(axis=0)
         write_header(out_path, fingerprint(model), mu, sd, W_all, b_all, Ws_all, bs_all, state_prior, since_prior,

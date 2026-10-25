@@ -3,13 +3,6 @@
 #include <array>
 #include <string>
 
-// nana's tunable constants: the eval's weights, PUCT and the rollout's score. the defaults are the
-// hand-set values; NANA_CONFIG selects weight overrides for tools. TBP uses nana.json beside
-// the executable. Settings are read once. Unknown
-// keys or malformed values are fatal, so a typo in a tuning run can't silently leave a default in
-// place. tuner/ writes these files
-// Cold Clear's Standard evaluator's weights (eval "cc", EvalCC.cpp), its defaults for TETR.IO garbage;
-// config keys cc_<name>
 struct CCWeights {
     double back_to_back = 52;
     double bumpiness = -24;
@@ -47,7 +40,6 @@ struct CCWeights {
 };
 
 struct NanaConfig {
-    // Runtime settings for TBP; emulation and benchmarks retain their environment overrides.
     std::string rules = "tetrio";
     int threads = 3;
     std::string reward = "app";
@@ -55,7 +47,7 @@ struct NanaConfig {
     double kill_lambda = 0.0;
     double kill_discount = 0.9;
     std::string pin_layout = "compact";
-    std::string variant = ""; // empty = choose automatically
+    std::string variant = "";
     int message_weight = 1;
     int rollout_weight = 30;
     int low_water = 30;
@@ -65,7 +57,6 @@ struct NanaConfig {
     int steal_topk = 4;
     int steal_temperature = 10;
 
-    // eval (Eval::eval_CC): added to the score, which is then mapped by (score + 10000) / 10000
     double top_half = -50.809334726527226;
     double top_quarter = -630.2445620700462;
     double low = -33.44361147332671;
@@ -90,30 +81,19 @@ struct NanaConfig {
                                      695.6269810587003 };
     std::array<double, 4> tspins = { 0, 80.51857794910987, 159.46297822832895, 325.85611242217686 };
 
-    // PUCT (UCTNode::c_puct): c = ln((N + c_base + 1) / c_base) + c_init * (1 + depth / depth_step)
     double c_init = 1.25;
     double c_base = 19652;
     int depth_step = 3;
-    // priors: the eval's rank r gets weight r^-prior_exponent, normalised
     double prior_exponent = 0.5;
-    // an edge's N and R are scaled by 1 - 1 / n_cap before each update, so old samples fade
-    // geometrically (Q averages roughly the last n_cap returns) and N levels off at n_cap
     double n_cap = 10000;
-    // nodes this many moves below the root are leaves (0 = no cap)
     int depth_cap = 0;
-    // the eval scoring every move: "nana" (eval_CC, the weights above) or "cc" (Cold Clear's Standard
-    // evaluator with its default weights, Eval::eval_CC_standard)
     std::string eval = "nana";
-    // the CC eval's term over the search's belief about the HMM opponent (EmulationGame::belief): the
-    // belief a move leaves, one piece ahead, weighed per hidden state. in CC score units; 0 = off
     std::array<double, 8> belief_weights{};
     CCWeights cc;
 
-    // rollout score: app_weight * APP + eval_weight * the best eval of the leaf's moves
     double app_weight = 0.6421088128536776;
     double eval_weight = 0.9756232465113018;
 
-    // r^-prior_exponent for ranks 1..PRIOR_TABLE (index rank - 1); computed when loaded
     static constexpr int PRIOR_TABLE = 1024;
     std::array<float, PRIOR_TABLE> prior_weight{};
     float priorWeight(int rank) const;
@@ -121,13 +101,9 @@ struct NanaConfig {
     std::string source = "defaults";
 };
 
-// Called by the TBP executable/launcher before using settings. Other tools use NANA_CONFIG.
 void loadTbpConfig();
-// Null for emulation/benchmarks, which retain their environment settings.
 const NanaConfig* tbpConfig();
 
-// The configuration in effect.
 const NanaConfig& config();
 
-// the config as JSON, every key (what --print-config shows)
 std::string configJson(const NanaConfig& config);

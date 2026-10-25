@@ -23,7 +23,6 @@ bool& tbpSettingsEnabled() {
     std::exit(2);
 }
 
-// every key, read and written the same way so the two can't drift apart
 template <class Visit>
 void visitFields(NanaConfig& c, Visit&& visit) {
     if (tbpSettingsEnabled()) {
@@ -203,22 +202,18 @@ NanaConfig load() {
         if (!j.is_object()) {
             fail(std::string(path) + " must hold a JSON object");
         }
-        // configs from before n_cap gave its decay, 1 - 1 / n_cap
         if (j.contains("decay") && !j.contains("n_cap")) {
             const double decay = j["decay"].is_number() ? j["decay"].get<double>() : -1;
             if (!(decay >= 0 && decay <= 1)) fail(std::string(path) + ": decay must be in [0, 1]");
             j["n_cap"] = decay < 1 ? 1 / (1 - decay) : std::numeric_limits<double>::max();
             j.erase("decay");
         }
-        // configs from before the handcrafted opponent was removed chose the opponent model; only the
-        // HMM is left
         if (j.contains("markov_opponent")) {
             if (j["markov_opponent"] != true) {
                 fail(std::string(path) + ": markov_opponent: the handcrafted opponent was removed; delete the key");
             }
             j.erase("markov_opponent");
         }
-        // every key must be one we know
         size_t known = 0;
         visitFields(c, [&](const char* key, auto& field) {
             if (j.contains(key)) {
@@ -243,11 +238,11 @@ NanaConfig load() {
     return c;
 }
 
-} // namespace
+}
 
 void loadTbpConfig() {
     tbpSettingsEnabled() = true;
-    (void)config(); // Validate before sending any protocol messages.
+    (void)config();
 }
 
 const NanaConfig* tbpConfig() {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the predeclared exact-reference C++ diagnostics; keep every result."""
+"""Run the C++ statistical diagnostics (nana_statcheck)."""
 import argparse
 import json
 from pathlib import Path
@@ -15,7 +15,6 @@ def main():
     if args.trials < 10000:
         parser.error('--trials must be at least 10000')
     args.out.mkdir(parents=True, exist_ok=True)
-    # Predeclared independent seed streams; never rerun a failing seed until it passes.
     seeds = (20261024, 71393, 991827)
     reports = []
     failed = False
@@ -32,7 +31,6 @@ def main():
         checks = [r for r in report['results'] if r['status'] != 'diagnostic']
         failed |= run.returncode != 0 or report['failures'] != 0
         print(f"seed {seed}: {len(checks)} checks, {report['failures']} failures", flush=True)
-    # All cell checks over all three seeds fit the predeclared 10,000-comparison bound.
     comparisons = sum((9 if '/one-turn/' in r['name'] else 81)
                       for p in reports for r in p['results'] if 'samples' in r)
     if comparisons > 10000:

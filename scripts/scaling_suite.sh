@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 # Sim scaling, then strength scaling, back to back on one machine.
-# Meant for scripts/run_ec2_bench.sh SCRIPT=scaling_suite.sh.
-#
-#   1. speed_scaling.sh 32 5 3000 (needs the machine to itself, so it goes first)
-#   2. a 16-game strength smoke run all the way to its summary, so a broken build fails in minutes
-#   3. strength_batches.sh at the size of the 2026-10-20 run: 3 x 100 games, 1-thread ladder
-#      x1..x32 at 80 ms, 2/4/8/16/32 threads at 80 ms, plus LF1
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

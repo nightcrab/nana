@@ -1,5 +1,4 @@
-// interactive.cpp : steps through the bot in a window and shows its search statistics
-//
+// steps through the bot in a window and shows its search statistics
 #include <iostream>
 
 #include "EmulationGame.hpp"

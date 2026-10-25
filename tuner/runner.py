@@ -1,10 +1,3 @@
-"""Plays seeded games of nana_emulate, one single-thread game process per cpu, and scores them.
-
-Every game is deterministic given (config, stage, seed): nana_emulate --threads 1 --sims N
---search-seed 1 replays exactly, so configs compared on the same seeds see the same pieces,
-garbage and opponent (common random numbers).
-"""
-
 import hashlib
 import json
 import os
@@ -16,18 +9,13 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 
 class Stage:
-    """How games are played: search budget, opponent pressure, game length and opponent."""
-
     def __init__(self, spec):
         self.name = spec["name"]
         self.sims = int(spec["sims"])
         self.garbage_scale = float(spec.get("garbage_scale", 1.0))
         self.horizon = int(spec.get("horizon", 100))
-        # the game plays the opponent HMM (MarkovOpponent, fitted on nana's stadium games) and the
-        # search models it. runs from before the handcrafted opponent was removed may name it
         if spec.get("env", "hmm") != "hmm":
             raise ValueError(f"stage {self.name}: env {spec['env']!r}: only the hmm opponent is left")
-        # the ruleset (NANA_RULES): tetrio or botris
         self.rules = spec.get("rules", "tetrio")
         self.spec = dict(spec)
 
@@ -40,8 +28,6 @@ class Stage:
 
 
 def fitness(game, horizon):
-    """Attack per piece over the full horizon: pieces lost to dying early count as no attack, so
-    survival is part of the score without a separate penalty."""
     return game["attack"] / horizon
 
 
@@ -63,16 +49,12 @@ class Runner:
         self.games_played = 0
         self.failures = 0
         self.lock = threading.Lock()
-        # Ctrl-C: stop launching games and kill the running ones (they'd otherwise be retried as failures)
         self.stopping = threading.Event()
         self.procs = set()
-        # called as progress(games done, games asked) while play waits, about twice a second
         self.progress = None
-        # (seconds, games) for every finished nana_emulate process, for calibration
         self.chunk_times = []
 
     def config_path(self, config):
-        """configs are content-addressed, so a file is written once and never changes"""
         text = json.dumps(config, sort_keys=True)
         name = hashlib.sha1(text.encode()).hexdigest()[:16] + ".json"
         path = os.path.join(self.config_dir, name)
@@ -90,7 +72,6 @@ class Runner:
         return env
 
     def print_config(self, config):
-        """The config nana actually loads for this file (nana_emulate --print-config)."""
         out = subprocess.run([self.nana, "--print-config"], env=self._env(self.config_path(config), Stage(
             {"name": "check", "sims": 1})), capture_output=True, text=True, timeout=60)
         if out.returncode != 0:
@@ -107,8 +88,6 @@ class Runner:
                 returncode, stdout, stderr = self._spawn(cmd, self._env(config_path, stage))
                 results = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
                 if returncode == 0 and len(results) == games:
-                    # a nana_emulate that doesn't report its rules (or plays others) would score the
-                    # wrong game without failing
                     played = {g.get("rules") for g in results}
                     if played != {stage.rules}:
                         raise RunnerError(f"asked for {stage.rules} rules, nana_emulate played {sorted(map(str, played))}: "
@@ -155,8 +134,6 @@ class Runner:
                 pass
 
     def play(self, requests):
-        """requests: [(key, config, stage, seed0, games)]. Returns {key: [game result per seed, in seed
-        order]}. Games are split into chunks and spread over the cpus."""
         tasks = []
         for key, config, stage, seed0, games in requests:
             path = self.config_path(config)
@@ -170,7 +147,6 @@ class Runner:
             pending = {pool.submit(self._run_chunk, path, stage, seed, n): (key, start)
                        for key, start, path, stage, seed, n in tasks}
             while pending:
-                # wait in short steps: on Windows an untimed wait doesn't wake up for Ctrl-C
                 finished, _ = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
                 for future in finished:
                     key, start = pending.pop(future)
@@ -188,7 +164,6 @@ class Runner:
         return results
 
     def scores(self, requests):
-        """Like play, but {key: [fitness per seed]} plus the raw games."""
         games = self.play(requests)
         horizons = {key: stage.horizon for key, _, stage, _, _ in requests}
         return {key: [fitness(g, horizons[key]) for g in gs] for key, gs in games.items()}, games

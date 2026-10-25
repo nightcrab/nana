@@ -42,8 +42,6 @@ auto type_to_json(PieceType type) -> nlohmann::json {
 };
 auto json_to_type(nlohmann::json json) -> PieceType;
 
-// the pieces left in the current bag after the queue, from a seven_bag randomizer state (the
-// stadium sends it on start); empty if the client doesn't say
 static std::vector<PieceType> json_to_bag(const nlohmann::json& message) {
     std::vector<PieceType> left;
     if (!message.contains("randomizer") || message["randomizer"].value("type", "") != "seven_bag") {
@@ -59,8 +57,6 @@ static std::vector<PieceType> json_to_bag(const nlohmann::json& message) {
     return left;
 }
 
-// put the pieces left in the bag where the rng deals them next; the search shuffles their order
-// for each simulation (EmulationGame::reseed_chance)
 static void apply_bag(RNG& rng, const std::vector<PieceType>& left) {
     rng.bagiterator = uint8_t(rng.bag.size() - left.size());
     std::copy(left.begin(), left.end(), rng.bag.begin() + rng.bagiterator);
@@ -162,7 +158,6 @@ auto rotation_to_json(RotationDirection dir) -> nlohmann::json {
     return nullptr;
 }
 
-// the opponent as TBP2 shows it (TBP1 doesn't): its board, combo and back_to_back, for the encoder
 struct SeenOpponent {
     bool have = false;
     Board board{};
@@ -190,10 +185,6 @@ static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
     }
 }
 
-// what the search's root knows of the opponent: the filter over what we've seen of its attacks, times
-// the encoder's evidence from its latest board if we've seen one (TBP2). before the filter has seen a
-// turn (a game joined midway), the board alone. search: the same belief as a filter, for the search's
-// simulations to carry on from (Search::root_filter)
 static RootOpponent rootOpponent(const OpponentFilter& filter, const SeenOpponent& seen, OpponentFilter& search) {
     std::array<float, markov::STATES> state;
     std::array<float, markov::SINCE> since;
@@ -283,7 +274,6 @@ auto json_to_spin(nlohmann::json json) -> spinType {
 int main() {
     try {
         loadTbpConfig();
-        // search threads: nana.json's, unless the client sets them in rules (set_threads)
         int core_count = config().threads;
 
         // send info state to the client
@@ -291,14 +281,10 @@ int main() {
 
         // generated pieces that we know about
         int total_pieces = 0;
-        // the pieces left in the current bag after the queue, when the client tells us (empty if not)
         std::vector<PieceType> bag_left;
 
         EmulationGame game;
 
-        // what the search's root knows of the opponent: a filter over the attacks we see land (every
-        // TBP version), and its latest board when the client sends it (TBP2; the stadium only sends it
-        // on start, at the game's start and after every garbage)
         OpponentFilter opponent_filter;
         SeenOpponent seen_opponent;
         RootOpponent root_opponent;
@@ -308,8 +294,6 @@ int main() {
             Search::root_opponent = &root_opponent;
             Search::root_filter = &search_filter;
         };
-        // our last suggestion, and the state it was made from: a client that restarts us after garbage
-        // (the stadium) sends start instead of play, and we replay the move to see what landed
         bool have_suggestion = false;
         Move last_suggestion;
 
@@ -325,9 +309,6 @@ int main() {
         message["name"] = "Nana";
         message["version"] = "0.1";
         message["author"] = "Shakkar + Awyzza";
-        // part of the TBP info message; clients like the stadium require it. set_threads: rules may
-        // carry the number of search threads. set_thinks: rules may carry `thinks`, simulations to run
-        // per move before a suggestion
         message["features"] = nlohmann::json::array({ "set_threads", "set_thinks" });
 
         // send just output to stdout
@@ -344,16 +325,12 @@ int main() {
             std::string type = message["type"];
 
             if (type == "quit") {
-                // endSearch waits for a running search's minimum work, so with none (after suggest, the
-                // stadium's last message) it would never return
                 if (Search::searching) {
                     Search::endSearch();
                 }
                 break;
             }
             else if (type == "rules") {
-                // set_threads. the search starts its threads on the first start, so later rules can't
-                // change them
                 if (message.contains("threads") && !Search::initialised) {
                     int threads;
                     CHECK_ERR(threads = message["threads"].get<int>());
@@ -362,15 +339,12 @@ int main() {
                     }
                 }
 
-                // set_thinks: each search runs this many simulations, and suggest waits for them
                 if (message.contains("thinks")) {
                     uint64_t thinks;
                     CHECK_ERR(thinks = message["thinks"].get<uint64_t>());
                     Search::simulation_limit = thinks;
                 }
 
-                // the turns an attack spends in transit (the stadium sends it): games from the next
-                // start on play it
                 if (message.contains("garbage_delay")) {
                     int delay;
                     CHECK_ERR(delay = message["garbage_delay"].get<int>());
@@ -416,16 +390,12 @@ int main() {
                 CHECK_ERR(hold = json_to_type(player_1["hold"]));
 
                 int back_to_back;
-                // TBP sends a bool; some clients (the stadium) send the b2b count
                 CHECK_ERR(back_to_back = player_1["back_to_back"].is_boolean() ? (player_1["back_to_back"].get<bool>() ? 1 : 0)
                                                                               : player_1["back_to_back"].get<int>());
 
                 int combo;
                 CHECK_ERR(combo = player_1["combo"].get<int>());
 
-                // a start in the middle of a game is the client restarting us after our move, with
-                // garbage under the board: replay our suggestion to see what landed. if the board isn't
-                // ours plus garbage it's a new game
                 if (have_suggestion) {
                     EmulationGame expected = game;
                     const int attack_before = expected.attack;
@@ -516,7 +486,6 @@ int main() {
 
                 const auto dealt = std::find(bag_left.begin(), bag_left.end(), piece);
                 if (dealt != bag_left.end()) {
-                    // it came out of the bag; the last one out starts the next bag
                     bag_left.erase(dealt);
                     if (bag_left.empty()) {
                         bag_left = { PieceType::S, PieceType::Z, PieceType::J, PieceType::L,
@@ -525,13 +494,11 @@ int main() {
                     apply_bag(game.rng, bag_left);
                 }
                 else {
-                    // no bag state from the client, or a piece that wasn't in it
                     bag_left.clear();
                     game.rng.bagiterator = total_pieces % 7;
                 }
             }
             else if (type == "suggest") {
-                // end search and give the best move (with set_thinks, once its simulations are done)
                 if (Search::simulation_limit > 0 && Search::searching) {
                     Search::waitForSimulations(std::chrono::seconds(120));
                 }
@@ -552,7 +519,6 @@ int main() {
                 std::cout << message.dump() << std::endl;
             }
             else if (type == "play") {
-                // the opponents are beside the move, not in it
                 const nlohmann::json full = message;
                 // play the move
                 message = message["move"];
@@ -602,7 +568,6 @@ int main() {
                 const int lines_before = game.lines;
                 game.play_moves();
 
-                // a play (not a restart) means no garbage landed on us this turn
                 opponent_filter.turn(game.attack - attack_before, game.lines > lines_before, 0);
                 have_suggestion = false;
 

@@ -1,28 +1,6 @@
 #!/usr/bin/env bash
-# Simulations / second at every thread count from 1 to max_threads, in conditions as close to
-# ideal as a cloud machine allows, and nothing else measured.
-#
+# Simulations / second at every thread count from 1 to max_threads.
 # usage: scripts/speed_scaling.sh [max_threads] [reps] [ms_per_run]
-#   TESTS="0 1"   position tests to run (default both)
-#   PREP=0        skip the machine preparation below (default 1; needs passwordless sudo)
-#
-# Measures nana_speed: nana_bench without NANA_BENCH, so no rdtsc profiling, no queue
-# timestamps and no statistics pass, timed over the search window only (not tree setup,
-# joining or garbage collection). MP-MCTS, Release, -march=native, mimalloc, LOAD_FACTOR as
-# built (6).
-#
-# Machine preparation (best effort, each step logged to machine.txt):
-#   - stops apt's timers, unattended-upgrades and snapd, and waits for any apt run to finish,
-#     since a freshly booted Ubuntu runs them in the first minutes
-#   - performance cpufreq governor and NUMA balancing off, where the kernel exposes them
-#   - waits for the load average to settle before the first run
-#   - runs each search at nice -20
-# Then one discarded warm-up run per test. Each rep runs every thread count once in a fresh
-# random order (both tests back to back), so clock drift and noisy neighbours spread over
-# all thread counts instead of landing on a contiguous block of them.
-#
-# Writes results/<host>-speed-<date>/{machine.txt,runs.csv,summary.txt}.
-# Run it on its own on the machine, e.g. through scripts/run_ec2_bench.sh with SCRIPT=speed_scaling.sh.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -80,7 +58,6 @@ else
 fi
 log "transparent hugepages: $(cat /sys/kernel/mm/transparent_hugepage/enabled 2> /dev/null)"
 
-# let the build and the steps above die down: 1-minute load average under 0.5, or 3 minutes
 for ((i = 0; i < 36; i++)); do
     awk '{ exit !($1 < 0.5) }' /proc/loadavg && break
     sleep 5

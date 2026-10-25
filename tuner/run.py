@@ -1,25 +1,3 @@
-"""A tuning run: PSO over nana's constants at one search budget, picked to fit a time budget.
-
-start runs the health checks, then calibrates: it times games at a ladder of sims counts, with
-configs scattered the way the swarm starts, and picks the largest sims count whose whole run fits
---budget-hours (or uses --sims as given). Then a fixed number of PSO iterations at that budget,
-a holdout against the defaults every few iterations, and one release gate at the end.
-
-Exploration comes first and exploitation last: the swarm starts widely scattered around the
-defaults (a weak prior), and the inertia falls linearly over the iterations, so the swarm settles.
-
-A run lives in tuner/runs/NAME/:
-  run.json        settings, fixed at start
-  state.json      checkpoint, rewritten atomically after every iteration
-  plan.json       the calibration: seconds per game at each sims count tried, and the plan
-  evals.jsonl     every iteration's evaluations (the full record)
-  gates.jsonl     the release gate
-  release.json    the config that passed the gate (the defaults until one does): a NANA_CONFIG file
-  best.json       the optimiser's current best (not gated)
-  status.txt      one screen of where the run is, rewritten every iteration
-  log.txt         everything printed
-"""
-
 import json
 import math
 import os
@@ -41,12 +19,8 @@ CALIBRATION_SEEDS = 800_000_000
 HOLDOUT_SEEDS = 900_000_000
 STATE_VERSION = 2
 
-# the sims counts calibration tries, cheapest first
 SIMS_LADDER = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072]
-# the opponent's garbage, eased at small budgets so a weak search survives long enough to be scored:
-# (sims, garbage_scale), interpolated in log2(sims), and 1.0 from 8192 sims up
 GARBAGE = [(32, 0.25), (128, 0.4), (512, 0.6), (2048, 0.8), (8192, 1.0)]
-# health checks play at a small budget: they test the plumbing, not the search
 CHECK_STAGE = {"name": "check", "sims": 32, "garbage_scale": 0.25}
 
 DEFAULTS = {
@@ -55,7 +29,6 @@ DEFAULTS = {
     "games_per_eval": 32,
     "spread": 0.3,
     "horizon": 100,
-    # the ruleset games are played with (NANA_RULES)
     "rules": "tetrio",
     "pso": {"inertia_start": 0.9, "inertia_end": 0.4, "cognitive": 1.5, "social": 1.5, "vmax": 0.2},
     "gate": {"delta": 0.02, "alpha": 0.05, "beta": 0.05, "max_games": 400},
@@ -74,7 +47,6 @@ def garbage_for(sims):
 
 
 def _clock(seconds):
-    """m:ss, or h:mm:ss from an hour"""
     seconds = int(seconds)
     h, m, s = seconds // 3600, seconds // 60 % 60, seconds % 60
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
@@ -107,21 +79,16 @@ class Run:
         self.monitor = Monitor()
         self.warnings = []
         self.warned = set()
-        # the live line: what the run is doing now, redrawn in place (only on a terminal)
         self.live = sys.stdout.isatty()
         self.doing = ""
         self.doing_since = time.monotonic()
         self.live_width = 0
         self.runner.progress = self.progress
 
-    # ---- files and logging
-
     def path(self, name):
         return os.path.join(self.dir, name)
 
     def log(self, message, show=False):
-        """everything goes to log.txt; the console gets only what show marks (progress and trouble),
-        or everything with --verbose"""
         line = time.strftime("%Y-%m-%d %H:%M:%S ") + message
         if show or self.verbose:
             self.clear_live()
@@ -130,7 +97,6 @@ class Run:
             f.write(line + "\n")
 
     def activity(self, label):
-        """name what the run is doing now, for the live line"""
         self.doing = label
         self.doing_since = time.monotonic()
 
@@ -158,10 +124,7 @@ class Run:
         _write_json(self.path("state.json"), self.state)
 
     def account(self, started):
-        """add the wall time since started (time.monotonic) to the run's hours"""
         self.state["hours"] += (time.monotonic() - started) / 3600
-
-    # ---- configs and the game settings
 
     def config(self, unit):
         return self.space.config(self.space.values(unit), self.state["base_config"])
@@ -171,13 +134,10 @@ class Run:
                       "horizon": self.settings["horizon"], "env": self.settings.get("env", "hmm"), "rules": self.rules()})
 
     def rules(self):
-        # runs from before the setting played tetrio
         return self.settings.get("rules", "tetrio")
 
     def stage(self):
         return self.make_stage(self.state["plan"]["sims"])
-
-    # ---- set up
 
     @staticmethod
     def create(directory, nana, cpus, space_paths, options, verbose=False):
@@ -189,7 +149,7 @@ class Run:
         specs = []
         for path in space_paths:
             specs += _read_json(path)
-        space = Space(specs)  # validates
+        space = Space(specs)
         settings = json.loads(json.dumps(DEFAULTS))
         for key, value in options.items():
             if value is None:
@@ -224,8 +184,6 @@ class Run:
         release = self.space.config(self.state["release"]["values"], self.state["base_config"])
         _write_json(self.path("release.json"), release)
 
-    # ---- health
-
     def health_checks(self):
         self.activity("health checks")
         started = time.monotonic()
@@ -245,12 +203,7 @@ class Run:
             self.log("health checks ok", show=True)
         self.account(started)
 
-    # ---- calibration and the plan
-
     def time_games(self, sims):
-        """Core-seconds per game at this many sims: the mean time of games with the swarm's starting
-        configs, so they're as long as the run's will be at the start. Each game is timed on its own:
-        game lengths vary a lot (most die early), and a batch's wall time follows its longest game."""
         self.activity(f"timing games at {sims} sims")
         stage = self.make_stage(sims)
         k = max(16, 2 * len(self.runner.cpus))
@@ -261,10 +214,6 @@ class Run:
         return sum(t for t, _ in self.runner.chunk_times) / sum(g for _, g in self.runner.chunk_times)
 
     def projection(self, core_seconds):
-        """Hours for the whole run at this cost per game: the iterations (the first scores only the
-        particles, later ones their bests too), the baseline and holdouts, and the gate at its limit.
-        Every batch of games also ends with a tail of about one process's games (chunk), while the
-        last processes finish and the other cpus wait."""
         s = self.settings
         cpus = len(self.runner.cpus)
         per_game = core_seconds / cpus
@@ -275,7 +224,6 @@ class Run:
         every = s["holdout"]["every"]
         holdouts = n // every + (1 if n % every else 0)
         checks = (holdouts + 1) * (s["holdout"]["games"] * per_game + tail)
-        # the gate plays both configs in batches of 4 games per cpu each
         gate_batches = math.ceil(s["gate"]["max_games"] / (4 * cpus))
         gate = 2 * s["gate"]["max_games"] * per_game + gate_batches * tail
         hours = {"iteration": iteration, "tune": tune, "checks": checks, "gate": gate}
@@ -293,7 +241,6 @@ class Run:
         for sims in ladder:
             started = time.monotonic()
             if chosen and budget:
-                # a rung costs about twice the last: don't spend time measuring one that clearly won't fit
                 if self.projection(2 * measured[chosen])["total"] > 1.3 * (budget - self.state["hours"]):
                     break
             core_seconds = self.time_games(sims)
@@ -329,10 +276,7 @@ class Run:
         self.state["phase"] = "tune"
         self.save()
 
-    # ---- the loop
-
     def baseline(self):
-        """The defaults on the holdout seeds (once)."""
         if self.state["baseline"] is None:
             started = time.monotonic()
             games = self.settings["holdout"]["games"]
@@ -349,7 +293,6 @@ class Run:
         stage = self.stage()
         s = self.settings
         n = s["games_per_eval"]
-        # inertia falls linearly over the run: the swarm explores first and settles at the end
         k, total = self.state["iterations"], s["iterations"]
         frac = k / (total - 1) if total > 1 else 1.0
         self.pso.inertia = s["pso"]["inertia_start"] + frac * (s["pso"]["inertia_end"] - s["pso"]["inertia_start"])
@@ -366,7 +309,6 @@ class Run:
         self.pso.tell(means)
         best = self.pso.best()
 
-        # monitors
         scores_x = [means[("x", i)] for i in range(self.pso.n)]
         game_sd = statistics.mean(statistics.stdev(s) for s in scores.values() if len(s) > 1)
         latest = means.get(("p", best_before[0])) if best_before else None
@@ -434,7 +376,6 @@ class Run:
                      f"{result['release']:.4f} in {result['games']} games)", show=True)
 
     def hours_left(self):
-        """the iterations left at the recent pace, plus the gate at its limit"""
         plan = self.state["plan"]
         if not plan or self.state["phase"] == "done":
             return 0.0
@@ -493,7 +434,6 @@ class Run:
                 if not self.verbose:
                     self.log(f"iteration {self.state['iterations']}/{total}, {self.eta(self.hours_left())}", show=True)
                 for w in self.warnings:
-                    # on the console, each kind of warning once; log.txt keeps every one
                     kind = w.split(":")[0]
                     self.log("WARNING " + w, show=kind not in self.warned)
                     self.warned.add(kind)

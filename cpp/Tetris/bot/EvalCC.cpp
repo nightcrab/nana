@@ -1,7 +1,3 @@
-// Cold Clear's Standard evaluator (cold-clear bot/src/evaluation/standard.rs, TETR.IO garbage), with
-// its default weights, on nana's board. Cold Clear's board is 40 rows of 10, a row's bit x for column x,
-// and cells off the board count as occupied.
-
 #include "Eval.hpp"
 #include "Config.hpp"
 
@@ -54,7 +50,6 @@ struct CCBoard {
     }
 };
 
-// a T's cells, Cold Clear's: North, East, South, West around its centre
 enum CCRot { N = 0, E = 1, S = 2, W = 3 };
 constexpr int T_CELLS[4][4][2] = {
     { { -1, 0 }, { 0, 0 }, { 1, 0 }, { 0, 1 } },
@@ -67,8 +62,6 @@ struct TSpot {
     int x, y, rot;
 };
 
-// detect_shape!: a pattern's rows, top first from y down, columns from x right; # occupied, _ empty,
-// ? either
 bool matches(const CCBoard& b, int x, int y, std::initializer_list<const char*> rows) {
     for (const char* row : rows) {
         for (int i = 0; row[i]; i++) {
@@ -149,7 +142,6 @@ bool onStack(const CCBoard& b, const TSpot& t) {
 }
 
 std::optional<TSpot> caveTslot(const CCBoard& b, TSpot start) {
-    // sonic drop
     while (true) {
         TSpot down = start;
         down.y--;
@@ -179,7 +171,6 @@ std::optional<TSpot> caveTslot(const CCBoard& b, TSpot start) {
     return std::nullopt;
 }
 
-// lock a T there and clear lines: how many, leaving the board behind in b
 int cutout(CCBoard& b, const TSpot& t) {
     for (const auto& c : T_CELLS[t.rot]) {
         const int x = t.x + c[0], y = t.y + c[1];
@@ -218,7 +209,7 @@ std::optional<TSpot> findTslot(const CCBoard& b) {
     return finRight(b);
 }
 
-}  // namespace
+}
 
 Eval::BeliefTerm::BeliefTerm(const OpponentFilter* filter, int meter) : filter(filter), meter(meter) {
     cache.fill(std::numeric_limits<float>::quiet_NaN());
@@ -232,13 +223,8 @@ float Eval::BeliefTerm::value(int attack, bool cleared) {
     return v;
 }
 
-// NANA_EVAL_TANK: a move that clears nothing is scored as if the meter had tanked under it, as the
-// game will play it, rather than on a board the garbage never reaches. 1: the rows only raise the
-// stack, so the height terms read the tank on top of the highest column (the rows themselves would be
-// full but for a hole the game draws at random, which the rest of the eval can't know). 2: the rows
-// go under the board with a hole from a hash of the board
 #ifndef NANA_EVAL_TANK
-#define NANA_EVAL_TANK 1
+#define NANA_EVAL_TANK 0
 #endif
 
 double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>& bag_left, double* move_part,
@@ -247,8 +233,6 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
     const Piece& piece = move.piece;
     const auto b2b_before = game.b2b;
 
-    // the move's input time, which nana's movegen doesn't give: an estimate from the shifts and
-    // rotations it takes from spawn, plus one for hold
     const bool held = piece.type != game.current_piece.type;
     static constexpr int rotations[4] = { 0, 1, 2, 1 };
     int move_time = std::abs(piece.position.x - (10 / 2 - 1)) + rotations[(int)piece.rotation] + (held ? 1 : 0);
@@ -263,7 +247,6 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
     for (int x = 0; x < Board::width; x++) {
         pc = pc && game.board.get_column(x) == 0;
     }
-    // updates combo and b2b as the game does
     const int garbage = game.damage_sent(lines, spin, pc);
 
     const bool full = spin == spinType::normal;
@@ -292,7 +275,6 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
         acc += w.wasted_t;
     }
     if (lines > 0) {
-        // Cold Clear's approximation of line clear delay
         move_time += 40;
     }
     acc += w.move_time * move_time;
@@ -301,13 +283,10 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
         transient += w.back_to_back;
     }
 
-    // TETR.IO tanks the whole meter, Botris up to 8 rows a piece
     const int tank = NANA_EVAL_TANK && lines == 0 && meter > 0
         ? (std::holds_alternative<TetrioS1>(game.mode) ? meter : std::min(meter, 8)) : 0;
     if constexpr (NANA_EVAL_TANK == 2) {
         if (tank > 0) {
-            // the hole is random in the game: here a column from the board itself, so the score doesn't
-            // peek at the game's rng
             uint32_t h = 0;
             for (int x = 0; x < Board::width; x++) {
                 h = h * 31 + game.board.get_column(x);
@@ -315,7 +294,6 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
             game.add_garbage(tank, (int)(h % Board::width));
         }
     }
-    // what the height terms add to the stack
     const int raised = NANA_EVAL_TANK == 1 ? tank : 0;
 
     CCBoard board = CCBoard::from(game.board);
@@ -323,15 +301,12 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
     const double opponent = belief ? belief->value(garbage, lines > 0) : 0.0;
     transient += w.top_quarter * std::max(highest + raised - 15, 0);
     transient += w.top_half * std::max(highest + raised - 10, 0);
-    // (Cold Clear divides in integers)
     acc += std::trunc(w.jeopardy * std::max(highest + raised - 10, 0) * move_time / 10);
 
-    // the bag the next piece comes from: the pieces left after the queue, filled back in through it
     unsigned bag = 0;
     for (PieceType p : bag_left) {
         bag |= 1u << (int)p;
     }
-    // (place_piece moved the next piece into current_piece; Cold Clear's queue still holds it)
     auto refill = [&](PieceType p) {
         if (p == PieceType::Empty) return;
         if (bag == 0x7F) bag = 0;
@@ -425,6 +400,5 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
     if (move_part) {
         *move_part = acc / 10000.0;
     }
-    // eval_CC's scale: a score / 10000, around 1
     return (transient + acc + opponent + 10000) / 10000.0;
 }

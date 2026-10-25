@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
-# What does crossing chiplets cost? Same thread count, same search, two pinnings:
-#   packed  workers fill one L3 group (chiplet) before the next (the default)
-#   spread  workers dealt round-robin across L3 groups (NANA_PIN_LAYOUT=spread)
-# With packed 8 threads nothing crosses a chiplet; spread over 4 chiplets ~3/4 of messages
-# and steals do. The sims/s gap, and how per-operation costs move (select, backprop,
-# rollout ns per job, queue time), say how much of the many-thread loss is cross-chiplet.
-# Caveat: spread also gives each thread a bigger share of L3, which favours spread, so
-# the gap understates the cost of crossing.
-#
+# What does crossing chiplets cost? Packed against spread pinning.
 # usage: scripts/chiplet_bench.sh [reps] [ms_per_run]
-#   THREADS="4 8 16"   thread counts to compare (default 4 8 16; packed = spread at 1 and at all cores)
-#
-# Builds nana_bench (MP-MCTS, Release) once. Writes results/<host>-chiplet-<date>/ with
-# machine.txt, raw/*.txt (every bench output), runs.csv and summary.txt.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -41,7 +29,6 @@ mkdir -p "$out/raw"
 for test in 0 1; do
     for n in "${threads[@]}"; do
         for ((r = 1; r <= reps; r++)); do
-            # alternate which layout goes first, so drift within a rep doesn't favour one
             if (( r % 2 )); then layouts="packed spread"; else layouts="spread packed"; fi
             for layout in $layouts; do
                 f="$out/raw/t$n-test$test-$layout-rep$r.txt"
@@ -65,7 +52,6 @@ for f in sorted(glob.glob(os.path.join(out, "raw", "*.txt"))):
     n, test, layout, rep = int(m[1]), m[2], m[3], int(m[4])
     text = open(f).read()
     get = lambda key: float(re.search(r"^" + re.escape(key) + r": ([0-9.e+-]+)", text, re.M)[1])
-    # per-thread profile rows: idx wait% select% backprop% expand% put% | rollout% | jobs/s | ns: select backprop expand put rollout | queue_us top%
     prof = [l for l in text.splitlines() if re.match(r"^ +\d+ +[0-9.]+%", l)]
     def col(part, i):
         vals = [float(l.split("|")[part].split()[i].rstrip("%")) for l in prof]

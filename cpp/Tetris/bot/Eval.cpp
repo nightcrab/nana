@@ -215,11 +215,8 @@ int Eval::get_row_transitions(const Board& board) {
     return transitions;
 }
 
-// the weights live in NanaConfig (Config.hpp), so tuner/ can set them
-
 double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
 
-    // read once: the config never changes after it's loaded
     static const NanaConfig& c = config();
 
     double score = 0.0;
@@ -272,7 +269,6 @@ double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
 
     score += get_row_transitions(board) * c.row_transitions;
 
-    // Botris rewards any piece's spin, including four-line I-spins: the table stops at three
     if (tspin && lines < (int)std::size(c.tspins)) {
         score += c.tspins[lines];
     }
@@ -303,7 +299,6 @@ double Eval::eval_CC(Game game, Move move, double* move_part) {
     }
 
     if (move_part) {
-        // the terms eval_CC(board, ...) adds for the move, on its scale
         static const NanaConfig& c = config();
         double score = c.clears[lines];
         if (tspin && lines < (int)std::size(c.tspins)) {

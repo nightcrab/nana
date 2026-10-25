@@ -1,21 +1,6 @@
 #!/usr/bin/env bash
-# Ablation in one session: builds every variant, then runs them interleaved (rotating which goes
-# first each rep) so drift hits them all equally. Variants are compile-flag sets; edit the table
-# below for a different ablation. The current set is the memory-layout options in UCT.hpp:
-#
-#   base     none of them
-#   compact  NANA_COMPACT_ACTIONS: edge stats (R, N, prior) in their own array, moves packed
-#   single   NANA_SINGLE_PASS: one scan per select also collects the history competitors
-#   nocopy   NANA_HISTORY_NOCOPY: backprop checks history without building a merged copy
-#   lookup   NANA_ONE_LOOKUP: one node lookup per select
-#   all      all four
-#
+# Ablation: builds every variant in the table below, then runs them interleaved.
 # usage: scripts/ablation_bench.sh [reps] [ms_per_run]
-#   THREADS="1 8 16 32"   thread counts (default 1 8 16 32)
-#   VARIANTS="base all"   subset to run (default: every variant in the table, in table order)
-#
-# Writes results/<host>-ablation-<date>/ with machine.txt, raw/*.txt (every bench output),
-# runs.csv and summary.txt. Max RSS is recorded per run.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -54,7 +39,6 @@ mkdir -p "$out/raw"
     for v in "${variants[@]}"; do echo "$v: ${flags[$v]}"; done
 } > "$out/machine.txt"
 
-# run a command and append its max RSS (KiB) as a last line
 with_rss() {
     python3 -c 'import resource, subprocess, sys; subprocess.run(sys.argv[1:], check=True); print("max rss kib:", resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)' "$@"
 }

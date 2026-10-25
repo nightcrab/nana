@@ -1,11 +1,4 @@
-// launcher.cpp : tbp_tetris when Nana is built with NANA_VARIANTS. Nana is built once per ISA level
-// (tbp_tetris-znver5, tbp_tetris-x86-64-v3, ...) and this runs the best one the CPU supports, handing
-// it our stdin / stdout and arguments, so TBP clients see one bot. It is built for the compiler's
-// default level so it runs anywhere.
-//
-//   nana.json: "variant": "<level>" forces a built level
-//   tbp_tetris --list-variants    show what each built level needs that the CPU lacks, and the pick
-
+// runs the best tbp_tetris ISA variant this CPU supports
 #include "Tetris/bot/Config.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -44,7 +37,6 @@ struct CpuBit {
     int bit;
 };
 
-// the CPUID bits behind the features the levels below need
 constexpr CpuBit cpu_bits[] = {
     {"sse2", 1, 0, EDX, 26},
     {"sse3", 1, 0, ECX, 0},
@@ -87,10 +79,6 @@ constexpr CpuBit cpu_bits[] = {
     {"prfchw", 0x80000001, 0, ECX, 8},
 };
 
-// what each level needs, best first. the x86-64 levels are the psABI's; for znver4 / znver5 it is
-// what the compiler may emit on its own (the AVX-512 extensions, GFNI, VNNI, ...). the rest they
-// enable (rdrnd, movdiri, clwb, ...) only comes from intrinsics, which Nana doesn't use.
-// os-avx / os-avx512: the OS saves the AVX / AVX-512 registers (XCR0)
 #define NEEDS_V1 "sse2"
 #define NEEDS_V2 NEEDS_V1 " cx16 lahf_lm popcnt sse3 ssse3 sse4.1 sse4.2"
 #define NEEDS_V3 NEEDS_V2 " os-avx avx avx2 bmi bmi2 f16c fma lzcnt movbe xsave"
@@ -129,7 +117,6 @@ unsigned long long xgetbv0() {
 #if defined(_MSC_VER) && !defined(__clang__)
     return _xgetbv(0);
 #else
-    // clang's _xgetbv wants the whole file built with xsave; the launcher is built without it
     unsigned lo, hi;
     __asm__ volatile(".byte 0x0f, 0x01, 0xd0" : "=a"(lo), "=d"(hi) : "c"(0));
     return (unsigned long long)hi << 32 | lo;
@@ -161,7 +148,6 @@ bool contains(const std::vector<std::string>& list, const std::string& item) {
     return false;
 }
 
-// the features this CPU and OS have, by the names above
 std::vector<std::string> detect() {
     std::vector<std::string> have;
     unsigned regs[4];
@@ -191,7 +177,6 @@ std::vector<std::string> detect() {
     const bool osxsave = regs[ECX] >> 27 & 1;
     if (osxsave) {
         const unsigned long long xcr0 = xgetbv0();
-        // SSE and AVX state; then opmask and both halves of zmm
         if ((xcr0 & 0x6) == 0x6) {
             have.push_back("os-avx");
         }
@@ -239,7 +224,6 @@ std::wstring selfPath() {
     }
 }
 
-// our command line after the program name, verbatim, as CommandLineToArgvW splits off argv[0]
 const wchar_t* afterProgramName(const wchar_t* cmd) {
     if (*cmd == L'"') {
         ++cmd;
@@ -269,7 +253,6 @@ int run(const std::string& level) {
     const std::wstring path = dir + stem + L"-" + widen(level) + L".exe";
     std::wstring cmd = L"\"" + path + L"\"" + afterProgramName(GetCommandLineW());
 
-    // the child dies with us: TBP clients stop the bot by killing the process they started
     HANDLE job = CreateJobObjectW(nullptr, nullptr);
     if (job) {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
@@ -301,7 +284,6 @@ int run(const std::string& level) {
     ResumeThread(child.hThread);
     CloseHandle(child.hThread);
 
-    // Ctrl+C reaches the child too, which decides what to do with it
     SetConsoleCtrlHandler(nullptr, TRUE);
     WaitForSingleObject(child.hProcess, INFINITE);
     DWORD code = 1;
@@ -330,7 +312,7 @@ int run(const std::string& level, char** argv) {
 
 #endif
 
-} // namespace
+}
 
 int main(int argc, char** argv) {
     loadTbpConfig();

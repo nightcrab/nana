@@ -9,23 +9,14 @@
 
 namespace Eval {
 	double eval_CC(const Board& board, int lines, bool tspin, bool waste_t);
-	// move_part: the share that rewards the move itself (its clear, T-spin, wasted T), what Cold
-	// Clear accumulates along a path; the rest scores the board it leaves
 	double eval_CC(Game game, Move move, double* move_part = nullptr);
-	// Cold Clear's Standard evaluator with its default weights (TETR.IO garbage), EvalCC.cpp: bag_left is
-	// the pieces left in the bag after the queue, for its T-slot count. same scale and move_part as eval_CC
-	// the belief term for one node's moves (eval_CC_standard): the opponent's belief after each move,
-	// cached by what the filter sees of it (whether it clears, its attack)
 	struct BeliefTerm {
 		const OpponentFilter* filter = nullptr;
-		// our garbage meter, which a move that clears nothing tanks
 		int meter = 0;
 		std::array<float, 32> cache;
 		BeliefTerm(const OpponentFilter* filter, int meter);
 		float value(int attack, bool cleared);
 	};
-	// meter: the garbage pending against us, which a move that clears nothing tanks (NANA_EVAL_TANK):
-	// the board is scored with it underneath
 	double eval_CC_standard(Game game, Move move, const std::vector<PieceType>& bag_left, double* move_part = nullptr,
 	                        BeliefTerm* belief = nullptr, int meter = 0);
 

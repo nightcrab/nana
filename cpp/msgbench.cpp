@@ -1,14 +1,6 @@
 // Microbenchmark for the parts of sending a message between two workers.
-//
 // usage: nana_msgbench [messages]
 //        nana_msgbench scale [max_threads]   per-thread slowdown of plain work as cores are added
-//
-// Each payload is sent through each transport. Times are ns per message.
-//   same thread   : producer and consumer are the same thread (no core-to-core transfer)
-//   spsc          : raw SPSC queue, consumer reads the message in place
-//   mpsc          : the search's mpsc queue, consumer moves it into flushed_queue first
-// The producer builds each message the way the search would, the consumer reads
-// what a worker would read, then destroys it (so heap frees happen on the consumer).
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -42,7 +34,6 @@ using clk = std::chrono::steady_clock;
 
 static std::atomic<uint64_t> g_sink = 0;
 
-// cpu numbers past the machine's are wrapped, so the layout still works on smaller machines
 static void pin(int cpu) {
 	cpu %= (int)std::max(1u, std::thread::hardware_concurrency());
 #ifdef _WIN32
@@ -55,13 +46,10 @@ static void pin(int cpu) {
 #endif
 }
 
-// payloads
-
 struct Tiny {
 	uint64_t v;
 };
 
-// same size as a Job, but no heap memory
 struct Blob {
 	std::array<uint64_t, sizeof(Job) / 8> v;
 };
@@ -85,19 +73,16 @@ struct BlobKind {
 		m.v.fill(i);
 		return m;
 	}
-	// one read per cache line
 	static uint64_t consume(const T& m) {
 		uint64_t s = 0;
 		for (size_t k = 0; k < m.v.size(); k += 8) s += m.v[k];
 		return s;
 	}
-	// one write per cache line
 	static void work(T& m) {
 		for (size_t k = 0; k < m.v.size(); k += 8) m.v[k]++;
 	}
 };
 
-// the kind of writes a SELECT makes: the board, counters, the opponent model, the path
 static void write_job(Job& j) {
 	j.state.pieces++;
 	j.state.game.board.board[0] ^= 1;
@@ -113,7 +98,6 @@ static uint64_t touch_state(const EmulationGame& s) {
 	return x;
 }
 
-// SELECT: state is copied in by the producer and read by the consumer
 struct JobKind {
 	using T = Job;
 	static constexpr const char* name = "Job, state";
@@ -143,7 +127,6 @@ struct JobPathKind {
 	static void work(T& m) { write_job(m); }
 };
 
-// BACKPROP: carries the state but the consumer only reads R and the path
 struct BackpropKind {
 	using T = Job;
 	static constexpr const char* name = "Job, path only read";
@@ -158,8 +141,6 @@ struct BackpropKind {
 		if (!m.path.empty()) m.path.back().actionID++;
 	}
 };
-
-// transports
 
 template <class K>
 double same_thread(uint64_t n) {
@@ -232,7 +213,6 @@ double stream_mpsc(uint64_t n, int producer_cpu, int consumer_cpu) {
 	return std::chrono::duration<double, std::nano>(end - start).count() / n;
 }
 
-// one-way latency of a tiny message, half a round trip
 static double pingpong(uint64_t n, int a_cpu, int b_cpu) {
 	rigtorp::SPSCQueue<Tiny> ab(64), ba(64);
 	std::atomic<bool> go = false;
@@ -264,8 +244,6 @@ static double pingpong(uint64_t n, int a_cpu, int b_cpu) {
 }
 
 
-// a few messages circulate between two threads and are moved on, never rebuilt,
-// like jobs in the search. each hop: receive, read, write, send. ns per hop.
 template <class K, bool use_mpsc>
 double circulate(uint64_t hops, int a_cpu, int b_cpu, bool same_thread, int in_flight = 6) {
 	using T = typename K::T;
@@ -322,7 +300,6 @@ double circulate(uint64_t hops, int a_cpu, int b_cpu, bool same_thread, int in_f
 		b.join();
 		end = clk::now();
 	}
-	// thread-time per message, so one and two thread runs compare directly
 	return std::chrono::duration<double, std::nano>(end - start).count() * (same_thread ? 1 : 2) / hops;
 }
 
@@ -336,7 +313,6 @@ static double median_of(int reps, F f) {
 
 template <class K>
 static void row(uint64_t n, int reps) {
-	// logical cpus 2k and 2k+1 are SMT siblings on one core
 	double st = median_of(reps, [&] { return same_thread<K>(n); });
 	double spsc_smt = median_of(reps, [&] { return stream_spsc<K>(n, 2, 3); });
 	double spsc_core = median_of(reps, [&] { return stream_spsc<K>(n, 2, 4); });
@@ -356,15 +332,12 @@ static void circ_row(uint64_t n, int reps) {
 	std::printf("%-28s %10.1f %10.1f %10.1f %10.1f %10.1f\n", K::name, st, spsc_smt, spsc_core, mpsc_smt, mpsc_core);
 }
 
-// scaling of per-thread work with no search around it: N threads, one per physical core,
-// each repeating a workload. reports ns per op, and the slowdown against one thread
 struct ScaleWorkload {
 	const char* name;
 	uint64_t (*op)();
 };
 
 static uint64_t op_alu() {
-	// pure arithmetic: only the clock should matter
 	uint64_t x = 0x9E3779B97F4A7C15ull;
 	for (int i = 0; i < 4096; i++) {
 		x ^= x << 13;
@@ -375,7 +348,6 @@ static uint64_t op_alu() {
 }
 
 static uint64_t op_alloc() {
-	// the heap allocations a rollout makes: move gen's vectors for two pieces, then the node's
 	static const size_t sizes[] = { 2048, 2048, 808, 2048, 2048, 2048, 808, 2048, 2048, 3200, 1600, 3200 };
 	void* blocks[std::size(sizes)];
 	for (size_t i = 0; i < std::size(sizes); i++) {
@@ -405,7 +377,6 @@ static double scale_run(const ScaleWorkload& w, int threads, double seconds) {
 	std::vector<std::thread> pool;
 	for (int t = 0; t < threads; t++) {
 		pool.emplace_back([&, t] {
-			// same placement as the search's workers: physical cores first
 			pinThreadToCore(t);
 			while (!go.load()) {}
 			uint64_t count = 0, sink = 0;
@@ -424,7 +395,6 @@ static double scale_run(const ScaleWorkload& w, int threads, double seconds) {
 
 	uint64_t total = 0;
 	for (uint64_t c : ops) total += c;
-	// ns of one thread's time per op
 	return seconds * 1e9 * threads / total;
 }
 
@@ -460,7 +430,6 @@ int main(int argc, const char** argv) {
 	uint64_t n = argc > 1 && !scale_mode ? std::stoull(argv[1]) : 1'000'000;
 	const int reps = 5;
 
-	// a realistic state: the first bench position, after a few moves so the vectors are populated
 	proto_state.game.board.board = { 0b00011111, 0b00011111, 0b00111101, 0b00011011, 0b00111111,
 									 0b00011110, 0b00011111, 0b00000111, 0b01111111, 0b11111111 };
 	proto_state.game.queue = { PieceType::Z, PieceType::L, PieceType::S, PieceType::S, PieceType::O, PieceType::Empty };

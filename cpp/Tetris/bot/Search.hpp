@@ -31,12 +31,10 @@ namespace Search {
 
     extern int time;
 
-    // NANA_FLUSH_AT_END: at the end of each search, what the parked MP-MCTS buffers were hiding
-    // from the root's statistics, which bestMove reads
     struct FlushStats {
         uint64_t searches = 0;
-        uint64_t changed = 0;       // searches where the hidden visits would change the best move
-        double hidden_share = 0;    // share of the root's visits that were hidden, summed over searches
+        uint64_t changed = 0;
+        double hidden_share = 0;
     };
     extern FlushStats flush_stats;
 
@@ -46,20 +44,10 @@ namespace Search {
 
     void endSearch();
 
-    // stop the search's workers once this many simulations have run (0 = no limit). a worker checks
-    // between jobs, so with one thread a search runs exactly this many, and with fast_seed_reset a
-    // game replays exactly (tuner/ relies on this)
     extern uint64_t simulation_limit;
 
-    // what's known of the real opponent (RootOpponent, from its board through the opponent encoder),
-    // set by the caller before a search: the search's HMM opponent then carries on from it (a hidden
-    // state and since counter drawn per simulation) instead of starting fresh at every root.
-    // nullptr = start fresh
     extern const RootOpponent* root_opponent;
-    // the caller's filter over the real opponent, if any: each search's root starts the simulations'
-    // belief from it (EmulationGame::belief)
     extern const OpponentFilter* root_filter;
-    // wait until the search reaches simulation_limit, or for timeout; false on timeout
     bool waitForSimulations(std::chrono::milliseconds timeout);
 
     void maybeInsertNode(UCTNode node, const int threadIdx);

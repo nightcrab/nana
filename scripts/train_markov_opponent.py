@@ -1,27 +1,5 @@
 """Fit MarkovOpponent (cpp/Tetris/game/MarkovOpponent.hpp) to logged games and write its parameters.
 
-The model is an input-output HMM:
-    hidden state  z in 0..STATES-1
-    input         a_t = damage we sent since the opponent's last piece, binned (0..ACTIONS-1)
-    jeopardy      c_t = bucket of the garbage in the opponent's meter before its piece, a
-                  deterministic function of the damage sent each way (replayed here exactly as
-                  MarkovOpponent::play does it)
-    since         d_t = pieces since the opponent's last attack (or death), bucketed: a function of
-                  its emissions, so it lets the time between attacks take any distribution
-    transition    P(z_t | z_{t-1}, a_t, c_t, d_t) = softmax_j(W[i, j] + U[a_t, j] + V[c_t, j] + X[d_t, j])
-    emission      P(o_t | z_t), o_t = the opponent's attack before cancelling (binned), or death
-After a death the next piece draws z from the initial distribution.
-
-The factored logits keep slices for rare (action, jeopardy, since) inputs close to the pooled
-transition matrix; U, V and X are L2-regularised towards 0 for the same reason.
-
-Data: CSVs written by nana_emulate --opponent-log (columns game, piece, sent, opp_attack, opp_sent,
-opp_meter, opp_dead), or SQLite databases (.db) written by Universal-Shaktris-Stadium's stadium_cli.
-For stadium games each player is a sequence: its input is the other player's attack the turn before,
-its emission its own attack, and jeopardy its logged meter (the stadium's garbage rules differ from
-MarkovOpponent's, so the meter isn't replayed). The stadium must log the game's final move (patched
-stadium_cli), since that move's attacks are what kill the loser.
-
 usage:
     python scripts/train_markov_opponent.py LOG.csv [LOG2.csv ...] [--out PATH]
     python scripts/train_markov_opponent.py --placeholder      # trivial model, to bootstrap a build
@@ -39,7 +17,6 @@ from collections import defaultdict
 
 import numpy as np
 
-# must match the constants in MarkovOpponent.hpp (the generated header static_asserts them)
 STATES = 8
 ACTIONS = 6
 JEOPARDY = 3
@@ -52,12 +29,7 @@ GARBAGE_CAP = 8.0
 DEFAULT_OUT = os.path.join(os.path.dirname(__file__), "..", "cpp", "Tetris", "game", "MarkovOpponentParams.hpp")
 
 
-# ---------------------------------------------------------------------------------------------
-# data
-
 class Games:
-    """Per-game arrays, padded to the longest game. mask[g, t] marks real steps."""
-
     def __init__(self, rows_by_game):
         self.ids = sorted(rows_by_game)
         lengths = [len(rows_by_game[g]) for g in self.ids]
@@ -66,7 +38,6 @@ class Games:
         self.sent = np.zeros((G, T))
         self.attack = np.zeros((G, T))
         self.meter = np.zeros((G, T))
-        # the meter before each piece, when the log has it (stadium games); NaN means replay it
         self.meter_before = np.full((G, T), np.nan)
         self.dead = np.zeros((G, T), dtype=bool)
         self.mask = np.zeros((G, T), dtype=bool)
@@ -82,11 +53,9 @@ class Games:
             self.mask[g, :n] = True
         self.action = np.minimum(self.sent, ACTIONS - 1).astype(int)
         self.emission = np.where(self.dead, DEATH, np.minimum(np.round(self.attack), ATTACKS - 1)).astype(int)
-        # a step draws from the initial distribution: the first piece, and the piece after a death
         self.fresh = np.zeros((G, T), dtype=bool)
         self.fresh[:, 0] = True
         self.fresh[:, 1:] = self.dead[:, :-1]
-        # pieces since its last attack before each piece, as MarkovOpponent::play counts them
         self.since = np.zeros((G, T), dtype=int)
         for t in range(1, T):
             self.since[:, t] = np.where(self.emission[:, t - 1] == 0, np.minimum(self.since[:, t - 1] + 1, SINCE - 1), 0)
@@ -109,7 +78,6 @@ def load(paths):
     for file_index, path in enumerate(paths):
         with open(path, newline="") as f:
             for row in csv.DictReader(f):
-                # games from different files are different games even with the same seed
                 gid = (file_index, int(row["game"]))
                 rows_by_game[gid].append((int(row["piece"]), float(row["sent"]), float(row["opp_attack"]),
                                           float(row["opp_sent"]), float(row["opp_meter"]), int(row["opp_dead"]),
@@ -118,7 +86,6 @@ def load(paths):
 
 
 def load_stadium(path, file_index, rows_by_game, players):
-    """Adds each game in a stadium database as one sequence per modelled player."""
     db = sqlite3.connect(path)
     rows_by_id = defaultdict(list)
     for row in db.execute("SELECT game_id, move_index, state, p1_attack, p1_meter, p2_attack, p2_meter FROM Data "
@@ -136,7 +103,6 @@ def load_stadium(path, file_index, rows_by_game, players):
             lost = result == "DRAW" or result == ("P2_WIN" if player == 1 else "P1_WIN")
             gid = (file_index, game_id, player)
             for t, r in enumerate(playing):
-                # the other player's attack lands between our pieces t - 1 and t
                 sent = playing[t - 1][other_col] if t > 0 else 0
                 rows_by_game[gid].append((t, sent, r[attack_col], 0.0, np.nan, 0, r[meter_col]))
             if lost:
@@ -145,12 +111,10 @@ def load_stadium(path, file_index, rows_by_game, players):
 
 
 def load_any(paths, players=(1, 2)):
-    """CSV logs and stadium databases, in any mix."""
     csvs = [p for p in paths if not p.endswith(".db")]
     games = load(csvs) if csvs else None
     rows_by_game = defaultdict(list)
     if games is not None:
-        # rebuild the CSV games' rows so both kinds share one Games
         for g, gid in enumerate(games.ids):
             for t in range(games.lengths[g]):
                 rows_by_game[("csv",) + gid].append((t, games.sent[g, t], games.attack[g, t], 0.0, games.meter[g, t],
@@ -162,8 +126,6 @@ def load_any(paths, players=(1, 2)):
 
 
 def replay_meter(games):
-    """The opponent's meter before each piece, as MarkovOpponent::play sees it, and after it (to
-    check the replay against the log)."""
     G, T = games.mask.shape
     meter = np.zeros(G)
     before = np.zeros((G, T))
@@ -188,15 +150,13 @@ def bucket(jeopardy, limits):
 
 
 def choose_jeopardy(games, meter, max_limit=30, min_share=0.005):
-    """The bucket limits under which the jeopardy bucket best predicts the next emission
-    (log-likelihood of a categorical emission per bucket), each bucket holding min_share of steps."""
     assert JEOPARDY == 3, "choose_jeopardy searches two limits"
     E = EMISSIONS
     p = np.minimum(np.floor(meter[games.mask]), max_limit).astype(int)
     e = games.emission[games.mask]
     hist = np.zeros((max_limit + 1, E))
     np.add.at(hist, (p, e), 1)
-    cum = np.vstack([np.zeros(E), np.cumsum(hist, axis=0)])  # cum[k] = counts with floor < k
+    cum = np.vstack([np.zeros(E), np.cumsum(hist, axis=0)])
     n = hist.sum()
 
     def ll(lo, hi):
@@ -219,22 +179,16 @@ def choose_jeopardy(games, meter, max_limit=30, min_share=0.005):
     return best
 
 
-# ---------------------------------------------------------------------------------------------
-# model
-
 def softmax(x, axis=-1):
     x = x - x.max(axis=axis, keepdims=True)
     e = np.exp(x)
     return e / e.sum(axis=axis, keepdims=True)
 
 
-# grid topology: state z is (mode, rung) = divmod(z, RUNGS). the rung is how buried the player is;
-# our attack shifts it by an offset, so a spike's effect depends on where it lands from
 RUNGS = 4
 
 
 def rung_offsets():
-    """offset index rung(j) - rung(i) + RUNGS - 1 for each transition i -> j"""
     rung = np.arange(STATES) % RUNGS
     return rung[None, :] - rung[:, None] + RUNGS - 1
 
@@ -246,25 +200,20 @@ class Model:
         self.V = np.zeros((JEOPARDY, STATES))
         self.X = np.zeros((SINCE, STATES))
         self.grid = grid
-        # Y[action][from][to]: only used with full, on top of U: the action's effect may depend on the state
         self.full = full
         self.Y = np.zeros((ACTIONS, STATES, STATES))
-        # K[action][rung offset]: only used on the grid, where it replaces U
         self.K = np.zeros((ACTIONS, 2 * RUNGS - 1))
         if grid:
             assert STATES % RUNGS == 0, "the grid needs STATES to be a multiple of RUNGS"
             mode, rung = np.divmod(np.arange(STATES), RUNGS)
             same_mode = mode[:, None] == mode[None, :]
             d = rung[None, :] - rung[:, None]
-            # stay, dig down a rung, or switch mode on the same rung
             base = (0.55 * (same_mode & (d == 0)) + 0.2 * (same_mode & (d == -1))
                     + 0.1 * (~same_mode & (d == 0)) + 0.01)
             self.W = np.log(base) + 0.1 * rng.standard_normal((STATES, STATES))
-            # our attack pushes the rung up, further for bigger attacks
             shift = np.array([0.0, 0.3, 0.6, 1.0, 1.5, 2.0])[:ACTIONS]
             offsets = np.arange(2 * RUNGS - 1) - (RUNGS - 1)
             self.K = -0.5 * (offsets[None, :] - shift[:, None]) ** 2
-            # deaths come from the top rungs; one mode attacks more than the other
             rows = []
             for z in range(STATES):
                 r = emission_prior.copy()
@@ -273,8 +222,6 @@ class Model:
                 rows.append(r / r.sum())
             self.emission = np.stack([rng.dirichlet(r * 50 + 0.1) for r in rows])
         elif cycle:
-            # a build -> ... -> build -> attack -> build cycle, which random starts don't find: after
-            # an attack the opponent has to rebuild before it can attack again
             stay, step = np.eye(STATES), np.roll(np.eye(STATES), 1, axis=1)
             self.W = np.log(0.45 * stay + 0.5 * step + 0.05 / STATES) + 0.05 * rng.standard_normal((STATES, STATES))
             quiet = emission_prior.copy()
@@ -288,7 +235,6 @@ class Model:
             self.emission = np.stack([rng.dirichlet(emission_prior * 20 + 0.1) for _ in range(STATES)])
 
     def transition(self):
-        # [action, jeopardy, since, from, to]
         logits = (self.W[None, None, None] + self.U[:, None, None, None, :] + self.V[None, :, None, None, :]
                   + self.X[None, None, :, None, :])
         if self.grid:
@@ -299,12 +245,10 @@ class Model:
 
 
 def forward_backward(model, games, jeopardy_bucket, return_gamma=False):
-    """Posteriors and sufficient statistics. Returns (log-likelihood, initial counts, transition
-    counts [action, jeopardy, since, from, to], emission counts [state, emission])."""
     G, T = games.mask.shape
     A = model.transition()
     B = model.emission
-    lik = B[:, games.emission].transpose(1, 2, 0)  # [G, T, S]
+    lik = B[:, games.emission].transpose(1, 2, 0)
     lik = np.where(games.mask[..., None], lik, 1.0)
 
     alpha = np.zeros((G, T, STATES))
@@ -314,7 +258,7 @@ def forward_backward(model, games, jeopardy_bucket, return_gamma=False):
         if t == 0:
             prior = np.broadcast_to(model.initial, (G, STATES))
         else:
-            At = A[games.action[:, t], jeopardy_bucket[:, t], games.since[:, t]]  # [G, S, S]
+            At = A[games.action[:, t], jeopardy_bucket[:, t], games.since[:, t]]
             prior = np.einsum("gi,gij->gj", prev, At)
             prior = np.where(games.fresh[:, t, None], model.initial[None], prior)
         a = prior * lik[:, t]
@@ -329,7 +273,6 @@ def forward_backward(model, games, jeopardy_bucket, return_gamma=False):
     for t in range(T - 2, -1, -1):
         At1 = A[games.action[:, t + 1], jeopardy_bucket[:, t + 1], games.since[:, t + 1]]
         nb = np.einsum("gij,gj->gi", At1, lik[:, t + 1] * beta[:, t + 1]) / scale[:, t + 1, None]
-        # past a reset or the end of the game, the future doesn't depend on this step's state
         cut = games.fresh[:, t + 1] | ~games.mask[:, t + 1]
         beta[:, t] = np.where(cut[:, None], 1.0, nb)
 
@@ -359,20 +302,10 @@ def forward_backward(model, games, jeopardy_bucket, return_gamma=False):
 
 
 def death_value(model, games, jeopardy_bucket, horizon=10, discount=None, pseudo=5.0, max_truncation=0.05):
-    """The value of the player's death from here, by the state of its last piece and the jeopardy and
-    since buckets before its next: [state, jeopardy, since]. With discount, E[discount^d] where d is
-    pieces until it dies (0 if it never does); otherwise P(it dies within its next `horizon` pieces).
-    Fitted from the games themselves, weighting each piece by the posterior over its state, so it
-    averages over how the other player really attacked afterwards.
-
-    A game the player survived ended because the other player died, so its label is truncated:
-    pieces are left out when what's unknown could matter (within `horizon` of the end, or with
-    discount^(pieces left) above max_truncation)."""
     *_, gamma = forward_backward(model, games, jeopardy_bucket, return_gamma=True)
     G, T = games.mask.shape
     t_index = np.arange(T)[None, :]
     dead = games.dead & games.mask
-    # pieces until the player's next death, or `never` if there is none
     never = 10 ** 6
     until = np.full((G, T), never)
     for t in range(T - 2, -1, -1):
@@ -384,7 +317,6 @@ def death_value(model, games, jeopardy_bucket, horizon=10, discount=None, pseudo
     else:
         label = np.where(until < never, discount ** np.minimum(until, 10 ** 4).astype(float), 0.0)
         known = (until < never) | (discount ** np.maximum(left, 0).astype(float) <= max_truncation)
-    # the keys come from the next piece, so there must be one
     use = games.mask & ~games.dead & known & (left >= 1)
     next_j = np.zeros_like(jeopardy_bucket)
     next_j[:, :-1] = jeopardy_bucket[:, 1:]
@@ -395,15 +327,12 @@ def death_value(model, games, jeopardy_bucket, horizon=10, discount=None, pseudo
     w = gamma[use]
     np.add.at(den, (next_j[use], next_s[use]), w)
     np.add.at(num, (next_j[use], next_s[use]), w * label[use][:, None])
-    # sparse cells shrink towards the state's overall value
     pooled = num.sum(axis=(0, 1)) / np.maximum(den.sum(axis=(0, 1)), 1e-9)
     table = (num + pseudo * pooled) / (den + pseudo)
     return table.transpose(2, 0, 1), den.transpose(2, 0, 1)
 
 
 class LoadedModel:
-    """A fitted model read back from a generated MarkovOpponentParams.hpp."""
-
     def __init__(self, path):
         numbers = [float(x) for x in re.findall(r"(-?\d+(?:\.\d*)?(?:e[-+]?\d+)?)f\b", open(path).read())]
         sizes = [STATES, ACTIONS * JEOPARDY * SINCE * STATES * STATES, STATES * EMISSIONS, ATTACKS, JEOPARDY - 1]
@@ -413,7 +342,6 @@ class LoadedModel:
         for size in sizes:
             parts.append(np.array(numbers[:size]))
             numbers = numbers[size:]
-        # the header rounds to 7 digits, so renormalise
         self.initial = parts[0] / parts[0].sum()
         transition = parts[1].reshape(ACTIONS, JEOPARDY, SINCE, STATES, STATES)
         self._transition = transition / transition.sum(axis=-1, keepdims=True)
@@ -431,13 +359,11 @@ def m_step(model, init_counts, tr_counts, em_counts, l2=1.0, steps=60, lr=0.05):
     model.initial = (init_counts + 1e-3) / (init_counts + 1e-3).sum()
     model.emission = (em_counts + 1e-4) / (em_counts + 1e-4).sum(axis=1, keepdims=True)
 
-    # transition logits: gradient ascent (Adam) on sum N log A - l2 (|U|^2 + |V|^2 + |X|^2)
     total = tr_counts.sum()
     n_from = tr_counts.sum(axis=4, keepdims=True)
     if model.grid:
-        # on the grid, K replaces U
         params = [model.W, model.K, model.V, model.X]
-        offset_onehot = np.eye(2 * RUNGS - 1)[rung_offsets()]  # [from, to, offset]
+        offset_onehot = np.eye(2 * RUNGS - 1)[rung_offsets()]
     else:
         params = [model.W, model.U, model.V, model.X]
     if model.full:
@@ -470,7 +396,6 @@ def fit(games, jeopardy_bucket, rng, restarts=4, warmup=15, iterations=1000, tol
 
     candidates = []
     for r in range(restarts):
-        # half the restarts start from the rebuild cycle
         model = Model(rng, prior, cycle=r % 2 == 0, grid=topology == "grid", full=topology == "full")
         for _ in range(warmup):
             ll, *counts = forward_backward(model, games, jeopardy_bucket)
@@ -479,8 +404,6 @@ def fit(games, jeopardy_bucket, rng, restarts=4, warmup=15, iterations=1000, tol
         log(f"  restart {r}: {ll / n:.5f} nats/piece after {warmup} iterations")
     ll, model = max(candidates, key=lambda c: c[0])
 
-    # the transition M-step is a few gradient steps, so the likelihood can dip: stop after
-    # `patience` iterations without a gain of tol per piece, and keep the best model seen
     best_ll, best = -np.inf, None
     stale = 0
     for it in range(iterations):
@@ -501,19 +424,13 @@ def fit(games, jeopardy_bucket, rng, restarts=4, warmup=15, iterations=1000, tol
 
 
 def baseline_loglik(train, test, test_bucket, train_bucket):
-    """Emission distribution per jeopardy bucket, no hidden state."""
     counts = np.zeros((JEOPARDY, EMISSIONS))
     np.add.at(counts, (train_bucket[train.mask], train.emission[train.mask]), 1)
     probs = (counts + 0.5) / (counts + 0.5).sum(axis=1, keepdims=True)
     return float(np.log(probs[test_bucket[test.mask], test.emission[test.mask]]).sum())
 
 
-# ---------------------------------------------------------------------------------------------
-# simulation and comparison
-
 def simulate(model, attack_value, limits, games, rng):
-    """Play the fitted model against the logged damage sent (teacher-forced inputs), the way
-    MarkovOpponent::play does. Returns (attack before cancelling, dead) arrays like the log's."""
     A = model.transition()
     G, T = games.mask.shape
     attack = np.zeros((G, T))
@@ -527,8 +444,6 @@ def simulate(model, attack_value, limits, games, rng):
             if t > 0 and dead[g, t - 1]:
                 fresh = True
             meter += games.sent[g, t]
-            # games that logged their meter (the stadium's) were played under other garbage rules: compare
-            # against the meter they really had
             logged = games.meter_before[g, t]
             c = int(sum((meter if np.isnan(logged) else logged) >= l for l in limits))
             a = games.action[g, t]
@@ -549,7 +464,6 @@ def simulate(model, attack_value, limits, games, rng):
 
 
 def summary(sent, attack, dead, mask):
-    """Statistics an opponent model should reproduce."""
     a = attack[mask]
     out = {}
     out["pieces"] = int(mask.sum())
@@ -559,12 +473,10 @@ def summary(sent, attack, dead, mask):
         out[f"P(attack={v})"] = (np.round(a) == v).mean()
     out["P(attack>=6)"] = (a >= 6).mean()
     out["deaths/1000"] = 1000 * dead[mask].mean()
-    # burstiness: P(attack > 0 at t+k | attack > 0 at t)
     on = (attack > 0) & mask
     for k in [1, 2, 3, 5, 8]:
         both = (on[:, :-k] & on[:, k:]).sum()
         out[f"P(on@+{k}|on)"] = both / max(on[:, :-k].sum(), 1)
-    # reaction: mean attack over the next 5 pieces after we send 4+, vs after we send 0
     T = attack.shape[1]
     win = np.zeros_like(attack)
     for k in range(1, 6):
@@ -585,9 +497,6 @@ def print_table(columns):
     for k in keys:
         print(f"{k:28s}" + "".join(f"{columns[n][k]:14.4f}" for n in names))
 
-
-# ---------------------------------------------------------------------------------------------
-# output
 
 def fmt(x):
     text = f"{x:.7g}"
@@ -677,7 +586,6 @@ def report_death_value(model, games, jeopardy_bucket, args):
 
 
 def refit_death_value(args):
-    """Recompute death_value for a fitted model, without refitting it."""
     model = LoadedModel(args.from_header)
     games = load_any(args.logs, tuple(int(p) for p in args.players.split(",")))
     meter, _ = replay_meter(games)
@@ -690,8 +598,6 @@ def refit_death_value(args):
                  table, args.horizon, args.discount, source, stadium_rules)
     print(f"wrote {args.out}")
 
-
-# ---------------------------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -745,8 +651,6 @@ def main():
     games = load_any(args.logs, tuple(int(p) for p in args.players.split(",")))
     print(f"{len(games.ids)} games, {games.steps()} pieces, {int(games.dead[games.mask].sum())} opponent deaths")
 
-    # the meter before each piece: logged by the stadium, replayed for nana_emulate logs. the replay must
-    # reproduce the opponent's meter, or the jeopardy buckets mean something else at run time
     meter, meter_after = replay_meter(games)
     logged = ~np.isnan(games.meter_before)
     replayed = games.mask & ~logged
