@@ -67,13 +67,39 @@ export NANA_REWARD=${NANA_REWARD:-app}
 
 out="results/$(hostname)-strength-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out/parts"
+# Runtime variants inherit the supplied config, then override only their own settings.
+declare -A variant_configs
+for v in "${variants[@]}"; do
+    if [ "$v" = no-garbage ]; then
+        variant_configs[v$v]="$PWD/$out/config-$v.json"
+        python3 - "${NANA_CONFIG:-}" "${variant_configs[v$v]}" <<'PY'
+import json
+import sys
+
+config = {}
+if sys.argv[1]:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        config = json.load(source)
+config.update(opponent=False, belief_weights=[0] * 8)
+with open(sys.argv[2], "w", encoding="utf-8") as target:
+    json.dump(config, target, indent=2)
+    target.write("\n")
+PY
+    fi
+done
 log() { echo "$*" | tee -a "$out/machine.txt"; }
 {
     echo "host: $(hostname)  cpus: $cpus  base_ms: $base_ms  mults: ${mults[*]}  par_threads: ${par_threads[*]}"
     echo "games: $games  seeds: $seed0..$(( seed0 + games - 1 ))  horizon: $horizon  lf1: $lf1"
     (( sims > 0 )) && echo "fixed search: $sims simulations per move (ms columns are only BASE_MS)"
     echo "extra flags (plain builds): ${extra_flags:-none}"
-    for v in "${variants[@]}"; do echo "variant $v: $(variant_flags "$v")"; done
+    for v in "${variants[@]}"; do
+        echo "variant $v: $(variant_flags "$v")"
+        if [ -n "${variant_configs[v$v]:-}" ]; then
+            echo "  NANA_REWARD=app NANA_CONFIG=${variant_configs[v$v]}"
+            cat "${variant_configs[v$v]}"
+        fi
+    done
     lscpu 2>/dev/null | grep -E "Model name|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\)|L3|MHz" || true
     uname -r
     git log -1 --format="commit: %h %s"
@@ -100,15 +126,19 @@ run_tasks() {
     claims=$(mktemp -d)
     worker() {
         local slot=$1 first=$(( $1 * threads )) k name lf ms seed n limit status
-        local pinning=() budget=()
+        local pinning=() budget=() runtime=()
         [ "$pin" = 1 ] && pinning=(taskset -c "$first-$(( first + threads - 1 ))")
         (( sims > 0 )) && budget=(--sims "$sims")
         for ((k = 0; k < ${#tasks[@]}; k++)); do
             ( set -C; : > "$claims/$k" ) 2> /dev/null || continue
             read -r name lf ms seed n <<< "${tasks[$k]}"
+            runtime=()
+            if [ -n "${variant_configs[$lf]:-}" ]; then
+                runtime=(env "NANA_CONFIG=${variant_configs[$lf]}" NANA_REWARD=app)
+            fi
             limit=$(( (sims > 0 ? 6 : 2) * n * horizon * ms / 1000 + 60 ))
             status=0
-            timeout "$limit" "${pinning[@]}" "${bins[$lf]}" --threads "$threads" --games "$n" --ms "$ms" \
+            timeout "$limit" "${pinning[@]}" "${runtime[@]}" "${bins[$lf]}" --threads "$threads" --games "$n" --ms "$ms" \
                 --seed "$seed" --max-pieces "$horizon" "${budget[@]}" \
                 > "$dir/$name-seed$seed.jsonl" 2> "$dir/$name-seed$seed.err" || status=$?
             if [ "$status" = 124 ]; then

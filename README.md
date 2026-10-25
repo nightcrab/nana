@@ -108,7 +108,9 @@ Each release contains multiple binaries targeting different hardware. `nana_tbp`
 
 Some of these, such as `threads` can be overridden by a TBP2 frontend but are used otherwise.
 
-`"opponent": false` makes the search ignore the opponent: no garbage is sent in simulations, and the kill reward and the opponent belief terms are off (so it needs `"reward": "app"` and zero `belief_weights`). Garbage already queued against Nana still lands. The search with and without an opponent are both compiled in, so this needs no rebuild. It replaces the old `NANA_SEARCH_GARBAGE=0` build flag. Other tools read the same keys from the file named by `NANA_CONFIG`.
+`"opponent": false` disables opponent simulation during search, including speculative incoming attacks, outgoing attacks to the opponent, kill rewards, and opponent belief terms. Garbage already queued against Nana still lands. Set `"reward": "app"` and leave `belief_weights` at zero in `nana.json`. Both search modes are compiled in, so this needs no rebuild. It replaces the old `NANA_SEARCH_GARBAGE=0` build flag.
+
+Other tools, such as `nana_emulate` and `nana_speed`, read `opponent`, `belief_weights`, and evaluation/search weights from the JSON file named by `NANA_CONFIG`. They use environment variables for reward and other TBP-only settings: set `NANA_REWARD=app` and use `{"opponent": false}` in that JSON file; do not include the `reward` key. The strength ladder's `no-garbage` variant applies these runtime settings automatically, retaining other settings from `NANA_CONFIG` and zeroing the belief weights for that variant.
 
 ## Tuning
 

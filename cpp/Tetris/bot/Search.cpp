@@ -292,7 +292,12 @@ static void searchGarbage(EmulationGame& root) {
     }
     if constexpr (cc_search) {
         EmulationGame::deterministic_chance = false;
-        root.reseed_chance();
+        if (search_opponent) {
+            root.reseed_chance<MarkovOpponent>();
+        }
+        else {
+            root.reseed_chance<NoOpponent>();
+        }
         EmulationGame::deterministic_chance = true;
     }
     if constexpr (NANA_PHANTOM_GARBAGE || cc_search) {
