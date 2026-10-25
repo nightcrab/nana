@@ -535,7 +535,14 @@ float UCTNode::ccValue() const {
 	return best;
 }
 
-size_t UCTNode::select_CC(RNG& rng) const {
+double ccUniform(RNG& rng) {
+	return ((double)rng.getRand(1u << 16) * 65536.0 + (double)rng.getRand(1u << 16)) / 4294967296.0;
+}
+
+size_t UCTNode::select_CC(RNG& rng, int exclude, float* p_chosen) const {
+	if (p_chosen) {
+		*p_chosen = 1.0f;
+	}
 #if NANA_CC_LOCKSTEP
 	if (cc_trace::select_hook) {
 		return cc_trace::select_hook(*this);
@@ -562,19 +569,46 @@ size_t UCTNode::select_CC(RNG& rng) const {
 		weights.push_back(w);
 		total += w;
 	}
+	// leaving out `exclude` and drawing from the rest keeps the full distribution for a caller that kept
+	// `exclude` with its own probability first
+	size_t skip = ranked.size();
+	for (size_t rank = 0; rank < ranked.size(); rank++) {
+		if ((int)ranked[rank].second == exclude) {
+			skip = rank;
+			break;
+		}
+	}
+	double drawable = total;
+	if (skip < ranked.size()) {
+		if (total - weights[skip] > 0) {
+			drawable = total - weights[skip];
+		}
+		else {
+			skip = ranked.size();
+		}
+	}
 #if NANA_CC_LOCKSTEP
 	const double u = cc_trace::uniform();
 #else
-	const double u = ((double)rng.getRand(1u << 16) * 65536.0 + (double)rng.getRand(1u << 16)) / 4294967296.0;
+	const double u = ccUniform(rng);
 #endif
-	double target = u * total;
+	double target = u * drawable;
 	size_t pick = ranked.size() - 1;
+	if (pick == skip && pick > 0) {
+		pick--;
+	}
 	for (size_t rank = 0; rank < ranked.size(); rank++) {
+		if (rank == skip) {
+			continue;
+		}
 		target -= weights[rank];
 		if (target < 0) {
 			pick = rank;
 			break;
 		}
+	}
+	if (p_chosen && total > 0) {
+		*p_chosen = (float)(weights[pick] / total);
 	}
 #if NANA_CC_LOCKSTEP
 	cc_trace::Step step{ id, {}, u, (uint32_t)pick };

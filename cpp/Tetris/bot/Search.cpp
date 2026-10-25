@@ -107,7 +107,9 @@ static size_t leafDepth() {
 #ifndef NANA_MPMCTS
 #define NANA_MPMCTS !NANA_CC_SEARCH
 #endif
-static_assert(!cc_search || !NANA_MPMCTS, "the CC search needs NANA_MPMCTS=0: its restarts assume PUCT");
+static_assert(!cc_search || !NANA_MPMCTS,
+              "the CC search needs NANA_MPMCTS=0: the MP-MCTS path selects with PUCT and restarts on PUCT's "
+              "stillChosen test; the CC search gets its restart from NANA_CC_RESTART instead");
 
 #ifndef NANA_LEAK
 #define NANA_LEAK 0
@@ -954,6 +956,66 @@ static void notifySimulationDone() {
     }
 }
 
+// A CC backup settled at the node it just left (job.child_hash), so every node above it keeps its
+// values and sampling weights. Draw the next simulation's path from the root again: fresh chance, and at
+// each ancestor the stored action stays with the probability it was sampled with. The job selects at the
+// first node where the draw leaves the stored path (without the stored action, when an action draw left
+// it), or at the settled node itself, which this thread owns.
+[[maybe_unused]] static void restartCC(int threadIdx, Msg&& msg) {
+    Job& job = *msg;
+    UCT& uct = Search::uct;
+    RNG& rng = uct.rng[threadIdx];
+    const size_t depth = job.path.size();
+
+    EmulationGame& state = job.state;
+    state = replay_root;
+    state.start_from_root();
+    size_t keep = depth;
+    int exclude = -1;
+    for (size_t i = 0; i < depth; i++) {
+        if (ccUniform(rng) >= job.probs[i]) {
+            keep = i;
+            exclude = job.path[i].actionID;
+            break;
+        }
+        state.set_move(state.specific_move(job.moves[i].unpack()));
+        state.play_moves();
+        state.chance_move();
+        const uint32_t expected = i + 1 < depth ? job.path[i + 1].hash : job.child_hash;
+        if (state.game_over || state.hash() != expected) {
+            keep = i + 1;
+            break;
+        }
+    }
+
+    uct.stats[threadIdx].restarts++;
+    const bool matched = keep == depth && exclude < 0 && !state.game_over && state.hash() == job.child_hash;
+    if (matched) {
+        uct.stats[threadIdx].replay_matched++;
+        uct.stats[threadIdx].restart_depth += depth;
+    }
+    else {
+        uct.stats[threadIdx].replay_diverged++;
+        uct.stats[threadIdx].replay_diverge_depth += keep;
+        uct.stats[threadIdx].restart_depth += keep;
+        job.path.resize(keep, HashActionPair(0, -1));
+        job.moves.resize(keep);
+        job.probs.resize(keep);
+    }
+
+    job.exclude = exclude;
+    job.R = Reward{};
+    job.extra_N = 0;
+    job.history.clear();
+    job.steps.clear();
+    job.snapshots.clear();
+    job.type = SELECT;
+
+    notifySimulationDone();
+
+    send(threadIdx, matched ? threadIdx : uct.getOwner(state.hash()), std::move(msg));
+}
+
 void Search::processJob(const int threadIdx, Msg&& msg) {
     Job& job = *msg;
 
@@ -1125,7 +1187,12 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 action = node.selectWithCompetitors(depth, row);
             }
             else if constexpr (cc_search) {
-                action = node.select_CC(uct.rng[threadIdx]);
+                float p = 1.0f;
+                action = node.select_CC(uct.rng[threadIdx], job.exclude, &p);
+                job.exclude = -1;
+                if constexpr (cc_restart) {
+                    job.probs.push_back(p);
+                }
             }
             else {
                 action = node.select(depth);
@@ -1231,6 +1298,17 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         if (!job.steps.empty()) {
             job.steps.pop_back();
         }
+        if (!job.probs.empty()) {
+            job.probs.pop_back();
+        }
+
+        if constexpr (cc_restart) {
+            if (settled && !job.path.empty() && job.moves.size() == job.path.size() &&
+                job.probs.size() == job.path.size()) {
+                restartCC(threadIdx, std::move(msg));
+                return;
+            }
+        }
 
         if (job.path.empty() || settled) {
             if (job.path.empty()) {
@@ -1246,6 +1324,8 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             job.moves.clear();
             job.steps.clear();
             job.snapshots.clear();
+            job.probs.clear();
+            job.exclude = -1;
             job.type = SELECT;
 
             notifySimulationDone();

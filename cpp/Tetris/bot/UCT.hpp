@@ -35,6 +35,17 @@ struct EdgeStats {
 constexpr bool cc_search = NANA_CC_SEARCH;
 constexpr float CC_DEAD = -1e9f;
 
+// The CC search's version of the MP-MCTS restart: a backup that settles below the root restarts through
+// a replay that redraws chance and each sampled action, instead of selecting again at the root's owner.
+// Off under lockstep, whose selections must follow Cold Clear's stream of root restarts.
+#ifndef NANA_CC_LOCKSTEP
+#define NANA_CC_LOCKSTEP 0
+#endif
+#ifndef NANA_CC_RESTART
+#define NANA_CC_RESTART (NANA_CC_SEARCH && !NANA_CC_LOCKSTEP)
+#endif
+constexpr bool cc_restart = NANA_CC_RESTART;
+
 #ifndef NANA_SUFFIX
 #define NANA_SUFFIX !NANA_CC_SEARCH
 #endif
@@ -211,8 +222,12 @@ class UCTNode {
     size_t select_r_max();
     size_t select_SOR(RNG& rng);
     float ccValue() const;
-    size_t select_CC(RNG& rng) const;
+    // Samples an action by Cold Clear's rank weights, never `exclude` unless nothing else is alive.
+    // `p_chosen` gets the pick's probability under the full distribution, `exclude` included.
+    size_t select_CC(RNG& rng, int exclude = -1, float* p_chosen = nullptr) const;
 };
+
+double ccUniform(RNG& rng);
 
 class HashActionPair {
    public:
@@ -276,6 +291,9 @@ class Job {
     std::vector<EmulationGame> snapshots;
     std::vector<PackedMove> moves;
     std::vector<float> steps;
+    // CC search: each path step's sampling probability, and an action the next selection must skip
+    std::vector<float> probs;
+    int exclude = -1;
 
     int extra_N = 0;
 
