@@ -3,6 +3,7 @@
 #include "SearchFixture.hpp"
 #endif
 #include "Config.hpp"
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -324,6 +325,31 @@ struct alignas(64) WorkerLocal {
 
 static std::vector<WorkerLocal> worker_local;
 
+// Per owner, ids of nodes that may hold parked visits, so the end-of-search
+// flush touches only those nodes, never the whole tree. Entries can repeat or
+// go stale; the flush dedups and filters them.
+static std::vector<std::vector<uint32_t>> parked_ids;
+
+static void noteParked(int threadIdx, const UCTNode& node) {
+    if constexpr (NANA_FLUSH_AT_END != 0) {
+        if (node.N_buffer == 0) {
+            parked_ids[threadIdx].push_back(node.id);
+        }
+    }
+}
+
+// Lookup that doesn't promote an old-generation node, unlike UCT::getNode.
+static UCTNode* findNode(uint32_t id) {
+    for (auto* side : { &Search::uct.nodes_right, &Search::uct.nodes_left }) {
+        auto& map = (*side)[id % Search::uct.workers].obj_;
+        auto it = map.find(id);
+        if (it != map.end()) {
+            return &it->second;
+        }
+    }
+    return nullptr;
+}
+
 #ifndef NANA_DEPTH_BASELINE
 #define NANA_DEPTH_BASELINE !NANA_CC_SEARCH
 #endif
@@ -390,6 +416,7 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
 
     // Create new search tree
     uct = UCT(core_count);
+    parked_ids.assign(core_count, {});
     depth_baseline.assign(core_count, DepthBaseline{});
 
     // Create root node
@@ -437,6 +464,11 @@ void Search::continueSearch(EmulationGame state) {
 
     if (state.game_over) {
         return;
+    }
+
+    // Collect here rather than in endSearch, so the move is returned first.
+    if (uct.map_size() > 200000) {
+        uct.collect();
     }
 
     search_start_time = std::chrono::steady_clock::now();
@@ -535,18 +567,28 @@ static void flushParked(bool apply) {
     std::vector<float> hidden_N(root.actionCount(), 0.0f);
     std::vector<float> hidden_R(root.actionCount(), 0.0f);
 
-    std::vector<UCTNode*> parked;
-    for (auto* side : { &uct.nodes_left, &uct.nodes_right }) {
-        for (auto& shard : *side) {
-            for (auto& [id, node] : shard.obj_) {
-                if (node.N_buffer != 0 || !rewardEmpty(node.R_buffer)) {
-                    parked.push_back(&node);
-                }
+    // Ids, not pointers: getNode below moves old-generation nodes, which would
+    // leave a pointer to a parked node dangling.
+    std::vector<uint32_t> parked;
+    for (std::vector<uint32_t>& ids : parked_ids) {
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        size_t kept = 0;
+        for (const uint32_t id : ids) {
+            const UCTNode* node = findNode(id);
+            if (node && (node->N_buffer != 0 || !rewardEmpty(node->R_buffer))) {
+                ids[kept++] = id;
+                parked.push_back(id);
             }
         }
+        ids.resize(apply ? 0 : kept);
     }
 
-    for (UCTNode* node : parked) {
+    for (const uint32_t id : parked) {
+        UCTNode* node = findNode(id);
+        if (!node) {
+            continue;
+        }
         const float N = (float)node->N_buffer;
 #if NANA_EXPECTIMAX
         Reward R = node->value();
@@ -581,8 +623,10 @@ static void flushParked(bool apply) {
             child = &parent;
         }
         if (apply) {
-            node->N_buffer = 0;
-            node->R_buffer = Reward{};
+            if (UCTNode* parked_node = findNode(id)) {
+                parked_node->N_buffer = 0;
+                parked_node->R_buffer = Reward{};
+            }
         }
     }
 
@@ -647,11 +691,6 @@ void Search::endSearch() {
 
     if constexpr (NANA_FLUSH_AT_END != 0) {
         flushParked(NANA_FLUSH_AT_END == 1);
-    }
-
-    // garbage collect
-    if (uct.map_size() > 200000) {
-        uct.collect();
     }
 
     queues.clear();
@@ -933,6 +972,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             edge.N += 1;
             node.N += 1;
             if (node.id != replay_root_hash) {
+                noteParked(threadIdx, node);
                 if constexpr (!NANA_EXPECTIMAX) {
                     node.R_buffer += job.R;
                 }
@@ -980,6 +1020,16 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             }
             local.ran_dry = false;
             job.is_reply = false;
+        }
+
+        // the owner runs parked expansions only once its queue is empty, so another job parked for
+        // the same state may have expanded it meanwhile: select into that node instead of expanding
+        // it again (the depth cap's leaves are expanded on purpose, as SELECT does)
+        if (const uint32_t hash = job.state.hash();
+            uct.getOwner(hash) == (uint32_t)threadIdx && uct.nodeExists(hash) && job.path.size() < leafDepth()) {
+            job.type = SELECT;
+            send(threadIdx, threadIdx, std::move(msg));
+            return;
         }
 
         uct.stats[threadIdx].nodes++;
@@ -1269,6 +1319,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 
         if (still_chosen && !leak) {
+            noteParked(threadIdx, node);
             if constexpr (!NANA_EXPECTIMAX) {
                 node.R_buffer += reward;
             }
