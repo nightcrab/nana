@@ -87,7 +87,7 @@ struct NanaConfig {
     double prior_exponent = 0.5;
     double n_cap = 10000;
     int depth_cap = 0;
-    std::string eval = "nana";
+    std::string eval = "cc";
     std::array<double, 8> belief_weights{};
     CCWeights cc;
 
