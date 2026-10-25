@@ -107,8 +107,12 @@ Every iteration, in `status.txt` and the log:
 ## Parameter spaces (`tuner/spaces/`)
 
 - `eval.json`: what the bot values. The rollout score's `app_weight` and `eval_weight`, and the
-  33 eval weights nana reads, each bounded to default +- max(|default|, 20) (`clears[0]` and
-  `tspins[0]` stay 0: the other entries are relative to them);
+  33 eval weights nana reads (`clears[0]` and `tspins[0]` stay 0: the other entries are relative to
+  them). The bounds are fixed, and are not moved when a tuning result becomes the default. Each
+  term's sign is fixed by what it means: penalties in [-M, 0], bonuses (counting, perfect clear,
+  tetris, t-spins) in [0, M], and well columns and 1-3 line clears in [-M, M]. M was set once as
+  2.5 x the larger of the tuned value and Cold Clear's weight for the term (at least 20), rounded up;
+  all ten well columns share +-150. A result near a bound means the bound was wrong: widen it there;
 - `search.json`: how it searches. `c_init`, `c_base`, `n_cap`, `depth_step`, `prior_exponent`.
 
 A space is a JSON list of `{"name", "default", "low", "high"}` with optional `"log": true` (uniform
