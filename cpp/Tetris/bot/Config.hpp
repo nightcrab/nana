@@ -69,6 +69,10 @@ struct NanaConfig {
     double counting = 61.9347727280756;
     double perfect_clear = 229.5585551568744;
     double wasted_t = -48.3875036786517;
+    // eval "convex" only: the whole score of a board with an overhang or cavity above the lowest column
+    double nonconvex = -7000;
+    // eval "convex" only: prior weight multiplier for actions to such boards, which rank after every convex action
+    double nonconvex_prior = 0.01;
     std::array<double, 10> well_columns = { 22.206568640471783, 23.75351666383591, -9.705152993022665,
                                             64.4055163819902,   38.01976098740804, 33.32048980372693,
                                             84.8998702340318,   36.54866592169482, -17.853911656640292,
@@ -103,5 +107,9 @@ struct NanaConfig {
 void loadTbpConfig();
 
 const NanaConfig& config();
+
+// the eval named by config().eval: "cc" (Cold Clear's eval), "nana" (nana's own), "convex" (nana's, no-spin style)
+enum class EvalMode { CC, Nana, Convex };
+EvalMode evalMode();
 
 std::string configJson(const NanaConfig& config);

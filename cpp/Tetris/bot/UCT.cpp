@@ -242,17 +242,23 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	std::vector<ColdAction> cold;
 	cold.reserve(raw_actions.size());
 
-	std::vector<Stochastic<int>> prior;
+	// scratch reused across nodes on this thread
+	thread_local std::vector<Stochastic<int>> prior;
+	thread_local std::vector<char> convex_action;
+	prior.clear();
 	prior.reserve(raw_actions.size());
+	convex_action.clear();
+	bool any_convex = false;
 
 	int idx = 0;
 
 	int gheight = state.game.board.get_garbage_height();
 
-	static const bool use_cc_eval = config().eval == "cc";
-	std::vector<PieceType> bag_left;
-	if (use_cc_eval) {
-		bag_left.assign(state.rng.bag.begin() + std::min<size_t>(state.rng.bagiterator, state.rng.bag.size()), state.rng.bag.end());
+	static const EvalMode eval_mode = evalMode();
+	const bool use_convex_eval = eval_mode == EvalMode::Convex;
+	Eval::Context context{ state.game, eval_mode };
+	if (eval_mode == EvalMode::CC) {
+		context.bag_left.assign(state.rng.bag.begin() + std::min<size_t>(state.rng.bagiterator, state.rng.bag.size()), state.rng.bag.end());
 	}
 
 	static const bool belief_weighted = [] {
@@ -266,15 +272,16 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		meter += garbage;
 	}
 	std::optional<Eval::BeliefTerm> belief;
-	if (use_cc_eval && belief_weighted && state.track_belief) {
+	if (eval_mode == EvalMode::CC && belief_weighted && state.track_belief) {
 		belief.emplace(&state.belief, meter);
+		context.belief = &*belief;
 	}
+	context.meter = meter;
 
 	for (auto& raw_action : raw_actions) {
 		double move_reward = 0;
-		float eval = use_cc_eval ? Eval::eval_CC_standard(state.game, Move(raw_action, false), bag_left, &move_reward,
-		                                                  belief ? &*belief : nullptr, meter)
-		                         : Eval::eval_CC(state.game, Move(raw_action, false), &move_reward);
+		bool is_convex = true;
+		float eval = Eval::evaluate(context, raw_action, &move_reward, &is_convex);
 		if constexpr (cc_search) {
 			edge_stats[idx].R = eval;
 		}
@@ -289,6 +296,10 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		assert(std::memcmp(&unpacked.piece.minos, &raw_action.minos, sizeof(raw_action.minos)) == 0);
 #endif
 		cold.push_back(std::move(c));
+		if (use_convex_eval) {
+			convex_action.push_back(is_convex);
+			any_convex |= is_convex;
+		}
 		prior.push_back(Stochastic<int>(idx, eval));
 		idx++;
 	}
@@ -296,14 +307,24 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	sort_des(prior);
 
 	static const NanaConfig& c = config();
+	// convex actions take the top ranks, and the rest are weighted down unless the node has no convex action
+	const bool split = use_convex_eval && any_convex;
+	if (split) {
+		std::stable_partition(prior.begin(), prior.end(), [&](const Stochastic<int>& p) { return convex_action[p.value] != 0; });
+	}
 	for (int rank = 1; rank <= prior.size(); rank++) {
 		prior[rank - 1].probability = c.priorWeight(rank);
+		if (split && !convex_action[prior[rank - 1].value]) {
+			prior[rank - 1].probability *= (float)c.nonconvex_prior;
+		}
 	}
 
-	prior = normalise(prior);
-
-	for (Stochastic<int>& P : prior) {
-		edge_stats[P.value].prior = P.probability;
+	float prior_sum = 0;
+	for (const Stochastic<int>& P : prior) {
+		prior_sum += P.probability;
+	}
+	for (const Stochastic<int>& P : prior) {
+		edge_stats[P.value].prior = P.probability / prior_sum;
 	}
 
 	this->edge_stats = std::move(edge_stats);

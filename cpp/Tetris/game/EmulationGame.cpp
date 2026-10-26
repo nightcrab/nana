@@ -375,10 +375,12 @@ std::vector<Piece> EmulationGame::placements() const {
         return pieces;
     }
 
+    // eval "convex" plays no spins, so its placements carry no spin labels
+    static const bool label_spins = evalMode() != EvalMode::Convex;
     bool candidates = false;
     for (Piece& piece : pieces) {
         piece.spin = spinType::null;
-        candidates |= piece.type == PieceType::T && spin_corners(game.board, piece);
+        candidates |= label_spins && piece.type == PieceType::T && spin_corners(game.board, piece);
     }
     if (!candidates) {
         return pieces;

@@ -237,7 +237,7 @@ static EmulationGame fromSeed(uint64_t seed, int pieces) {
         double best = -1e18;
         int best_index = -1;
         for (size_t i = 0; i < placements.size(); i++) {
-            const double total = Eval::eval_CC_standard(game.game, Move(placements[i], false), left);
+            const double total = Eval::evalCC(game.game, placements[i], left);
             if (total > best) {
                 best = total;
                 best_index = (int)i;
@@ -289,7 +289,7 @@ int main(int argc, const char** argv) {
             return 2;
         }
     }
-    if (config().eval != "cc") {
+    if (evalMode() != EvalMode::CC) {
         std::cerr << "nana_cctree compares against Cold Clear's eval: set NANA_CONFIG to a config with \"eval\": \"cc\"" << std::endl;
         return 2;
     }

@@ -302,7 +302,7 @@ private:
 
             for (auto& move : moves) {
                 // raw scores
-                policy.push_back(Stochastic<Move>(move, Eval::eval_CC(game.game, move)));
+                policy.push_back(Stochastic<Move>(move, Eval::evalNana(game.game, move.piece)));
             }
 
             // sort in descending order
@@ -323,7 +323,7 @@ private:
             Distribution::normalise(SoR_policy);
 
             Move sample = Distribution::sample(SoR_policy, game.rng);
-            std::cout << "eval was:" << Eval::eval_CC(game.game, sample) << std::endl;
+            std::cout << "eval was:" << Eval::evalNana(game.game, sample.piece) << std::endl;
             game.set_move(sample);
             game.play_moves();
             game.chance_move();

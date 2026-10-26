@@ -215,7 +215,10 @@ int Eval::get_row_transitions(const Board& board) {
     return transitions;
 }
 
-double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
+// Convex: the no-spin style, leaving out the features that only score boards with an overhang or cavity above
+// the lowest column (overhangs, T-spins, wasted T). evalConvex scores those boards on their own.
+template <bool Convex>
+static double evalBoard(const Board& board, int lines, bool tspin, bool waste_t) {
 
     static const NanaConfig& c = config();
 
@@ -223,10 +226,10 @@ double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
 
     std::pair<int, int> values;
 
-    if (is_top_half(board))
+    if (Eval::is_top_half(board))
         score += c.top_half;
 
-    if (is_top_quarter(board))
+    if (Eval::is_top_quarter(board))
         score += c.top_quarter;
 
     if (is_low(board))
@@ -236,63 +239,71 @@ double Eval::eval_CC(const Board& board, int lines, bool tspin, bool waste_t) {
         score += c.perfect_clear;
 
 
-    values = cavities_overhangs(board);
+    values = Eval::cavities_overhangs(board);
 
     score += values.first * c.cavity_cells;
 
     score += values.first * values.first * c.cavity_cells_sq;
 
-    score += values.second * c.overhangs;
+    if constexpr (!Convex) {
+        score += values.second * c.overhangs;
 
-    score += values.second * values.second * c.overhangs_sq;
+        score += values.second * values.second * c.overhangs_sq;
+    }
 
-    values = height_features(board);
+    values = Eval::height_features(board);
 
     score += values.second * c.height;
 
-    if (ct4(board)) {
+    if (Eval::ct4(board)) {
         score += c.counting;
     }
 
-    values = n_covered_cells(board);
+    values = Eval::n_covered_cells(board);
 
     score += values.first * c.covered_cells;
     score += values.second * c.covered_cells_sq;
 
-    values = get_bumpiness(board);
+    values = Eval::get_bumpiness(board);
 
     score += values.first * c.bumpiness;
     score += values.second * c.bumpiness_sq;
 
-    score += c.well_columns[well_position(board)];
+    score += c.well_columns[Eval::well_position(board)];
     score += c.clears[lines];
 
-    score += get_row_transitions(board) * c.row_transitions;
+    score += Eval::get_row_transitions(board) * c.row_transitions;
 
-    if (tspin && lines < (int)std::size(c.tspins)) {
+    if (!Convex && tspin && lines < (int)std::size(c.tspins)) {
         score += c.tspins[lines];
     }
 
-    if (waste_t) {
+    if (!Convex && waste_t) {
         score += c.wasted_t;
     }
 
     return (score + 10000) / 10000;
 }
 
-double Eval::eval_CC(Game game, Move move, double* move_part) {
-    game.place_piece(move.piece);
-    int lines = game.board.clearLines();
-    spinType spin = move.piece.spin;
+double Eval::nanaBoard(const Board& board, int lines, bool tspin, bool waste_t) {
+    return evalBoard<false>(board, lines, tspin, waste_t);
+}
+
+double Eval::evalNana(const Game& game, const Piece& piece, double* move_part) {
+    // only the board changes, so only the board is copied
+    Board board = game.board;
+    board.set(piece);
+    int lines = board.clearLines();
+    spinType spin = piece.spin;
     bool tspin = false;
     if (spin == spinType::normal &&
-        (move.piece.type == PieceType::T || !std::holds_alternative<TetrioS1>(game.mode))) {
+        (piece.type == PieceType::T || !std::holds_alternative<TetrioS1>(game.mode))) {
         tspin = true;
     }
 
     bool waste_t = false;
 
-    if (move.piece.type == PieceType::T) {
+    if (piece.type == PieceType::T) {
         if (!tspin) {
             waste_t = true;
         }
@@ -309,5 +320,40 @@ double Eval::eval_CC(Game game, Move move, double* move_part) {
         }
         *move_part = score / 10000;
     }
-    return eval_CC(game.board, lines, tspin, waste_t);
+    return nanaBoard(board, lines, tspin, waste_t);
+}
+
+double Eval::evalConvex(const Game& game, const Piece& piece, double* move_part, bool* convex) {
+    static const NanaConfig& c = config();
+    // death is worth 0, so every live board stays at least one point above it
+    constexpr double alive = 1.0 / 10000;
+    // only the board changes, so only the board is copied
+    Board board = game.board;
+    board.set(piece);
+    int lines = board.clearLines();
+    const bool is_convex = board.surface_convex();
+    if (convex) {
+        *convex = is_convex;
+    }
+    if (!is_convex) {
+        if (move_part) {
+            *move_part = 0;
+        }
+        return std::max((c.nonconvex + 10000) / 10000, alive);
+    }
+    if (move_part) {
+        *move_part = c.clears[lines] / 10000;
+    }
+    return std::max(evalBoard<true>(board, lines, false, false), alive);
+}
+
+double Eval::evaluate(const Context& context, const Piece& piece, double* move_part, bool* convex) {
+    switch (context.mode) {
+    case EvalMode::CC:
+        return evalCC(context.game, piece, context.bag_left, move_part, context.belief, context.meter);
+    case EvalMode::Convex:
+        return evalConvex(context.game, piece, move_part, convex);
+    default:
+        return evalNana(context.game, piece, move_part);
+    }
 }

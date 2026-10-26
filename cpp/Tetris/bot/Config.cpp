@@ -55,6 +55,8 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("counting", c.counting);
     visit("perfect_clear", c.perfect_clear);
     visit("wasted_t", c.wasted_t);
+    visit("nonconvex", c.nonconvex);
+    visit("nonconvex_prior", c.nonconvex_prior);
     visit("well_columns", c.well_columns);
     visit("clears", c.clears);
     visit("tspins", c.tspins);
@@ -154,8 +156,11 @@ void finish(NanaConfig& c) {
     if (!(c.n_cap >= 1)) {
         fail("n_cap must be at least 1");
     }
-    if (c.eval != "nana" && c.eval != "cc") {
-        fail("eval must be nana or cc");
+    if (c.eval != "nana" && c.eval != "cc" && c.eval != "convex") {
+        fail("eval must be nana, cc or convex");
+    }
+    if (!(c.nonconvex_prior >= 0 && c.nonconvex_prior <= 1)) {
+        fail("nonconvex_prior must be in [0, 1]");
     }
     if (c.depth_cap < 0) {
         fail("depth_cap must be nonnegative");
@@ -241,6 +246,12 @@ float NanaConfig::priorWeight(int rank) const {
 const NanaConfig& config() {
     static const NanaConfig loaded = load();
     return loaded;
+}
+
+EvalMode evalMode() {
+    static const EvalMode mode = config().eval == "cc" ? EvalMode::CC
+        : config().eval == "convex" ? EvalMode::Convex : EvalMode::Nana;
+    return mode;
 }
 
 std::string configJson(const NanaConfig& config) {
