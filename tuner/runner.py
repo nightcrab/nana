@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import os
 import queue
 import subprocess
@@ -17,6 +18,9 @@ class Stage:
         if spec.get("env", "hmm") != "hmm":
             raise ValueError(f"stage {self.name}: env {spec['env']!r}: only the hmm opponent is left")
         self.rules = spec.get("rules", "tetrio")
+        self.objective = spec.get("objective", "strength")
+        if self.objective not in ("strength", "sims-per-second"):
+            raise ValueError(f"unknown objective: {self.objective}")
         self.spec = dict(spec)
 
     def args(self):
@@ -27,7 +31,15 @@ class Stage:
         return dict(config, rules=self.rules)
 
 
-def fitness(game, horizon):
+def fitness(game, horizon, objective="strength"):
+    if objective == "sims-per-second":
+        sims = game.get("sims_per_move", 0)
+        ms = game.get("ms_per_move", 0)
+        if not (math.isfinite(sims) and sims > 0 and math.isfinite(ms) and ms > 0):
+            raise RunnerError("sims-per-second needs positive, finite sims_per_move and ms_per_move from nana_emulate")
+        return 1000.0 * sims / ms
+    if objective != "strength":
+        raise ValueError(f"unknown objective: {objective}")
     return game["attack"] / horizon
 
 
@@ -36,16 +48,31 @@ class RunnerError(RuntimeError):
 
 
 class Runner:
-    def __init__(self, nana, cpus, workdir, chunk=4, timeout=3600):
+    @staticmethod
+    def validate_cpus(cpus, threads):
+        if not isinstance(threads, int) or not 1 <= threads <= 64:
+            raise ValueError("threads must be an integer in [1, 64]")
+        if not cpus or any(not isinstance(cpu, int) or cpu < 0 for cpu in cpus):
+            raise ValueError("cpus must be a nonempty list of nonnegative CPU numbers")
+        if len(set(cpus)) != len(cpus):
+            raise ValueError("cpus must not contain duplicates")
+        if len(cpus) % threads:
+            raise ValueError("--threads must divide the number of --cpus (each game needs its own CPU group)")
+
+    def __init__(self, nana, cpus, workdir, chunk=4, timeout=3600, threads=1):
         self.nana = os.path.abspath(nana)
         self.cpus = list(cpus)
+        self.validate_cpus(self.cpus, threads)
+        self.threads = threads
+        self.cpu_groups = [self.cpus[i:i + threads] for i in range(0, len(self.cpus), threads)]
+        self.workers = len(self.cpu_groups)
         self.config_dir = os.path.join(workdir, "configs")
         os.makedirs(self.config_dir, exist_ok=True)
         self.chunk = chunk
         self.timeout = timeout
         self.free = queue.Queue()
-        for cpu in self.cpus:
-            self.free.put(cpu)
+        for group in self.cpu_groups:
+            self.free.put(group)
         self.games_played = 0
         self.failures = 0
         self.lock = threading.Lock()
@@ -78,9 +105,10 @@ class Runner:
         return json.loads(out.stdout)
 
     def _run_chunk(self, config_path, stage, seed0, games):
-        cpu = self.free.get()
+        cpus = self.free.get()
         try:
-            cmd = [self.nana, "--threads", "1", "--cpu", str(cpu), "--search-seed", "1", "--games", str(games),
+            affinity = ["--cpu", str(cpus[0])] if self.threads == 1 else ["--cpus", ",".join(map(str, cpus))]
+            cmd = [self.nana, "--threads", str(self.threads)] + affinity + ["--search-seed", "1", "--games", str(games),
                    "--seed", str(seed0)] + stage.args()
             for attempt in range(2):
                 started = time.monotonic()
@@ -99,7 +127,7 @@ class Runner:
                     self.failures += 1
             raise RunnerError(f"nana_emulate failed twice (exit {returncode}): {' '.join(cmd)}\n{stderr[-2000:]}")
         finally:
-            self.free.put(cpu)
+            self.free.put(cpus)
 
     def _spawn(self, cmd, env):
         if self.stopping.is_set():
@@ -141,7 +169,7 @@ class Runner:
                 tasks.append((key, start, path, stage, seed0 + start, n))
         results = {key: [None] * games for key, _, _, _, games in requests}
         total, done = sum(games for *_, games in requests), 0
-        pool = ThreadPoolExecutor(max_workers=len(self.cpus))
+        pool = ThreadPoolExecutor(max_workers=self.workers)
         try:
             pending = {pool.submit(self._run_chunk, path, stage, seed, n): (key, start)
                        for key, start, path, stage, seed, n in tasks}
@@ -164,5 +192,6 @@ class Runner:
 
     def scores(self, requests):
         games = self.play(requests)
-        horizons = {key: stage.horizon for key, _, stage, _, _ in requests}
-        return {key: [fitness(g, horizons[key]) for g in gs] for key, gs in games.items()}, games
+        stages = {key: stage for key, _, stage, _, _ in requests}
+        return {key: [fitness(g, stages[key].horizon, stages[key].objective) for g in gs]
+                for key, gs in games.items()}, games

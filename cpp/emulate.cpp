@@ -1,7 +1,7 @@
 // survival benchmark: seeded games against the emulated opponent
 // usage: nana_emulate [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
 //                  [--opponent-log FILE]
-//                  [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]
+//                  [--sims N] [--search-seed 0|1] [--cpu K | --cpus K,L,...] [--print-config] [--garbage-scale X]
 
 #include "EmulateCommon.hpp"
 #include "EmulationGame.hpp"
@@ -18,6 +18,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -37,6 +38,7 @@ struct Options {
     uint64_t sims = 0;
     bool search_seed = false;
     int cpu = -1;
+    std::vector<int> cpus;
     bool print_config = false;
     float garbage_scale = 1;
 };
@@ -209,6 +211,19 @@ static bool parse(int argc, const char** argv, Options& options) {
             options.opponent_log = argv[++i];
             continue;
         }
+        if (arg == "--cpus") {
+            std::string list = argv[++i];
+            if (list.empty() || list.back() == ',') return false;
+            std::istringstream stream(list);
+            std::string part;
+            while (std::getline(stream, part, ',')) {
+                size_t consumed = 0;
+                int cpu = std::stoi(part, &consumed);
+                if (cpu < 0 || consumed != part.size()) return false;
+                options.cpus.push_back(cpu);
+            }
+            continue;
+        }
         long long value = std::stoll(argv[++i]);
         if (arg == "--threads") options.threads = (int)value;
         else if (arg == "--games") options.games = (int)value;
@@ -225,7 +240,8 @@ static bool parse(int argc, const char** argv, Options& options) {
         }
         else return false;
     }
-    return options.threads > 0 && options.games > 0 && options.ms > 0;
+    return options.threads > 0 && options.games > 0 && options.ms > 0
+        && (options.cpu < 0 || options.cpus.empty());
 }
 
 int main(int argc, const char** argv) {
@@ -238,7 +254,7 @@ int main(int argc, const char** argv) {
     catch (const std::exception&) {
         std::cerr << "usage: " << argv[0]
             << " [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]"
-            << " [--opponent-log FILE] [--sims N] [--search-seed 0|1] [--cpu K] [--print-config] [--garbage-scale X]"
+            << " [--opponent-log FILE] [--sims N] [--search-seed 0|1] [--cpu K | --cpus K,L,...] [--print-config] [--garbage-scale X]"
             << std::endl;
         return 1;
     }
@@ -249,6 +265,10 @@ int main(int argc, const char** argv) {
     }
     if (options.cpu >= 0 && !restrictProcessToCpu(options.cpu)) {
         std::cerr << "can't restrict the process to cpu " << options.cpu << std::endl;
+        return 1;
+    }
+    if (!options.cpus.empty() && !restrictProcessToCpus(options.cpus)) {
+        std::cerr << "can't restrict the process to the requested cpus" << std::endl;
         return 1;
     }
     Search::simulation_limit = options.sims;

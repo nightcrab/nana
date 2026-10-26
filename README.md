@@ -120,6 +120,9 @@ python -m tuner start smoke --nana out/build/<build>/cpp/nana_emulate.exe --cpus
 # tune within a time budget: the tuner measures game times and picks the largest sims count that fits
 python -m tuner start eval1 --nana out/build/<build>/cpp/nana_emulate.exe --cpus 0,2,4,6,8,10,12,14 --budget-hours 8
 
+# tune sims/s with the search parameter space and fewer games (4 per evaluation)
+python -m tuner start speed1 --nana ... --cpus ... --sims 8192 --objective sims-per-second
+
 # see what a budget buys without tuning (resume then tunes)
 python -m tuner start eval1 --nana ... --cpus ... --budget-hours 8 --plan-only
 

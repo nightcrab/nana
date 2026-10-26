@@ -1,0 +1,58 @@
+[
+ {
+  "name": "message_weight",
+  "default": 1,
+  "low": 0,
+  "high": 10,
+  "integer": true
+ },
+ {
+  "name": "rollout_weight",
+  "default": 30,
+  "low": 1,
+  "high": 120,
+  "integer": true
+ },
+ {
+  "name": "low_water",
+  "default": 30,
+  "low": 0,
+  "high": 240,
+  "integer": true
+ },
+ {
+  "name": "give_margin",
+  "default": 3,
+  "low": 0,
+  "high": 120,
+  "integer": true
+ },
+ {
+  "name": "backoff_iterations",
+  "default": 64,
+  "low": 0,
+  "high": 1024,
+  "integer": true
+ },
+ {
+  "name": "steal_chiplet_penalty",
+  "default": 30,
+  "low": 0,
+  "high": 240,
+  "integer": true
+ },
+ {
+  "name": "steal_topk",
+  "default": 4,
+  "low": 1,
+  "high": 8,
+  "integer": true
+ },
+ {
+  "name": "steal_temperature",
+  "default": 10,
+  "low": 0,
+  "high": 120,
+  "integer": true
+ }
+]

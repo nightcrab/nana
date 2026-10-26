@@ -23,8 +23,37 @@ python -m tuner status eval1          # from another terminal, any time
 python -m tuner resume eval1
 ```
 
-Use one logical cpu per physical core (`--cpus`): each game runs single-threaded, pinned to its cpu,
-and two games sharing a core would slow each other unevenly. Keep the machine otherwise idle.
+Use one logical cpu per physical core (`--cpus`). By default each game uses one thread, pinned to
+its cpu. `--threads N` assigns N search threads and N CPUs to each game, taking consecutive groups
+from the supplied CPU list. The CPU count must be divisible by N, with no duplicate CPUs; for
+example, `--cpus 0,2,4,6,8,10 --threads 3` runs two games concurrently on groups `0,2,4` and
+`6,8,10`. Choose groups across L3 caches if you want to measure cross-cache stealing. Keep the
+machine otherwise idle. The thread count is saved and reused on resume; older runs use one thread.
+
+To optimise search throughput instead of strength:
+
+```
+python -m tuner start speed1 --nana out/build/<build>/cpp/nana_emulate.exe --cpus 0,2,4,6 --sims 8192 --objective sims-per-second
+```
+
+This defaults to `spaces/search.json`, 4 games per evaluation (instead of 32), 8 holdout games
+(instead of 32), and at most 32 release-gate pairs (instead of 400). `--space`, `--games`, and
+`--gate-games` still override their defaults. Both the PSO and the holdouts/release gate maximise
+sims/s: `1000 * sims_per_move / ms_per_move`, averaged across games. This measures search time,
+including search start/stop overhead, without process startup. It does not reward dying early by
+counting shorter games as faster. Timing varies, so increase `--games` if signal warnings persist;
+use a substantial sims count to avoid measuring mostly overhead. Speed gains can sacrifice strength.
+Single-threaded seed determinism is checked using attack; the strength canary and death-rate warning are skipped in
+speed mode. Existing runs resume with their original objective (strength for older runs).
+
+To tune work stealing with three threads per game (rebuild `nana_emulate` for CPU-group support):
+
+```
+python -m tuner start stealing1 --nana out/build/<build>/cpp/nana_emulate.exe --cpus 0,2,4,6,8,10 --threads 3 --sims 8192 --objective sims-per-second --space tuner/spaces/work_stealing.json
+```
+
+Multithreaded search depends on scheduling, so exact seed replay is skipped for these runs.
+Config checks, throughput validation in speed mode, and the strength canary in strength mode still run.
 
 To see what a budget buys without tuning, add `--plan-only`: it calibrates, prints the plan and
 stops; `resume` then tunes. To check a setup end to end in a minute or two:
@@ -36,7 +65,7 @@ python -m tuner start smoke --nana ... --cpus ... --sims 64 --iterations 3 --par
 ## What a run does
 
 1. **Health checks** (also on every resume), at 32 sims: nana loads exactly the configs written
-   (`--print-config`), the same seeds replay the same games, and a deliberately broken eval (height
+   (`--print-config`), the same seeds replay the same games with one thread, and a deliberately broken eval (height
    penalties flipped) scores clearly worse.
 2. **Calibration**: two waves of games over the cpus at each sims count of a ladder (256, 512, ...,
    131072), with the swarm's starting configs. From the seconds per game it projects the whole run,
@@ -76,6 +105,8 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 | option | default | |
 |---|---|---|
 | `--budget-hours H` / `--sims N` | (one is required) | the time budget, or a fixed sims count |
+| `--objective` | `strength` | maximise attack/piece or `sims-per-second` (with the smaller defaults above) |
+| `--threads` | 1 | search threads per game; must divide the CPU count (1–64) |
 | `--iterations` | 15 | PSO iterations |
 | `--particles` | 24 | swarm size; an iteration costs about 2 x particles x games games |
 | `--games` | 32 | games per evaluation: more is less noise and slower iterations |
@@ -83,7 +114,8 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 | `--gate-games` | 400 | the gate's limit on paired games |
 | `--holdout-every` | 5 | iterations between holdouts |
 | `--rules` | `tetrio` | the ruleset games are played with: `tetrio` or `botris` |
-| `--space` | `spaces/eval.json` | parameter space files (repeat to combine) |
+| `--eval` | executable default (`cc`) | evaluator: `cc`, `nana`, or `convex`; saved in the run's base config |
+| `--space` | `spaces/eval.json` (speed: `spaces/search.json`) | parameter space files (repeat to combine) |
 | `-v`, `--verbose` | off | print everything; otherwise the console shows the plan, an ETA per iteration, each kind of warning once, and the result (`log.txt` always has everything) |
 | `--overwrite` | off | replace a run of the same name without asking (`start` asks when it can) |
 
@@ -114,6 +146,11 @@ Every iteration, in `status.txt` and the log:
   2.5 x the larger of the tuned value and Cold Clear's weight for the term (at least 20), rounded up;
   all ten well columns share +-150. A result near a bound means the bound was wrong: widen it there;
 - `search.json`: how it searches. `c_init`, `c_base`, `n_cap`, `depth_step`, `prior_exponent`.
+- `work_stealing.json`: all eight work-stealing settings: `message_weight`, `rollout_weight`,
+  `low_water`, `give_margin`, `backoff_iterations`, `steal_chiplet_penalty`, `steal_topk`, and
+  `steal_temperature`. Integer bounds include the current config defaults; `steal_topk` spans
+  its supported range of 1–8. Select it with `--space tuner/spaces/work_stealing.json`.
+  Use `--threads` greater than 1 to measure work stealing.
 
 A space is a JSON list of `{"name", "default", "low", "high"}` with optional `"log": true` (uniform
 in log space) and `"integer": true`; `name[i]` is one element of an array key.

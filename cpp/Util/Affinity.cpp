@@ -246,15 +246,25 @@ int cacheGroupOfCore(int index) {
 }
 
 bool restrictProcessToCpu(int cpu) {
-    if (cpu < 0 || cpu >= 64) {
-        return false;
-    }
+    return restrictProcessToCpus({ cpu });
+}
+
+bool restrictProcessToCpus(const std::vector<int>& cpus) {
+    if (cpus.empty()) return false;
 #ifdef _WIN32
-    return SetProcessAffinityMask(GetCurrentProcess(), DWORD_PTR(1) << cpu) != 0;
+    DWORD_PTR mask = 0;
+    for (int cpu : cpus) {
+        if (cpu < 0 || cpu >= (int)(sizeof(mask) * 8)) return false;
+        mask |= DWORD_PTR(1) << cpu;
+    }
+    return SetProcessAffinityMask(GetCurrentProcess(), mask) != 0;
 #else
     cpu_set_t set;
     CPU_ZERO(&set);
-    CPU_SET(cpu, &set);
+    for (int cpu : cpus) {
+        if (cpu < 0 || cpu >= CPU_SETSIZE) return false;
+        CPU_SET(cpu, &set);
+    }
     return sched_setaffinity(0, sizeof(set), &set) == 0;
 #endif
 }

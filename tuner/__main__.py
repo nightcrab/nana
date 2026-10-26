@@ -2,7 +2,7 @@
 
     python -m tuner start NAME --nana PATH --cpus 0,2,4,6 (--budget-hours H | --sims N)
                                [--space tuner/spaces/eval.json ...] [--iterations 15] [--particles 24]
-                               [--games 32] [--spread 0.3] [--gate-games 400] [--plan-only]
+                               [--games 32] [--spread 0.3] [--gate-games 400] [--threads 1] [--plan-only]
     python -m tuner resume NAME
     python -m tuner status NAME
     python -m tuner check NAME          health checks only
@@ -15,6 +15,7 @@ import sys
 
 from .health import HealthError
 from .run import Run
+from .runner import Runner
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -63,21 +64,25 @@ def main():
     start.add_argument("name")
     start.add_argument("--nana", required=True, help="nana_emulate built in Release")
     start.add_argument("--cpus", required=True, help="logical cpus to use, e.g. 0,2,4,6 (one per physical core)")
+    start.add_argument("--threads", type=int, default=1, help="search threads per game (default 1; must divide the CPU count)")
     budget = start.add_mutually_exclusive_group(required=True)
     budget.add_argument("--budget-hours", type=float,
                         help="the whole run's time: the tuner picks the largest sims count that fits")
     budget.add_argument("--sims", type=int, help="tune at this sims count, whatever it costs")
     start.add_argument("--space", action="append", help="parameter space files (default tuner/spaces/eval.json)")
+    start.add_argument("--objective", choices=["strength", "sims-per-second"], default="strength",
+                       help="fitness to maximise (default strength; sims-per-second defaults to search.json)")
     start.add_argument("--iterations", type=int, help="PSO iterations (default 15)")
     start.add_argument("--particles", type=int, help="default 24")
-    start.add_argument("--games", dest="games_per_eval", type=int, help="games per evaluation (default 32)")
+    start.add_argument("--games", dest="games_per_eval", type=int, help="games per evaluation (strength: 32; sims-per-second: 4)")
     start.add_argument("--spread", type=float,
                        help="the starting swarm's spread around the defaults, in unit-cube units (default 0.3)")
-    start.add_argument("--gate-games", type=int, help="the release gate's limit on paired games (default 400)")
+    start.add_argument("--gate-games", type=int, help="the release gate's limit on paired games (strength: 400; sims-per-second: 32)")
     start.add_argument("--holdout-every", type=int, help="iterations between holdouts (default 5)")
     start.add_argument("--chunk", type=int, help="games per nana_emulate process (default 4)")
     start.add_argument("--seed", type=int, help="the optimiser's seed (default 1)")
     start.add_argument("--rules", choices=["tetrio", "botris"], help="the ruleset games are played with (default tetrio)")
+    start.add_argument("--eval", choices=["cc", "nana", "convex"], help="evaluator to tune (default: nana_emulate's configured default)")
     start.add_argument("--plan-only", action="store_true", help="calibrate, print the plan and stop; resume tunes")
     start.add_argument("-v", "--verbose", action="store_true", help="print everything (log.txt always has it)")
     start.add_argument("--overwrite", action="store_true", help="replace a run of the same name without asking")
@@ -96,9 +101,14 @@ def main():
     try:
         if args.command == "start":
             cpus = [int(c) for c in args.cpus.split(",")]
-            spaces = args.space or [os.path.join(HERE, "spaces", "eval.json")]
+            try:
+                Runner.validate_cpus(cpus, args.threads)
+            except ValueError as e:
+                parser.error(str(e))
+            spaces = args.space or [os.path.join(HERE, "spaces",
+                                                "search.json" if args.objective == "sims-per-second" else "eval.json")]
             options = {k: getattr(args, k) for k in ("budget_hours", "sims", "iterations", "particles", "games_per_eval",
-                                                     "spread", "gate_games", "holdout_every", "chunk", "seed", "rules")}
+                                                     "spread", "gate_games", "holdout_every", "chunk", "seed", "rules", "objective", "threads", "eval")}
             if not os.path.isfile(args.nana):
                 raise SystemExit(f"no nana_emulate at {args.nana}")
             clear_existing(directory, args.overwrite)

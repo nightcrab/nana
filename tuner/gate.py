@@ -21,7 +21,7 @@ def sprt(diffs, mu1, alpha, beta):
 
 def run_gate(runner, stage, candidate, release, seed0, delta=0.02, alpha=0.05, beta=0.05, max_games=2000,
              batch=None, log=print):
-    batch = batch or 4 * len(runner.cpus)
+    batch = batch or 4 * runner.workers
     cand, rel = [], []
     verdict, llr = "continue", 0.0
     seed = seed0
