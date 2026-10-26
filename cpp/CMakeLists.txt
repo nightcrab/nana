@@ -27,8 +27,6 @@ set(TETRIS_SOURCES
 	"Tetris/bot/UCT.hpp"
 	"Tetris/bot/Search.cpp"
 	"Tetris/bot/Search.hpp"
-	"Tetris/bot/OpponentFeatures.cpp"
-	"Tetris/bot/OpponentFeatures.hpp"
 
 	"Util/Affinity.cpp"
 	"Util/Allocator.cpp"
@@ -111,7 +109,6 @@ nana_add_executable(nana_msgbench nana_core "msgbench.cpp")
 nana_add_executable(nana_emulate nana_core "emulate.cpp")
 nana_add_executable(nana_emulate_tbp nana_core "emulate_tbp.cpp")
 nana_add_executable(nana_eval_dump nana_core "eval_dump.cpp")
-nana_add_executable(nana_opp_features nana_core "opp_features.cpp")
 
 option(NANA_STATCHECK "Build exact-reference sampling and backup diagnostics" OFF)
 if(NANA_STATCHECK)

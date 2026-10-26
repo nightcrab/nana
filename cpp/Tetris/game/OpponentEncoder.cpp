@@ -74,8 +74,7 @@ bool encoderAvailable() {
             return false;
         }
         if (std::abs(fitted_encoder.fingerprint - hmmFingerprint()) > 1e-3) {
-            std::cerr << "warning: the opponent encoder was trained against another opponent HMM; it's off until "
-                         "scripts/board_encoder.py retrains it" << std::endl;
+            std::cerr << "warning: the opponent encoder was trained against another opponent HMM; it's off" << std::endl;
             return false;
         }
         return true;
