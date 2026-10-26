@@ -105,11 +105,7 @@ Each release contains multiple binaries targeting different hardware. `nana_tbp`
 }
 ```
 
-Some of these, such as `threads` can be overridden by a TBP2 frontend but are used otherwise.
-
-`"opponent": false` disables opponent simulation during search, including speculative incoming attacks, outgoing attacks to the opponent, and opponent belief terms. Garbage already queued against Nana still lands. Leave `belief_weights` at zero with it. Both search modes are compiled in, so this needs no rebuild.
-
-Other tools, such as `nana_emulate` and `nana_speed`, read the same settings from the JSON file named by `NANA_CONFIG`, except `threads` and `variant`, which only `nana_tbp` uses. `nana_emulate --print-config` shows what was loaded. The strength ladder's `no-garbage` variant writes such a file from `NANA_CONFIG` with `opponent` off and the belief weights zeroed.
+Some of these, such as `threads` can be overridden by a TBP2 frontend such as [Universal Shaktris Stadium](https://github.com/shakkar23/Universal-Shaktris-Stadium).
 
 ## Tuning
 
