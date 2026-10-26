@@ -85,7 +85,7 @@ struct NanaConfig {
     int depth_cap = 0;
     std::string eval = "cc";
     // false: the search models no opponent, so no speculative garbage, kill reward or belief terms
-    bool opponent = true;
+    bool opponent = false;
     std::array<double, 8> belief_weights{};
     CCWeights cc;
 

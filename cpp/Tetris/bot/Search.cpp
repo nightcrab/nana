@@ -157,7 +157,7 @@ static void loadTuning() {
 #endif
 
 // config "opponent", read once per search: picks which compiled search the workers run
-static bool search_opponent = true;
+static bool search_opponent = false;
 
 static void loadSearchOpponent() {
     search_opponent = config().opponent;
