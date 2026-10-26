@@ -228,8 +228,13 @@ float Eval::BeliefTerm::value(int attack, bool cleared) {
 #endif
 
 double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>& bag_left, double* move_part,
-                              BeliefTerm* belief, [[maybe_unused]] int meter) {
+                              BeliefTerm* belief, int meter) {
     static const CCWeights& w = config().cc;
+    return eval_CC_standard(w, std::move(game), move, bag_left, move_part, belief, meter);
+}
+
+double Eval::eval_CC_standard(const CCWeights& w, Game game, Move move, const std::vector<PieceType>& bag_left,
+                              double* move_part, BeliefTerm* belief, [[maybe_unused]] int meter) {
     const Piece& piece = move.piece;
     const auto b2b_before = game.b2b;
 
@@ -401,4 +406,68 @@ double Eval::eval_CC_standard(Game game, Move move, const std::vector<PieceType>
         *move_part = acc / 10000.0;
     }
     return (transient + acc + opponent + 10000) / 10000.0;
+}
+
+namespace {
+int wellColumn(const CCBoard& board) {
+    int well = 0;
+    for (int x = 1; x < 10; x++) {
+        if (board.heights[x] <= board.heights[well]) well = x;
+    }
+    return well;
+}
+}
+
+Eval::CCBoardTerms Eval::cc_board_terms(const Board& raw) {
+    const CCBoard board = CCBoard::from(raw);
+    CCBoardTerms out;
+    out.height = board.highest();
+
+    const int well = wellColumn(board);
+    for (int y = board.heights[well]; y < 20; y++) {
+        bool filled = true;
+        for (int x = 0; x < 10 && filled; x++) {
+            filled = x == well || board.occupied(x, y);
+        }
+        if (!filled) break;
+        out.well_depth++;
+    }
+
+    for (int y = 0; y < 40; y++) {
+        const unsigned r = board.rows[y];
+        out.row_transitions += std::popcount((r | 0x400u) ^ (1u | (r << 1)));
+    }
+
+    int bump = -1;
+    int prev = well == 0 ? 1 : 0;
+    for (int x = 1; x < 10; x++) {
+        if (x == well) continue;
+        bump += std::abs(board.heights[prev] - board.heights[x]);
+        prev = x;
+    }
+    out.bumpiness = std::abs(bump);
+
+    for (int y = 0; y < out.height; y++) {
+        for (int x = 0; x < 10; x++) {
+            if (board.occupied(x, y) || y >= board.heights[x]) continue;
+            if (x > 1 && board.heights[x - 1] <= y - 1 && board.heights[x - 2] <= y) { out.overhangs++; continue; }
+            if (x < 8 && board.heights[x + 1] <= y - 1 && board.heights[x + 2] <= y) { out.overhangs++; continue; }
+            out.cavities++;
+        }
+    }
+
+    for (int x = 0; x < 10; x++) {
+        for (int y = board.heights[x] - 3; y >= 0; y--) {
+            if (!board.occupied(x, y)) {
+                out.covered += std::min(6, board.heights[x] - y - 1);
+            }
+        }
+    }
+
+    if (const std::optional<TSpot> slot = findTslot(board)) {
+        CCBoard cut = board;
+        out.tslot = true;
+        out.tslot_lines = cutout(cut, *slot);
+    }
+    return out;
 }

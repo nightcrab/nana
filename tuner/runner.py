@@ -23,8 +23,8 @@ class Stage:
         return ["--sims", str(self.sims), "--garbage-scale", repr(self.garbage_scale),
                 "--max-pieces", str(self.horizon)]
 
-    def environment(self):
-        return {"NANA_RULES": self.rules, "NANA_REWARD": "app"}
+    def config(self, config):
+        return dict(config, rules=self.rules)
 
 
 def fitness(game, horizon):
@@ -65,15 +65,14 @@ class Runner:
             os.replace(tmp, path)
         return path
 
-    def _env(self, config_path, stage):
+    def _env(self, config_path):
         env = dict(os.environ)
-        env.update(stage.environment())
         env["NANA_CONFIG"] = config_path
         return env
 
     def print_config(self, config):
-        out = subprocess.run([self.nana, "--print-config"], env=self._env(self.config_path(config), Stage(
-            {"name": "check", "sims": 1})), capture_output=True, text=True, timeout=60)
+        out = subprocess.run([self.nana, "--print-config"], env=self._env(self.config_path(config)),
+                             capture_output=True, text=True, timeout=60)
         if out.returncode != 0:
             raise RunnerError(f"nana_emulate --print-config failed: {out.stderr.strip()}")
         return json.loads(out.stdout)
@@ -85,7 +84,7 @@ class Runner:
                    "--seed", str(seed0)] + stage.args()
             for attempt in range(2):
                 started = time.monotonic()
-                returncode, stdout, stderr = self._spawn(cmd, self._env(config_path, stage))
+                returncode, stdout, stderr = self._spawn(cmd, self._env(config_path))
                 results = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
                 if returncode == 0 and len(results) == games:
                     played = {g.get("rules") for g in results}
@@ -136,7 +135,7 @@ class Runner:
     def play(self, requests):
         tasks = []
         for key, config, stage, seed0, games in requests:
-            path = self.config_path(config)
+            path = self.config_path(stage.config(config))
             for start in range(0, games, self.chunk):
                 n = min(self.chunk, games - start)
                 tasks.append((key, start, path, stage, seed0 + start, n))

@@ -61,10 +61,6 @@ namespace Search {
 
     template <class Opp>
     Reward rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_board);
-#if !NANA_SUFFIX
-    template <class Opp>
-    float leafReward(EmulationGame& state, float max_eval);
-#endif
 
     void printStatistics();
 

@@ -80,15 +80,4 @@ const Params& params() {
     return cdfs;
 }
 
-float fresh_death_value(int jeopardy, int since) {
-    const Params& p = fitted_params;
-    float total = 0;
-    float weighted = 0;
-    for (int z = 0; z < STATES; z++) {
-        total += p.initial[z];
-        weighted += p.initial[z] * p.death_value[z][jeopardy][since];
-    }
-    return total > 0 ? weighted / total : 0.0f;
-}
-
 }

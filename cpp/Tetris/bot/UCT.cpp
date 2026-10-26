@@ -75,38 +75,34 @@ float rewardScalar(const Return& r) {
 	return (float)c.app_weight * rate * (r.n - r.n_dead) + (float)c.eval_weight * r.E;
 }
 
-Reward UCTNode::climb(size_t i, Reward reward, bool carried, bool apply) {
-#if NANA_SUFFIX
+Reward UCTNode::climb(size_t i, Reward reward, bool carried) {
+#if !NANA_CC_SEARCH
 	Return v = stepUp(reward, cold[i].step_attack);
 
-	if (apply) {
-		Return& s = cold[i].sums;
-		if (!carried) {
-			const float d = (float)decay();
-			s.A *= d;
-			s.L *= d;
-			s.E *= d;
-			s.n *= d;
-			s.n_dead *= d;
-		}
-		s += v;
-		edge_stats[i].R = rewardScalar(s);
+	Return& s = cold[i].sums;
+	if (!carried) {
+		const float d = (float)decay();
+		s.A *= d;
+		s.L *= d;
+		s.E *= d;
+		s.n *= d;
+		s.n_dead *= d;
 	}
+	s += v;
+	edge_stats[i].R = rewardScalar(s);
 	return v;
 #else
-	if (apply) {
-		if (carried) {
-			edge_stats[i].addCarried(reward);
-		}
-		else {
-			edge_stats[i].addReward(reward);
-		}
+	if (carried) {
+		edge_stats[i].addCarried(reward);
+	}
+	else {
+		edge_stats[i].addReward(reward);
 	}
 	return reward;
 #endif
 }
 
-#if NANA_EXPECTIMAX
+#if !NANA_CC_SEARCH
 void ChildTable::put(uint32_t child, Reward V, float k) {
 	if (first.n == 0 || first.hash == child) {
 		first = { child, first.n + k, V };
@@ -145,9 +141,7 @@ float UCTNode::armValue(size_t i, Reward& V) const {
 		V = Reward{};
 		return 0.0f;
 	}
-#if NANA_SUFFIX
 	s = stepUp(s, cold[i].step_attack);
-#endif
 	V = scaled(s, 1.0f / n);
 	return rewardScalar(V);
 }
@@ -156,10 +150,7 @@ static bool counts(const ChildTable& t) {
 	return NANA_EXPECTIMAX_MIN_N <= 1 ? t.completed > 0 : t.completed >= NANA_EXPECTIMAX_MIN_N;
 }
 
-Reward UCTNode::report(size_t i, uint32_t child, Reward V, float k, bool fresh, bool apply) {
-	if (!apply) {
-		return value();
-	}
+Reward UCTNode::report(size_t i, uint32_t child, Reward V, float k, bool fresh) {
 	ChildTable& t = cold[i].children;
 #ifdef NANA_SEARCH_FIXTURE
     if (search_fixture::inject_weights && child == search_fixture::hash_base+2) k *= 4;
@@ -213,15 +204,13 @@ void UCTNode::updateTime(size_t i, int newtime) {
 		if constexpr (!cc_search) {
 			edge.R = edge.R / 5;
 		}
-#if NANA_SUFFIX
+#if !NANA_CC_SEARCH
 		Return& s = cold[i].sums;
 		s.A /= 5;
 		s.L /= 5;
 		s.E /= 5;
 		s.n /= 5;
 		s.n_dead /= 5;
-#endif
-#if NANA_EXPECTIMAX
 		cold[i].children.completed /= 5;
 		if ((int)i == best && !counts(cold[i].children)) {
 			rescanBest();
@@ -385,10 +374,7 @@ size_t UCTNode::select_uct(int depth) {
 */
 float UCTNode::c_puct(float node_N, int depth) {
 	static const NanaConfig& c = config();
-#ifndef NANA_C_INIT_SCALE
-#define NANA_C_INIT_SCALE 1
-#endif
-	const float c_init = (float)(c.c_init * NANA_C_INIT_SCALE);
+	const float c_init = (float)c.c_init;
 	const float c_base = (float)c.c_base;
 
 	float D = 1 + depth / c.depth_step;

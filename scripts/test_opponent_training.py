@@ -1,8 +1,12 @@
 """Checks for the offline experiment's leakage boundaries and distributional loss."""
 
 import unittest
+import itertools
 import sqlite3
 import tempfile
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
 from contextlib import closing
 from pathlib import Path
 
@@ -10,11 +14,48 @@ import numpy as np
 import torch
 
 from opponent_model import Predictor
-from opponent_data import positions_from_db, target_player
-from train_opponent import sequence_loss, split_games, gain_intervals
+from opponent_data import positions_from_db, target_player, generate
+from train_opponent import sequence_loss, split_games, gain_intervals, trajectory_metrics
 
 
 class TrainingTests(unittest.TestCase):
+    def test_no_garbage_uses_only_generated_full_horizon_targets_and_reuses_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'games.db'
+            path.write_bytes(b'dummy database fingerprint')
+            exe = Path(tmp)/'replay'
+            exe.write_bytes(b'dummy executable fingerprint')
+            position = dict(game='1', board=[[0]*10 for _ in range(40)], queue=list('IOTLJS'),
+                            hold=None, bag=['Z'], combo=0, b2b=0, meter=7,
+                            incoming=[9], recorded=[6, 6, 6], real_mask=[True, False, False],
+                            replay_mask=[True, False, False])
+            args = SimpleNamespace(dbs=[str(path)], player='2', horizon=3, stride=1,
+                                   max_positions=0, seed=1, samples=2, thinks=4000,
+                                   replay_weight=0.5, cc=str(exe), jobs=1, shard_size=32,
+                                   cache=str(Path(tmp)/'cache'), pieces=True, no_garbage=True,
+                                   prepare_only=False, exclude_positions=[])
+            rollouts = [dict(position=0, queue_seed=q, repeat=0, moves=[dict(attack=q)]) for q in range(2)]
+            with patch('opponent_data.positions_from_db', return_value=[position]), \
+                 patch('opponent_data.cc.run_replays', return_value=rollouts) as replay:
+                arrays, manifest = generate(args)
+                np.testing.assert_array_equal(arrays['real'], [[0, 8, 8], [1, 8, 8]])
+                self.assertTrue(arrays['real_mask'].all())
+                self.assertEqual(arrays['replay'].shape, (2, 0, 3))
+                self.assertEqual(len(set(arrays['game'])), 1)
+                self.assertEqual(manifest[0]['target_mode'], 'no-garbage-continuations')
+                args.prepare_only = True
+                prepared, summary = generate(args)
+                self.assertEqual(prepared, {})
+                self.assertEqual(summary[0]['examples'], 2)
+                self.assertEqual(replay.call_count, 1)
+                # Excluding an evaluation root changes the cache and removes it.
+                excluded = Path(tmp)/'held-out.jsonl'
+                excluded.write_text(json.dumps(dict(positions=[position]))+'\n')
+                args.exclude_positions = [str(excluded)]
+                _, summary = generate(args)
+                self.assertEqual(summary[0]['examples'], 0)
+                self.assertEqual(replay.call_count, 1)
+
     def test_target_side_follows_metadata_and_rejects_ambiguous_matches(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)/"games.db"
@@ -68,8 +109,10 @@ class TrainingTests(unittest.TestCase):
         real = torch.zeros(2, 3, dtype=torch.long)
         mask = torch.ones(2, 3, dtype=torch.bool)
         replay = torch.ones(2, 2, 3, dtype=torch.long)
-        first = sequence_loss(logits, real, mask, replay, mask, 0.5)
-        second = sequence_loss(logits, real, mask, replay.repeat(1, 4, 1), mask, 0.5)
+        replay_logits = torch.randn(2, 2, 3, 9)
+        first = sequence_loss(logits, real, mask, replay, mask, 0.5, replay_logits)
+        second = sequence_loss(logits, real, mask, replay.repeat(1, 4, 1), mask, 0.5,
+                               replay_logits.repeat(1, 4, 1, 1))
         torch.testing.assert_close(first, second)
 
     def test_censored_targets_do_not_contribute(self):
@@ -77,7 +120,7 @@ class TrainingTests(unittest.TestCase):
         real = torch.zeros(1, 3, dtype=torch.long)
         mask = torch.tensor([[True, False, False]])
         replay = real[:, None]
-        loss = sequence_loss(logits, real, mask, replay, mask, 0.5)
+        loss = sequence_loss(logits, real, mask, replay, mask, 0.5, logits[:, None])
         loss.backward()
         self.assertEqual(float(logits.grad[:, 1:].abs().sum()), 0)
         self.assertGreater(float(logits.grad[:, :1].abs().sum()), 0)
@@ -85,13 +128,73 @@ class TrainingTests(unittest.TestCase):
     def test_model_uses_raw_cells_and_outputs_normalized_distributions(self):
         torch.manual_seed(2)
         torch.set_num_threads(1)
-        model = Predictor(width=8, blocks=1)
+        model = Predictor(width=2, blocks=1, heads=32, hidden=8, fusion=16)
         boards = torch.zeros(2, 1, 20, 10)
         boards[1, 0, :5, :5] = 1
-        output = model(boards, torch.zeros(2, 3))
+        output = model(boards, torch.zeros(2, 3), torch.zeros(2, 8, dtype=torch.long))
         self.assertEqual(tuple(output.shape), (2, 8, 9))
         self.assertFalse(torch.allclose(output[0], output[1]))
         torch.testing.assert_close(output.softmax(-1).sum(-1), torch.ones(2, 8))
+        output.sum().backward()
+        self.assertEqual(len(model.heads), 32)
+        for head in model.heads:
+            self.assertIsNotNone(head[0].weight.grad)
+
+    def test_teacher_forcing_is_causal_and_uses_each_replay_prefix(self):
+        torch.manual_seed(3)
+        model = Predictor(horizon=3, board=False, hidden=8, fusion=8)
+        board, context = torch.zeros(2, 1, 20, 10), torch.zeros(2, 3)
+        targets = torch.tensor([[0, 0, 0], [1, 0, 2]])
+        output = model(board, context, targets)
+        torch.testing.assert_close(output[0, 0], output[1, 0])
+        self.assertFalse(torch.allclose(output[0, 1], output[1, 1]))
+        changed = targets.clone()
+        changed[:, -1] = 5
+        torch.testing.assert_close(output, model(board, context, changed))
+
+    def test_replay_training_matches_individual_sequence_losses(self):
+        torch.manual_seed(5)
+        model = Predictor(horizon=3, board=False, hidden=8, fusion=8)
+        conditioning = model.encode(torch.zeros(1, 1, 20, 10), torch.zeros(1, 3))
+        real = torch.tensor([[0, 1, 0]])
+        replay = torch.tensor([[[1, 0, 2], [8, 8, 8]]])
+        mask = torch.ones(1, 3, dtype=torch.bool)
+        real_logits = model.decode(conditioning, real)
+        replay_logits = model.decode(conditioning.expand(2, -1), replay[0])[None]
+        combined = sequence_loss(real_logits, real, mask, replay, mask, 0.5, replay_logits)
+        expected = -real_logits.log_softmax(-1).gather(-1, real[..., None]).mean()
+        for sample in replay[0]:
+            logits = model.decode(conditioning, sample[None])
+            expected = expected - 0.25 * logits.log_softmax(-1).gather(-1, sample[None, :, None]).mean()
+        torch.testing.assert_close(combined, expected)
+        combined.backward()
+        self.assertTrue(all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None))
+
+    def test_beam_matches_exhaustive_joint_probabilities_and_death_is_absorbing(self):
+        torch.manual_seed(4)
+        model = Predictor(horizon=2, board=False, hidden=8, fusion=8)
+        model.eval()
+        targets = torch.tensor(list(itertools.product(range(9), repeat=2)))
+        board, context = torch.zeros(81, 1, 20, 10), torch.zeros(81, 3)
+        logits = model(board, context, targets)
+        scores = logits.log_softmax(-1).gather(-1, targets[..., None]).squeeze(-1).sum(-1)
+        self.assertAlmostEqual(float(scores.exp().sum().detach()), 1, places=5)
+        expected, indices = scores.topk(3)
+        sequences, actual = model.trajectories(board[:2], context[:2], beam=81)
+        for b in range(2):
+            torch.testing.assert_close(actual[b], expected)
+            torch.testing.assert_close(sequences[b], targets[indices])
+        self.assertTrue(torch.isneginf(scores[(targets[:, 0] == 8) & (targets[:, 1] != 8)]).all())
+
+    def test_coverage_excludes_censored_windows_and_preserves_absolute_mass(self):
+        sequences = torch.tensor([[[0, 0], [1, 0], [2, 0]], [[0, 0], [1, 0], [2, 0]]])
+        logp = torch.tensor([[0.4, 0.2, 0.1], [0.4, 0.2, 0.1]]).log()
+        metrics = trajectory_metrics(sequences, logp, torch.tensor([[1, 0], [0, 0]]),
+                                     torch.tensor([[True, True], [True, False]]))
+        self.assertEqual(metrics["complete_windows"], 1)
+        self.assertEqual(metrics["top1_exact_coverage"], 0)
+        self.assertEqual(metrics["top3_exact_coverage"], 1)
+        self.assertAlmostEqual(metrics["mean_top3_probability_mass"], 0.7, places=6)
 
     def test_bootstrap_identical_predictions_have_zero_gain(self):
         prob = torch.ones(4, 8, 9)/9

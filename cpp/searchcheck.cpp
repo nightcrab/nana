@@ -10,7 +10,7 @@
 
 using Json=nlohmann::json;
 using namespace search_fixture;
-static_assert(NANA_SUFFIX && NANA_EXPECTIMAX);
+static_assert(!cc_search);
 
 int terminal(Model& m,double payoff) {
     const int id=int(m.nodes.size());

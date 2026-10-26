@@ -42,10 +42,6 @@ struct CCWeights {
 struct NanaConfig {
     std::string rules = "tetrio";
     int threads = 3;
-    std::string reward = "app";
-    double reward_scale = 0.25;
-    double kill_lambda = 0.0;
-    double kill_discount = 0.9;
     std::string pin_layout = "compact";
     std::string variant = "";
     int message_weight = 1;
@@ -103,8 +99,8 @@ struct NanaConfig {
     std::string source = "defaults";
 };
 
+// nana_tbp: read nana.json beside the executable (and the TBP-only keys) instead of NANA_CONFIG
 void loadTbpConfig();
-const NanaConfig* tbpConfig();
 
 const NanaConfig& config();
 

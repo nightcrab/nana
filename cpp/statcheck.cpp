@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-static_assert(NANA_SUFFIX && NANA_EXPECTIMAX, "statcheck tests suffix expectimax");
+static_assert(!cc_search, "statcheck tests suffix expectimax");
 static_assert(!NANA_FUTURE_ORACLE, "statcheck requires sampled chance");
 using Json = nlohmann::json;
 constexpr int K = markov::EMISSIONS;

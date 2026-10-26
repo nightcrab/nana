@@ -201,7 +201,7 @@ def variants_report(configs, names, rng):
             continue
         print(f"\nvariants at {key[0]} threads, paired against {control}: ratio of means [95% CI]")
         print(f"{'config':<20} {'seeds':>5} {'APP@H':>22} {'attack rate':>22} {'deaths':>11} {'sims/move':>10}"
-              f" {'restarts':>9} {'to root':>8} {'leaks':>7}")
+              f" {'restarts':>9} {'to root':>8}")
         mean_of = lambda games, k: statistics.fmean(g.get(k, math.nan) for g in games)
         per_piece = lambda games: sum(g["attack"] for g in games) / max(sum(g["pieces"] for g in games), 1)
         for name in [control] + [n for n in group if n != control]:
@@ -209,7 +209,7 @@ def variants_report(configs, names, rng):
             pairs = [(configs[control][s], configs[name][s]) for s in seeds]
             games = [b for _, b in pairs]
             counters = " ".join(f"{mean_of(games, k):>{w}.3f}" for k, w in
-                                (("restarts_per_sim", 9), ("root_per_sim", 8), ("leaks_per_sim", 7)))
+                                (("restarts_per_sim", 9), ("root_per_sim", 8)))
             sims = mean_of(games, "sims_per_move")
             deaths = sum(g["died"] for g in games)
             if name == control:

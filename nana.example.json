@@ -1,6 +1,5 @@
 {
   "rules": "tetrio",
   "threads": 3,
-  "reward": "app",
   "pin_layout": "compact"
 }

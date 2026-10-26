@@ -9,12 +9,19 @@ ms=${2:-3000}
 read -ra threads <<< "${THREADS:-4 8 16}"
 
 git submodule update --init --recursive
-cmake -S . -B build-chiplet -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1" > /dev/null
+cmake -S . -B build-chiplet -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF > /dev/null
 cmake --build build-chiplet --target nana_bench -j "$(nproc)" > /dev/null
 bench=$PWD/build-chiplet/cpp/nana_bench
 
 out="results/$(hostname)-chiplet-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out/raw"
+# the spread runs: NANA_CONFIG (if any) with pin_layout spread
+python3 - "${NANA_CONFIG:-}" "$out/spread.json" <<'PY'
+import json, sys
+config = json.load(open(sys.argv[1])) if sys.argv[1] else {}
+config["pin_layout"] = "spread"
+json.dump(config, open(sys.argv[2], "w"))
+PY
 {
     echo "host: $(hostname)  cpus: $(nproc)  threads: ${threads[*]}  reps: $reps  ms: $ms"
     lscpu 2>/dev/null | grep -E "Model name|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\)|L3" || true
@@ -33,7 +40,7 @@ for test in 0 1; do
             for layout in $layouts; do
                 f="$out/raw/t$n-test$test-$layout-rep$r.txt"
                 if [ "$layout" = spread ]; then
-                    NANA_PIN_LAYOUT=spread "$bench" "$n" "$ms" "$test" > "$f"
+                    NANA_CONFIG="$PWD/$out/spread.json" "$bench" "$n" "$ms" "$test" > "$f"
                 else
                     "$bench" "$n" "$ms" "$test" > "$f"
                 fi

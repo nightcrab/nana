@@ -26,23 +26,19 @@ bool& tbpSettingsEnabled() {
 template <class Visit>
 void visitFields(NanaConfig& c, Visit&& visit) {
     if (tbpSettingsEnabled()) {
-        visit("rules", c.rules);
         visit("threads", c.threads);
-        visit("reward", c.reward);
-        visit("reward_scale", c.reward_scale);
-        visit("kill_lambda", c.kill_lambda);
-        visit("kill_discount", c.kill_discount);
-        visit("pin_layout", c.pin_layout);
         visit("variant", c.variant);
-        visit("message_weight", c.message_weight);
-        visit("rollout_weight", c.rollout_weight);
-        visit("low_water", c.low_water);
-        visit("give_margin", c.give_margin);
-        visit("backoff_iterations", c.backoff_iterations);
-        visit("steal_chiplet_penalty", c.steal_chiplet_penalty);
-        visit("steal_topk", c.steal_topk);
-        visit("steal_temperature", c.steal_temperature);
     }
+    visit("rules", c.rules);
+    visit("pin_layout", c.pin_layout);
+    visit("message_weight", c.message_weight);
+    visit("rollout_weight", c.rollout_weight);
+    visit("low_water", c.low_water);
+    visit("give_margin", c.give_margin);
+    visit("backoff_iterations", c.backoff_iterations);
+    visit("steal_chiplet_penalty", c.steal_chiplet_penalty);
+    visit("steal_topk", c.steal_topk);
+    visit("steal_temperature", c.steal_temperature);
     visit("top_half", c.top_half);
     visit("top_quarter", c.top_quarter);
     visit("low", c.low);
@@ -144,11 +140,7 @@ void readValue(const nlohmann::json& j, const char* key, std::array<T, N>& out) 
 void finish(NanaConfig& c) {
     if (c.rules != "tetrio" && c.rules != "botris") fail("rules must be tetrio or botris");
     if (c.threads < 1) fail("threads must be at least 1");
-    if (c.reward != "kill" && c.reward != "app") fail("reward must be kill or app");
     if (c.pin_layout != "compact" && c.pin_layout != "spread") fail("pin_layout must be compact or spread");
-    if (c.reward_scale <= 0) fail("reward_scale must be positive");
-    if (c.kill_lambda < 0 || c.kill_lambda > 1) fail("kill_lambda must be in [0, 1]");
-    if (c.kill_discount < 0 || c.kill_discount > 1) fail("kill_discount must be in [0, 1]");
     if (c.message_weight < 0 || c.rollout_weight < 1 || c.low_water < 0 || c.give_margin < 0 ||
         c.backoff_iterations < 0 || c.steal_chiplet_penalty < 0 || c.steal_temperature < 0)
         fail("request tuning values must be nonnegative, with rollout_weight at least 1");
@@ -208,18 +200,6 @@ NanaConfig load() {
         if (!j.is_object()) {
             fail(std::string(path) + " must hold a JSON object");
         }
-        if (j.contains("decay") && !j.contains("n_cap")) {
-            const double decay = j["decay"].is_number() ? j["decay"].get<double>() : -1;
-            if (!(decay >= 0 && decay <= 1)) fail(std::string(path) + ": decay must be in [0, 1]");
-            j["n_cap"] = decay < 1 ? 1 / (1 - decay) : std::numeric_limits<double>::max();
-            j.erase("decay");
-        }
-        if (j.contains("markov_opponent")) {
-            if (j["markov_opponent"] != true) {
-                fail(std::string(path) + ": markov_opponent: the handcrafted opponent was removed; delete the key");
-            }
-            j.erase("markov_opponent");
-        }
         size_t known = 0;
         visitFields(c, [&](const char* key, auto& field) {
             if (j.contains(key)) {
@@ -249,10 +229,6 @@ NanaConfig load() {
 void loadTbpConfig() {
     tbpSettingsEnabled() = true;
     (void)config();
-}
-
-const NanaConfig* tbpConfig() {
-    return tbpSettingsEnabled() ? &config() : nullptr;
 }
 
 float NanaConfig::priorWeight(int rank) const {

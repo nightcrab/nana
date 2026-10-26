@@ -15,4 +15,8 @@
 /tuner_*.log
 /tuner_*.err
 /scripts/opponent_replay/target/
-/scripts/__pycache__/
+__pycache__/
+/out.txt
+/ec2-*.log
+/speed.html
+*.aps

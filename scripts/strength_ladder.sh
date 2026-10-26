@@ -47,11 +47,11 @@ if [ "${BUILD:-1}" = 1 ]; then
         [ "$lf" = 1 ] && [ "$lf1" != 1 ] && continue
         [ "$lf" = 6 ] && (( ${#mults[@]} == 0 && ${#variants[@]} > 0 )) && continue
         cmake -S . -B "build-strength-lf$lf" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF \
-            -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1 -DNANA_LOAD_FACTOR=$lf $extra_flags" > /dev/null
+            -DCMAKE_CXX_FLAGS="-DNANA_LOAD_FACTOR=$lf $extra_flags" > /dev/null
         cmake --build "build-strength-lf$lf" --target nana_emulate -j "$cpus" > /dev/null
     done
     for v in "${variants[@]}"; do
-        cmake -S . -B "build-strength-v$v" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF             -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1 -DNANA_LOAD_FACTOR=6 $(variant_flags "$v")" > /dev/null
+        cmake -S . -B "build-strength-v$v" -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF             -DCMAKE_CXX_FLAGS="-DNANA_LOAD_FACTOR=6 $(variant_flags "$v")" > /dev/null
         cmake --build "build-strength-v$v" --target nana_emulate -j "$cpus" > /dev/null
     done
 fi
@@ -62,8 +62,6 @@ done
 for key in "${!bins[@]}"; do
     [[ $key == v* ]] && [ ! -x "${bins[$key]}" ] && { echo "missing binary for variant ${key#v}: ${bins[$key]}" >&2; exit 1; }
 done
-
-export NANA_REWARD=${NANA_REWARD:-app}
 
 out="results/$(hostname)-strength-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out/parts"
@@ -96,7 +94,7 @@ log() { echo "$*" | tee -a "$out/machine.txt"; }
     for v in "${variants[@]}"; do
         echo "variant $v: $(variant_flags "$v")"
         if [ -n "${variant_configs[v$v]:-}" ]; then
-            echo "  NANA_REWARD=app NANA_CONFIG=${variant_configs[v$v]}"
+            echo "  NANA_CONFIG=${variant_configs[v$v]}"
             cat "${variant_configs[v$v]}"
         fi
     done
@@ -134,7 +132,7 @@ run_tasks() {
             read -r name lf ms seed n <<< "${tasks[$k]}"
             runtime=()
             if [ -n "${variant_configs[$lf]:-}" ]; then
-                runtime=(env "NANA_CONFIG=${variant_configs[$lf]}" NANA_REWARD=app)
+                runtime=(env "NANA_CONFIG=${variant_configs[$lf]}")
             fi
             limit=$(( (sims > 0 ? 6 : 2) * n * horizon * ms / 1000 + 60 ))
             status=0

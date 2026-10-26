@@ -96,7 +96,23 @@ def context(position, pieces=False):
     return values
 
 
+def position_key(position):
+    """Compare roots without database names or recorded futures."""
+    root = {k: position[k] for k in ('queue', 'hold', 'bag', 'b2b', 'combo', 'meter')}
+    root['board'] = position['board'][:20]
+    return hashlib.sha256(json.dumps(root, sort_keys=True).encode()).hexdigest()
+
+
 def generate(args):
+    no_garbage = getattr(args, 'no_garbage', False)
+    prepare_only = getattr(args, 'prepare_only', False)
+    if no_garbage and args.replay_weight <= 0:
+        raise ValueError('no-garbage targets require generated continuations')
+    exclusions = getattr(args, 'exclude_positions', [])
+    excluded = set()
+    for path in exclusions:
+        with open(path) as f:
+            excluded.update(position_key(p) for p in json.loads(next(f))['positions'])
     cache = Path(args.cache)
     cache.mkdir(parents=True, exist_ok=True)
     arrays = defaultdict(list)
@@ -109,9 +125,11 @@ def generate(args):
         db_hash = digest_file(db_path)
         spec = dict(version=VERSION, db=db_hash, player=player, horizon=args.horizon,
                     stride=args.stride, limit=args.max_positions, seed=args.seed,
-                    queue_seeds=args.queue_seeds, repeats=args.repeats, thinks=args.thinks,
+                    samples=args.samples, sampler='fresh-queue-per-rollout', thinks=args.thinks,
                     replay=replay_signature, loader=digest_file(__file__),
                     entropy_loader=digest_file(cc.__file__))
+        spec.update(no_garbage=no_garbage,
+                    exclude_positions=[digest_file(p) for p in exclusions])
         key = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:20]
         directory = cache / key
         directory.mkdir(exist_ok=True)
@@ -121,12 +139,14 @@ def generate(args):
             print(f"cached positions: {directory}", flush=True)
         else:
             positions = positions_from_db(db_path, player, args.horizon, args.stride)
+            positions = [p for p in positions if position_key(p) not in excluded]
             if args.max_positions and len(positions) > args.max_positions:
                 index = np.random.default_rng(args.seed).choice(len(positions), args.max_positions, replace=False)
                 positions = [positions[i] for i in sorted(index)]
             temp = position_file.with_suffix(".tmp")
             temp.write_text(json.dumps(dict(spec=spec, positions=positions)))
             temp.replace(position_file)
+        prepared_examples = 0
         for start in range(0, len(positions), args.shard_size):
             shard = positions[start:start+args.shard_size]
             target_file = directory / f"replay-{start:07d}-{len(shard)}.npz"
@@ -139,9 +159,11 @@ def generate(args):
             else:
                 print(f"replaying {start+1}..{start+len(shard)} / {len(positions)}", flush=True)
                 replays = cc.run_replays(shard, args)
-                targets = np.full((len(shard), args.queue_seeds*args.repeats, args.horizon), -1, dtype=np.int64)
+                targets = np.full((len(shard), args.samples, args.horizon), -1, dtype=np.int64)
                 for replay in replays:
-                    slot = replay["queue_seed"] * args.repeats + replay["repeat"]
+                    slot = replay["queue_seed"]
+                    if replay['repeat'] != 0:
+                        raise ValueError('training expects one independent search per sampled queue')
                     if not (0 <= replay["position"] < len(shard) and 0 <= slot < targets.shape[1]):
                         raise ValueError("replay returned an invalid position or sample ID")
                     if (targets[replay["position"], slot] >= 0).any():
@@ -153,20 +175,34 @@ def generate(args):
                 with open(temp, "wb") as f:
                     np.savez_compressed(f, targets=targets)
                 temp.replace(target_file)
-            arrays["replay"].extend(targets)
-            for position in shard:
-                arrays["board"].append(position["board"][:20])
-                arrays["context"].append(context(position, args.pieces))
-                arrays["real"].append(position["recorded"])
-                arrays["real_mask"].append(position["real_mask"])
-                arrays["replay_mask"].append(position["replay_mask"])
-                arrays["game"].append(db_hash + ":" + position["game"])
-        manifest.append(dict(path=str(Path(db_path).resolve()), key=key, player=player, positions=len(positions)))
+            prepared_examples += len(shard) * (args.samples if no_garbage else 1)
+            if prepare_only:
+                continue
+            for i, position in enumerate(shard):
+                # Continuations keep the root's game ID, so game splits remain disjoint.
+                examples = targets[i] if no_garbage else [position['recorded']]
+                board = position['board'][:20]
+                root_context = context(position, args.pieces)
+                real_mask = [True]*args.horizon if no_garbage else position['real_mask']
+                replay_mask = [False]*args.horizon if no_garbage else position['replay_mask']
+                replays = np.empty((0, args.horizon), dtype=np.int64) if no_garbage else targets[i]
+                game = db_hash + ':' + position['game']
+                for target in examples:
+                    arrays['replay'].append(replays)
+                    arrays['board'].append(board)
+                    arrays['context'].append(root_context)
+                    arrays['real'].append(target)
+                    arrays['real_mask'].append(real_mask)
+                    arrays['replay_mask'].append(replay_mask)
+                    arrays['game'].append(game)
+        manifest.append(dict(path=str(Path(db_path).resolve()), key=key, player=player,
+                             positions=len(positions), examples=prepared_examples,
+                             target_mode='no-garbage-continuations' if no_garbage else 'recorded'))
+    if prepare_only:
+        return {}, manifest
     if not arrays["board"]:
         raise ValueError("no complete horizon windows found in the stadium databases")
-    out = {k: np.asarray(v) for k, v in arrays.items()}
-    out["board"] = out["board"].astype(np.float32)[:, None]
-    out["context"] = out["context"].astype(np.float32)
-    out["real"] = out["real"].astype(np.int64)
-    out["replay"] = out["replay"].astype(np.int64)
+    dtypes = dict(board=np.float32, context=np.float32, real=np.int64, replay=np.int64)
+    out = {k: np.asarray(v, dtype=dtypes.get(k)) for k, v in arrays.items()}
+    out['board'] = out['board'][:, None]
     return out, manifest

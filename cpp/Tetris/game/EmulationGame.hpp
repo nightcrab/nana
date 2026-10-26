@@ -7,10 +7,6 @@
 #include <ostream>
 #include <queue>
 
-#ifndef NANA_HASH_QUEUE_FRONT
-#define NANA_HASH_QUEUE_FRONT 1
-#endif
-
 #ifndef NANA_FUTURE_ORACLE
 #define NANA_FUTURE_ORACLE 0
 #endif
@@ -69,13 +65,6 @@ class EmulationGame {
     OpponentFilter belief;
 
     void set_tetrio_rules();
-
-    float kill_value = 0;
-    float kill_survival = 1;
-    float kill_weight = 1;
-    float kill_discount = 1;
-    void reset_kill(float discount, bool expected);
-    float expected_kill() const;
 
     int garbage_ramp = 0;
     int ramp_pieces = 0;

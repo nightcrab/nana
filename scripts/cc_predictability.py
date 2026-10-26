@@ -107,6 +107,9 @@ def load_positions(paths, player, stride, horizon, limit):
 
 
 def run_replays(positions, args):
+    # Training requests independent draws; the diagnostic retains nested Q x R draws.
+    queue_seeds = args.samples if hasattr(args, 'samples') else args.queue_seeds
+    repeats = 1 if hasattr(args, 'samples') else args.repeats
     exe = Path(args.cc)
     if not exe.exists():
         sys.exit(f"{exe} not found; build it in ../cold-clear with\n"
@@ -115,9 +118,11 @@ def run_replays(positions, args):
         file = Path(tmp) / "positions.json"
         file.write_text(json.dumps({"positions": positions}))
         cmd = [str(exe), "--positions", str(file), "--horizon", str(args.horizon), "--thinks", str(args.thinks),
-               "--queue-seeds", str(args.queue_seeds), "--repeats", str(args.repeats), "--seed", str(args.seed),
+               "--queue-seeds", str(queue_seeds), "--repeats", str(repeats), "--seed", str(args.seed),
                "--jobs", str(args.jobs)]
-        total = len(positions) * (args.queue_seeds + 1) * args.repeats
+        if getattr(args, "no_garbage", False):
+            cmd += ["--no-garbage", "1"]
+        total = sum(queue_seeds + int('future' in p) for p in positions) * repeats
         rollouts = []
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
         for line in proc.stdout:
@@ -226,25 +231,26 @@ def report(positions, rollouts, horizon):
 
     h0 = entropy(pooled, correct=False)
     print(f"\nper-piece attack entropy, bits (lower = more predictable)")
-    print(f"  no knowledge of the position (pooled marginal): {h0:.3f}")
-    print(f"  {'piece':>5}  {'H(a_k | position)':>18}  {'H(a_k | position, queue)':>25}  {'P(attack)':>9}"
+    print(f"  nothing known (pooled marginal): {h0:.3f}")
+    print("  visible = board, hold, current piece, previews, bag state; hidden queue = pieces dealt after the root")
+    print(f"  {'piece':>5}  {'H(a_k | visible)':>18}  {'H(a_k | visible, hidden queue)':>31}  {'P(attack)':>9}"
           f"  {'best yes/no guess':>17}")
     for k in range(H):
-        print(f"  {k + 1:>5}  {mean(cond_h[k]):>18.3f}  {mean(cond_h_search[k]):>25.3f}  {mean(p_attack[k]):>9.2f}"
+        print(f"  {k + 1:>5}  {mean(cond_h[k]):>18.3f}  {mean(cond_h_search[k]):>31.3f}  {mean(p_attack[k]):>9.2f}"
               f"  {mean(timing_acc[k]):>17.0%}")
     for n in sorted({min(5, H), H}):
         c = mean(mean(cond_h[k]) for k in range(n))
         s = mean(mean(cond_h_search[k]) for k in range(n))
-        print(f"  first {n}: {c:.3f} bits/piece given the position ({1 - c / h0:.0%} below no knowledge),"
-              f" {s:.3f} given the queue too")
-    print("  (the per-piece marginals bound the joint sequence's entropy per piece from above; the queue column"
-          " is a plug-in over the repeats, so it reads low)")
+        print(f"  first {n}: {c:.3f} bits/piece given what's visible ({1 - c / h0:.0%} below nothing known),"
+              f" {s:.3f} given the hidden queue too (search randomness only)")
+    print("  (the per-piece marginals bound the joint sequence's entropy per piece from above; the hidden-queue"
+          " column is a plug-in over the repeats, so it reads low)")
 
     tv, wv = mean(total_var), mean(within_var)
     hv, hw = mean(hit_var), mean(hit_within)
     print(f"\nspread within a position, averaged over positions")
     print(f"  {H}-piece total attack: variance {tv:.2f} (sd {math.sqrt(tv):.2f});"
-          f" search noise alone {wv:.2f} ({wv / tv if tv else 0:.0%}), unseen pieces the rest")
+          f" search noise alone {wv:.2f} ({wv / tv if tv else 0:.0%}), hidden queue the rest")
     print(f"  pieces that attack:   variance {hv:.2f} (sd {math.sqrt(hv):.2f});"
           f" search noise alone {hw:.2f} ({hw / hv if hv else 0:.0%})")
     print(f"  the most common exact {H}-piece attack pattern covers {mean(modal_seq):.0%} of rollouts")

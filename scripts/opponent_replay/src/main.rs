@@ -7,8 +7,9 @@
 //! bottom first, of 0/1; queue is [current, preview...]; bag is what is left of the 7-bag after the
 //! queue; future (optional) is the pieces the game really dealt next. Each position plays R
 //! rollouts for each of Q random continuations of the bag, and R more on `future` (queue seed -1)
-//! when it has one. Rollouts on the same queue differ only by the search's own randomness. No
-//! Fixed incoming attacks arrive during a rollout. One JSON line per rollout on stdout.
+//! when it has one. Rollouts on the same queue differ only by the search's own randomness.
+//! Fixed incoming attacks arrive unless --no-garbage 1 ignores both incoming and initial meter.
+//! One JSON line per rollout on stdout.
 //! Build with cargo build --release --manifest-path scripts/opponent_replay/Cargo.toml.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -130,6 +131,7 @@ fn rollout(
     base_seed: u64,
     horizon: usize,
     thinks: u32,
+    no_garbage: bool,
 ) -> Vec<Value> {
     let eval = Standard::default();
     let mut game = pos.board.clone();
@@ -137,20 +139,21 @@ fn rollout(
     let options = Options {
         speculate: true,
         threads: 1,
-        min_thinks: thinks,
+        min_thinks: if no_garbage { Options::default().min_thinks } else { thinks },
         max_thinks: thinks,
         ..Default::default()
     };
     let mut bot = BotState::new(pos.board.clone(), options);
     let mut rng = base_seed
         ^ (queue_seed as u64).wrapping_mul(0xD1B54A32D192ED03)
-        ^ (position_id as u64).wrapping_mul(0x94D049BB133111EB);
+        ^ if no_garbage { 0 } else { (position_id as u64).wrapping_mul(0x94D049BB133111EB) };
     // Separate streams: repeats share the queue, but resample unknown garbage holes.
     let mut garbage_rng = rng ^ (repeat as u64).wrapping_mul(0x9E3779B97F4A7C15);
-    let mut meter = pos.meter;
+    let mut meter = if no_garbage { 0 } else { pos.meter };
     let mut dealt = 0;
     let mut moves = vec![];
-    for step in 0..horizon.min(pos.incoming.len()) {
+    let steps = if no_garbage { horizon } else { horizon.min(pos.incoming.len()) };
+    for step in 0..steps {
         let mut stuck = 0;
         loop {
             match bot.think() {
@@ -193,7 +196,7 @@ fn rollout(
         let (next_meter, tanked) = pressure(
             meter,
             lock.garbage_sent,
-            pos.incoming[step],
+            if no_garbage { 0 } else { pos.incoming[step] },
             !lock.cleared_lines.is_empty(),
         );
         meter = next_meter;
@@ -232,6 +235,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn no_garbage_ignores_initial_meter_and_recorded_schedule_length() {
+        let pos = load(&json!({
+            "board": vec![vec![0u32; 10]; 40],
+            "queue": ["I", "O", "T", "L", "J", "S"],
+            "hold": null, "bag": ["Z"], "combo": 0, "b2b": 0,
+            "meter": 100, "incoming": []
+        }));
+        assert!(rollout(&pos, 0, 0, 0, 1, 3, 1, false).is_empty());
+        let moves = rollout(&pos, 0, 0, 0, 1, 3, 1, true);
+        assert_eq!(moves.len(), 3);
+        assert!(moves.iter().all(|m| m["height"].as_u64().unwrap() <= 12));
+    }
+
+    #[test]
     fn fixed_pressure_cancels_old_meter_before_simultaneous_attack() {
         assert_eq!(pressure(5, 3, 4, true), (6, 0));
         assert_eq!(pressure(2, 7, 4, true), (0, 0));
@@ -254,6 +271,7 @@ fn main() {
     let mut repeats = 4usize;
     let mut base_seed = 1u64;
     let mut jobs = 1usize;
+    let mut no_garbage = false;
     let mut i = 1;
     while i < args.len() {
         if i + 1 >= args.len() {
@@ -268,6 +286,7 @@ fn main() {
             "--repeats" => repeats = v.parse().unwrap(),
             "--seed" => base_seed = v.parse().unwrap(),
             "--jobs" => jobs = v.parse::<usize>().unwrap().max(1),
+            "--no-garbage" => no_garbage = v.parse::<u32>().unwrap() != 0,
             other => panic!("unknown option {}", other),
         }
         i += 2;
@@ -305,7 +324,7 @@ fn main() {
                     Some(&t) => t,
                     None => break,
                 };
-                let moves = rollout(&positions[p], p, q, r, base_seed, horizon, thinks);
+                let moves = rollout(&positions[p], p, q, r, base_seed, horizon, thinks, no_garbage);
                 let line = json!({ "position": p, "queue_seed": q, "repeat": r, "moves": moves });
                 send.send(line.to_string()).unwrap();
             })

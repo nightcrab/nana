@@ -418,8 +418,6 @@ int main() {
 
                 // create new emulation game rooted at this state
                 game = EmulationGame();
-#ifdef TBP1
-#else
                 {
                     // create opponent model from other board
                     nlohmann::json player_2;
@@ -428,7 +426,6 @@ int main() {
                     CHECK_ERR(player_2 = message["opponents"][0]);
                     readOpponent(player_2, seen_opponent);
                 }
-#endif
 
                 game.game.board = board;
                 game.game.current_piece = queue.front();
@@ -533,8 +530,6 @@ int main() {
                 CHECK_ERR(rotation = json_to_rotation(message["location"]["orientation"]));
 
 
-#ifdef TBP1
-#else
                 {
                     // create opponent model from other board
                     nlohmann::json player_2;
@@ -545,7 +540,6 @@ int main() {
                         readOpponent(player_2, seen_opponent);
                     }
                 }
-#endif
 
 
 

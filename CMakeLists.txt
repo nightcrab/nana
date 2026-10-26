@@ -10,6 +10,5 @@ if (POLICY CMP0141)
 endif()
 
 project ("nana")
-option(BENCH OFF)
 # Include sub-projects.
 add_subdirectory ("cpp")

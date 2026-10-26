@@ -46,9 +46,6 @@ constexpr float CC_DEAD = -1e9f;
 #endif
 constexpr bool cc_restart = NANA_CC_RESTART;
 
-#ifndef NANA_SUFFIX
-#define NANA_SUFFIX !NANA_CC_SEARCH
-#endif
 #ifndef NANA_SUFFIX_DISCOUNT
 #define NANA_SUFFIX_DISCOUNT 1.0
 #endif
@@ -72,15 +69,13 @@ struct Return {
     friend Return operator+(Return a, const Return& b) { return a += b; }
 };
 
-#if NANA_SUFFIX
-using Reward = Return;
-#else
+// The regular search backs up suffix returns by expectimax; the CC search backs up Cold Clear's scalar values.
+#if NANA_CC_SEARCH
 using Reward = float;
+#else
+using Reward = Return;
 #endif
 
-#ifndef NANA_EXPECTIMAX
-#define NANA_EXPECTIMAX !NANA_CC_SEARCH
-#endif
 #ifndef NANA_EXPECTIMAX_MIN_N
 #define NANA_EXPECTIMAX_MIN_N 1
 #endif
@@ -131,11 +126,9 @@ struct ColdAction {
     int time = 0;
     float eval = 0;
     float move_reward = 0;
-#if NANA_SUFFIX
+#if !NANA_CC_SEARCH
     float step_attack = 0;
     Return sums;
-#endif
-#if NANA_EXPECTIMAX
     ChildTable children;
 #endif
 };
@@ -195,16 +188,16 @@ class UCTNode {
 
     void updateTime(size_t i, int newtime);
 
-    Reward climb(size_t i, Reward reward, bool carried, bool apply = true);
+    Reward climb(size_t i, Reward reward, bool carried);
 
-#if NANA_EXPECTIMAX
+#if !NANA_CC_SEARCH
     Reward leaf_V{};
     int best = -1;
     float best_Q = 0;
     Reward best_V{};
 
     Reward value() const { return best >= 0 ? best_V : leaf_V; }
-    Reward report(size_t i, uint32_t child, Reward V, float k, bool fresh, bool apply = true);
+    Reward report(size_t i, uint32_t child, Reward V, float k, bool fresh);
     void rescanBest();
     float armValue(size_t i, Reward& V) const;
 #endif
@@ -335,7 +328,6 @@ public:
     uint64_t restarts = 0;
     uint64_t restart_depth = 0;
     uint64_t root_backprops = 0;
-    uint64_t leaks = 0;
     uint64_t illegal_moves = 0;
     uint64_t replay_matched = 0;
     uint64_t replay_diverged = 0;

@@ -28,7 +28,6 @@ struct Params {
 };
 
 const Params& params();
-float fresh_death_value(int jeopardy, int since);
 
 inline int jeopardy_bucket(float meter) {
     const Params& p = params();
@@ -68,9 +67,6 @@ public:
     float total_damage = 0;
     double last_attack = 0;
 
-    bool expected_death = false;
-    float last_death_prob = 0;
-
     // Advances internal state and returns outgoing damage this turn
     double play() {
         const markov::Params& p = markov::params();
@@ -85,14 +81,8 @@ public:
 
         const auto& row = fresh ? p.initial : p.transition[action][jeopardy_bucket()][since][state];
         fresh = false;
-        int emission;
-        if (expected_death) {
-            emission = play_surviving(p, row);
-        }
-        else {
-            state = sample(row);
-            emission = sample(p.emission[state]);
-        }
+        state = sample(row);
+        const int emission = sample(p.emission[state]);
         since = emission == 0 ? (uint8_t)std::min(since + 1, markov::SINCE - 1) : 0;
         if (emission == markov::DEATH) {
             dead = true;
@@ -131,16 +121,6 @@ public:
         return markov::jeopardy_bucket(meter);
     }
 
-    float death_value() const {
-        if (dead) {
-            return 1.0f;
-        }
-        if (fresh) {
-            return markov::fresh_death_value(jeopardy_bucket(), since);
-        }
-        return markov::params().death_value[state][jeopardy_bucket()][since];
-    }
-
     double jeopardy() const { return meter; }
     bool is_dead() const { return dead; }
 
@@ -169,35 +149,13 @@ private:
     }
 
     template <size_t N>
-    int sample(const std::array<float, N>& cdf, float scale = 1.0f) {
-        const float u = uniform() * scale;
+    int sample(const std::array<float, N>& cdf) {
+        const float u = uniform();
         int i = 0;
         while (i < (int)N - 1 && u >= cdf[i]) {
             i++;
         }
         return i;
-    }
-
-    int play_surviving(const markov::Params& p, const std::array<float, markov::STATES>& row) {
-        std::array<float, markov::STATES> survive;
-        float death = 0;
-        float total = 0;
-        float previous = 0;
-        for (int j = 0; j < markov::STATES; j++) {
-            const float to = row[j] - previous;
-            previous = row[j];
-            const float alive = p.emission[j][markov::DEATH - 1];
-            death += to * (1.0f - alive);
-            total += to * alive;
-            survive[j] = total;
-        }
-        last_death_prob = death;
-        if (total <= 0) {
-            state = sample(row);
-            return 0;
-        }
-        state = sample(survive, total);
-        return sample(p.emission[state], p.emission[state][markov::DEATH - 1]);
     }
 };
 

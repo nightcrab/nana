@@ -13,19 +13,7 @@
 #endif
 
 const char* EmulationGame::rules() {
-    if (const auto* c = tbpConfig()) return c->rules.c_str();
-    static const char* const name = [] {
-        const char* rules = std::getenv("NANA_RULES");
-        if (!rules || !*rules || std::strcmp(rules, "tetrio") == 0) {
-            return "tetrio";
-        }
-        if (std::strcmp(rules, "botris") == 0) {
-            return "botris";
-        }
-        std::cerr << "NANA_RULES=" << rules << " isn't a ruleset (tetrio or botris)" << std::endl;
-        std::exit(1);
-    }();
-    return name;
+    return config().rules.c_str();
 }
 
 namespace {
@@ -140,11 +128,6 @@ void EmulationGame::chance_move() {
     }
 
     last_received = garbage_amount;
-
-    const float death = markov.expected_death ? markov.last_death_prob : (markov.dead ? 1.0f : 0.0f);
-    kill_weight *= kill_discount;
-    kill_value += kill_survival * death * kill_weight;
-    kill_survival *= 1.0f - death;
 
     if (garbage_amount > 0) {
         if (garbage_delay == 0) {
@@ -444,10 +427,8 @@ uint32_t EmulationGame::hash() const {
     hash = fasthash32(&game.combo, sizeof(u16), hash);
     if (game.hold)
         hash = fasthash32(&*game.hold, sizeof(*game.hold), hash);
-#if NANA_HASH_QUEUE_FRONT
     else
         hash = fasthash32(&game.queue.front(), sizeof(PieceType), hash);
-#endif
     if constexpr (NANA_HASH_METER) {
         for (int garbage : garbage_meter) {
             hash = fasthash32(&garbage, sizeof(garbage), hash);
@@ -525,19 +506,6 @@ template void EmulationGame::start_from_root<NoOpponent>();
 
 void EmulationGame::reset_opponent() {
     markov = MarkovOpponent();
-}
-
-void EmulationGame::reset_kill(float discount, bool expected) {
-    kill_value = 0;
-    kill_survival = 1;
-    kill_weight = 1;
-    kill_discount = discount;
-    markov.expected_death = expected;
-}
-
-float EmulationGame::expected_kill() const {
-    const float ahead = markov.death_value();
-    return std::clamp(kill_value + kill_survival * kill_weight * ahead, 0.0f, 1.0f);
 }
 
 void EmulationGame::write_opponent_header(std::ostream& out) {

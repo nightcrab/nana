@@ -5,6 +5,7 @@ usage: python3 scripts/tune_requesting.py --bench build-bench-mp1/cpp/nana_bench
 """
 import argparse
 import csv
+import json
 import math
 import os
 import random
@@ -15,16 +16,6 @@ import time
 
 DEFAULTS = {"message_weight": 1, "rollout_weight": 30, "low_water": 30, "give_margin": 3,
             "backoff_iterations": 64, "steal_chiplet_penalty": 30, "steal_topk": 4, "steal_temperature": 10}
-ENV = {
-    "message_weight": "NANA_MESSAGE_WEIGHT",
-    "rollout_weight": "NANA_ROLLOUT_WEIGHT",
-    "low_water": "NANA_LOW_WATER",
-    "give_margin": "NANA_GIVE_MARGIN",
-    "backoff_iterations": "NANA_BACKOFF_ITERATIONS",
-    "steal_chiplet_penalty": "NANA_STEAL_CHIPLET_PENALTY",
-    "steal_topk": "NANA_STEAL_TOPK",
-    "steal_temperature": "NANA_STEAL_TEMPERATURE",
-}
 
 
 def sample(rng):
@@ -59,9 +50,11 @@ def mean_wait(output):
 
 
 def run(args, config, test):
-    env = dict(os.environ)
-    for key, value in config.items():
-        env[ENV[key]] = str(value)
+    # the trial's settings on top of the NANA_CONFIG the script was started with
+    path = os.path.join(args.out, "config.json")
+    with open(path, "w") as f:
+        json.dump({**args.base_config, **config}, f)
+    env = dict(os.environ, NANA_CONFIG=path)
     out = subprocess.run([args.bench, str(args.threads), str(args.ms), str(test)],
                          env=env, capture_output=True, text=True, check=True).stdout
     requests = field(out, "requests")
@@ -105,6 +98,10 @@ def main():
     p.add_argument("--out", default=f"results/tune-{time.strftime('%Y%m%d-%H%M%S')}")
     args = p.parse_args()
     args.bench = os.path.abspath(args.bench)
+    args.base_config = {}
+    if os.environ.get("NANA_CONFIG"):
+        with open(os.environ["NANA_CONFIG"]) as f:
+            args.base_config = json.load(f)
 
     os.makedirs(args.out, exist_ok=True)
     rng = random.Random(args.seed)

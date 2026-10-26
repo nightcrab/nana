@@ -11,7 +11,7 @@ read -ra tests <<< "${TESTS:-0 1}"
 prep=${PREP:-1}
 
 git submodule update --init --recursive
-cmake -S . -B build-speed -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF -DCMAKE_CXX_FLAGS="-DNANA_MPMCTS=1" > /dev/null
+cmake -S . -B build-speed -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF > /dev/null
 cmake --build build-speed --target nana_speed -j "$(nproc)" > /dev/null
 bench=$PWD/build-speed/cpp/nana_speed
 

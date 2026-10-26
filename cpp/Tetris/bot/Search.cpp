@@ -88,17 +88,9 @@ Search::FlushStats Search::flush_stats;
 constexpr int LOAD_FACTOR = NANA_LOAD_FACTOR;
 
 constexpr size_t MAX_PATH_DEPTH = 64;
-#ifndef NANA_DEPTH_CAP
-#define NANA_DEPTH_CAP 0
-#endif
-static int configuredDepthCap() {
-    if (NANA_DEPTH_CAP > 0) return NANA_DEPTH_CAP;
-    if (const char* text = std::getenv("NANA_DEPTH_CAP"); text && *text) return std::atoi(text);
-    return config().depth_cap;
-}
 static size_t leafDepth() {
     static const size_t depth = [] {
-        const int cap = cc_search ? 0 : configuredDepthCap();
+        const int cap = cc_search ? 0 : config().depth_cap;
         return cap > 0 && (size_t)cap < MAX_PATH_DEPTH ? (size_t)cap : MAX_PATH_DEPTH;
     }();
     return depth;
@@ -111,27 +103,6 @@ static_assert(!cc_search || !NANA_MPMCTS,
               "the CC search needs NANA_MPMCTS=0: the MP-MCTS path selects with PUCT and restarts on PUCT's "
               "stillChosen test; the CC search gets its restart from NANA_CC_RESTART instead");
 
-#ifndef NANA_LEAK
-#define NANA_LEAK 0
-#endif
-#ifndef NANA_LEAK_P
-#define NANA_LEAK_P 0.05
-#endif
-#ifndef NANA_LEAK_K
-#define NANA_LEAK_K 32
-#endif
-#ifndef NANA_LEAK_EPS
-#define NANA_LEAK_EPS 0.05
-#endif
-
-#ifndef NANA_FLUSH_AT_END
-#define NANA_FLUSH_AT_END 1
-#endif
-
-#ifndef NANA_REPLAY_RESTART
-#define NANA_REPLAY_RESTART 1
-#endif
-static_assert(!NANA_REPLAY_RESTART || NANA_HASH_QUEUE_FRONT, "NANA_REPLAY_RESTART needs NANA_HASH_QUEUE_FRONT");
 
 static EmulationGame replay_root(false);
 static uint32_t replay_root_hash = 0;
@@ -170,63 +141,15 @@ constexpr int MAX_STEAL_TOPK = 8;
 static RequestTuning tuning;
 
 static void loadTuning() {
-    if (const auto* c = tbpConfig()) {
-        tuning.message_weight = c->message_weight;
-        tuning.rollout_weight = c->rollout_weight;
-        tuning.low_water = c->low_water;
-        tuning.give_margin = c->give_margin;
-        tuning.backoff_iterations = c->backoff_iterations;
-        tuning.steal_chiplet_penalty = c->steal_chiplet_penalty;
-        tuning.steal_topk = c->steal_topk;
-        tuning.steal_temperature = c->steal_temperature;
-        return;
-    }
-    auto read = [](const char* name, int& value) {
-        if (const char* text = std::getenv(name)) {
-            value = std::atoi(text);
-        }
-    };
-    tuning = RequestTuning();
-    read("NANA_MESSAGE_WEIGHT", tuning.message_weight);
-    read("NANA_ROLLOUT_WEIGHT", tuning.rollout_weight);
-    read("NANA_LOW_WATER", tuning.low_water);
-    read("NANA_GIVE_MARGIN", tuning.give_margin);
-    read("NANA_BACKOFF_ITERATIONS", tuning.backoff_iterations);
-    read("NANA_STEAL_CHIPLET_PENALTY", tuning.steal_chiplet_penalty);
-    read("NANA_STEAL_TOPK", tuning.steal_topk);
-    read("NANA_STEAL_TEMPERATURE", tuning.steal_temperature);
-    tuning.steal_topk = std::clamp(tuning.steal_topk, 1, MAX_STEAL_TOPK);
-}
-
-struct RewardTuning {
-    bool app_only = NANA_SUFFIX;
-    float scale = 0.25f;
-    float lambda = 0.0f;
-    float discount = 0.9f;
-};
-
-static RewardTuning reward_tuning;
-
-static void loadRewardTuning() {
-    if (const auto* c = tbpConfig()) {
-        reward_tuning.app_only = c->reward == "app";
-        reward_tuning.scale = static_cast<float>(c->reward_scale);
-        reward_tuning.lambda = static_cast<float>(c->kill_lambda);
-        reward_tuning.discount = static_cast<float>(c->kill_discount);
-        return;
-    }
-    reward_tuning = RewardTuning();
-    if (const char* text = std::getenv("NANA_REWARD")) {
-        reward_tuning.app_only = std::strcmp(text, "app") == 0;
-    }
-    auto read = [](const char* name, float& value) {
-        if (const char* text = std::getenv(name); text && *text) {
-            value = (float)std::atof(text);
-        }
-    };
-    read("NANA_REWARD_SCALE", reward_tuning.scale);
-    read("NANA_KILL_LAMBDA", reward_tuning.lambda);
-    read("NANA_KILL_DISCOUNT", reward_tuning.discount);
+    const NanaConfig& c = config();
+    tuning.message_weight = c.message_weight;
+    tuning.rollout_weight = c.rollout_weight;
+    tuning.low_water = c.low_water;
+    tuning.give_margin = c.give_margin;
+    tuning.backoff_iterations = c.backoff_iterations;
+    tuning.steal_chiplet_penalty = c.steal_chiplet_penalty;
+    tuning.steal_topk = std::clamp(c.steal_topk, 1, MAX_STEAL_TOPK);
+    tuning.steal_temperature = c.steal_temperature;
 }
 
 #ifndef NANA_OPPONENT_ORACLE
@@ -240,10 +163,6 @@ static void loadSearchOpponent() {
     search_opponent = config().opponent;
     if (search_opponent) {
         return;
-    }
-    if (!cc_search && !reward_tuning.app_only) {
-        std::cerr << "the kill reward needs an opponent: set reward app (NANA_REWARD=app) or opponent true" << std::endl;
-        std::exit(2);
     }
     if constexpr (NANA_OPPONENT_ORACLE || NANA_FUTURE_ORACLE) {
         std::cerr << "the opponent and future oracles need opponent true" << std::endl;
@@ -268,20 +187,6 @@ static void adoptOpponentBelief(EmulationGame& root) {
     }
 }
 
-static void resetKill(EmulationGame& root) {
-    loadRewardTuning();
-    const float fitted = markov::params().discount;
-    const float discount = fitted > 0 ? fitted : reward_tuning.discount;
-    root.reset_kill(discount, !reward_tuning.app_only);
-    if (NANA_SUFFIX && !reward_tuning.app_only) {
-        std::cerr << "NANA_SUFFIX needs NANA_REWARD=app (reward \"app\" in nana.json)" << std::endl;
-        std::exit(2);
-    }
-}
-
-#ifdef NANA_SEARCH_GARBAGE
-#error "NANA_SEARCH_GARBAGE was replaced by the config key opponent; set opponent to false in the json instead"
-#endif
 #ifndef NANA_PHANTOM_GARBAGE
 #define NANA_PHANTOM_GARBAGE 0
 #endif
@@ -372,10 +277,8 @@ static std::vector<WorkerLocal> worker_local;
 static std::vector<std::vector<uint32_t>> parked_ids;
 
 static void noteParked(int threadIdx, const UCTNode& node) {
-    if constexpr (NANA_FLUSH_AT_END != 0) {
-        if (node.N_buffer == 0) {
-            parked_ids[threadIdx].push_back(node.id);
-        }
+    if (node.N_buffer == 0) {
+        parked_ids[threadIdx].push_back(node.id);
     }
 }
 
@@ -391,9 +294,6 @@ static UCTNode* findNode(uint32_t id) {
     return nullptr;
 }
 
-#ifndef NANA_DEPTH_BASELINE
-#define NANA_DEPTH_BASELINE !NANA_CC_SEARCH
-#endif
 struct alignas(64) DepthBaseline {
     std::array<double, MAX_PATH_DEPTH + 1> sum{};
     std::array<double, MAX_PATH_DEPTH + 1> count{};
@@ -455,7 +355,6 @@ void Search::startSearch(const EmulationGame &state, int core_count) {
     Search::core_count = core_count;
 
     root_state = state;
-    resetKill(root_state);
     loadSearchOpponent();
     searchOpponent(root_state);
     searchGarbage(root_state);
@@ -536,7 +435,6 @@ void Search::continueSearch(EmulationGame state) {
     root_state.true_attack = state.true_app() * 0;
     root_state.pieces = 0;
     root_state.lines = 2;
-    resetKill(root_state);
     loadSearchOpponent();
     searchOpponent(root_state);
     searchGarbage(root_state);
@@ -606,7 +504,7 @@ static size_t mostVisited(const UCTNode& root, const std::vector<float>* extra_N
     return best;
 }
 
-static void flushParked(bool apply) {
+static void flushParked() {
     using Search::uct;
     const uint32_t root_hash = Search::root_state.hash();
     if (!uct.nodeExists(root_hash)) {
@@ -622,15 +520,13 @@ static void flushParked(bool apply) {
     for (std::vector<uint32_t>& ids : parked_ids) {
         std::sort(ids.begin(), ids.end());
         ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-        size_t kept = 0;
         for (const uint32_t id : ids) {
             const UCTNode* node = findNode(id);
             if (node && (node->N_buffer != 0 || !rewardEmpty(node->R_buffer))) {
-                ids[kept++] = id;
                 parked.push_back(id);
             }
         }
-        ids.resize(apply ? 0 : kept);
+        ids.clear();
     }
 
     for (const uint32_t id : parked) {
@@ -639,10 +535,10 @@ static void flushParked(bool apply) {
             continue;
         }
         const float N = (float)node->N_buffer;
-#if NANA_EXPECTIMAX
-        Reward R = node->value();
-#else
+#if NANA_CC_SEARCH
         Reward R = node->R_buffer;
+#else
+        Reward R = node->value();
 #endif
         UCTNode* child = node;
         for (size_t step = 0; step < MAX_PATH_DEPTH; step++) {
@@ -655,15 +551,13 @@ static void flushParked(bool apply) {
             if ((size_t)action >= parent.actionCount()) {
                 break;
             }
-#if NANA_EXPECTIMAX
-            R = parent.report(action, child->id, R, N, false, apply);
+#if NANA_CC_SEARCH
+            R = parent.climb(action, R, true);
 #else
-            R = parent.climb(action, R, true, apply);
+            R = parent.report(action, child->id, R, N, false);
 #endif
-            if (apply) {
-                parent.stats(action).N += N;
-                parent.N += (int)N;
-            }
+            parent.stats(action).N += N;
+            parent.N += (int)N;
             if (parent_hash == root_hash) {
                 hidden_N[action] += N;
                 hidden_R[action] += rewardScalar(R);
@@ -671,11 +565,9 @@ static void flushParked(bool apply) {
             }
             child = &parent;
         }
-        if (apply) {
-            if (UCTNode* parked_node = findNode(id)) {
-                parked_node->N_buffer = 0;
-                parked_node->R_buffer = Reward{};
-            }
+        if (UCTNode* parked_node = findNode(id)) {
+            parked_node->N_buffer = 0;
+            parked_node->R_buffer = Reward{};
         }
     }
 
@@ -684,11 +576,11 @@ static void flushParked(bool apply) {
         minus_N[i] = -hidden_N[i];
         minus_R[i] = -hidden_R[i];
     }
-    const size_t before = apply ? mostVisited(root, &minus_N, &minus_R) : mostVisited(root);
-    const size_t after = apply ? mostVisited(root) : mostVisited(root, &hidden_N, &hidden_R);
+    const size_t before = mostVisited(root, &minus_N, &minus_R);
+    const size_t after = mostVisited(root);
     float total = 0, hidden = 0;
     for (size_t i = 0; i < root.actionCount(); i++) {
-        total += root.stats(i).N + (apply ? 0 : hidden_N[i]);
+        total += root.stats(i).N;
         hidden += hidden_N[i];
     }
     Search::flush_stats.searches++;
@@ -722,30 +614,26 @@ void Search::endSearch() {
     // reset the thread stopper
     thread_stopper = std::stop_source();
 
-    if constexpr (NANA_REPLAY_RESTART) {
-        bool delivered = true;
-        while (delivered) {
-            delivered = false;
-            for (int i = 0; i < core_count; i++) {
-                while (!queues[i]->isempty()) {
-                    Msg msg = queues[i]->dequeue();
-                    if (msg->type == FLUSH) {
-                        if (search_opponent) {
-                            processJob<MarkovOpponent>(i, std::move(msg));
-                        }
-                        else {
-                            processJob<NoOpponent>(i, std::move(msg));
-                        }
-                        delivered = true;
+    bool delivered = true;
+    while (delivered) {
+        delivered = false;
+        for (int i = 0; i < core_count; i++) {
+            while (!queues[i]->isempty()) {
+                Msg msg = queues[i]->dequeue();
+                if (msg->type == FLUSH) {
+                    if (search_opponent) {
+                        processJob<MarkovOpponent>(i, std::move(msg));
                     }
+                    else {
+                        processJob<NoOpponent>(i, std::move(msg));
+                    }
+                    delivered = true;
                 }
             }
         }
     }
 
-    if constexpr (NANA_FLUSH_AT_END != 0) {
-        flushParked(NANA_FLUSH_AT_END == 1);
-    }
+    flushParked();
 
     queues.clear();
     worker_local.clear();
@@ -802,7 +690,6 @@ void Search::printStatistics() {
         sum.restarts += s.restarts;
         sum.restart_depth += s.restart_depth;
         sum.root_backprops += s.root_backprops;
-        sum.leaks += s.leaks;
         sum.cycles += s.cycles;
         sum.depth_capped += s.depth_capped;
     }
@@ -823,7 +710,6 @@ void Search::printStatistics() {
     std::cout << "backprops stopped early: " << (backprops ? 100.0 * sum.restarts / backprops : 0.0) << "%" << std::endl;
     std::cout << "mean restart depth: " << (sum.restarts ? (double)sum.restart_depth / sum.restarts : 0.0) << std::endl;
     std::cout << "root backprops: " << sum.root_backprops << std::endl;
-    std::cout << "leaks (NANA_LEAK " << NANA_LEAK << "): " << sum.leaks << std::endl;
     std::cout << "cycles: " << sum.cycles << std::endl;
     std::cout << "depth capped: " << sum.depth_capped << std::endl;
     std::cout << "nodes storing history: " << history_nodes << " (" << history_rows * sizeof(HistoryRow) / 1024 << " KiB)" << std::endl;
@@ -1077,7 +963,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         uct.stats[threadIdx].flushes++;
         UCTNode& node = uct.getNode(job.path.back().hash, threadIdx);
         EdgeStats& edge = node.stats(job.path.back().actionID);
-#if NANA_EXPECTIMAX
+#if !NANA_CC_SEARCH
         job.R = node.report(job.path.back().actionID, job.child_hash, job.R, 1.0f + job.extra_N, false);
 #else
         job.R = node.climb(job.path.back().actionID, job.R, true);
@@ -1089,7 +975,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
             node.N += 1;
             if (node.id != replay_root_hash) {
                 noteParked(threadIdx, node);
-                if constexpr (!NANA_EXPECTIMAX) {
+                if constexpr (cc_search) {
                     node.R_buffer += job.R;
                 }
                 node.N_buffer += job.extra_N + 1;
@@ -1207,11 +1093,9 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
             UCTNode& node = uct.getNode(hash, threadIdx);
 
-            if constexpr (NANA_FLUSH_AT_END != 0) {
-                if (!job.path.empty()) {
-                    node.parent_hash = job.path.back().hash;
-                    node.parent_action = job.path.back().actionID;
-                }
+            if (!job.path.empty()) {
+                node.parent_hash = job.path.back().hash;
+                node.parent_action = job.path.back().actionID;
             }
 
             if (node.actionCount() == 0) {
@@ -1282,15 +1166,13 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                     uct.stats[threadIdx].illegal_moves++;
                 }
             }
-            if constexpr (NANA_REPLAY_RESTART) {
-                job.moves.push_back(node.cold[action].move);
-            }
+            job.moves.push_back(node.cold[action].move);
             job.parent_board = node.cold[action].eval - node.cold[action].move_reward;
             state.set_move(state.specific_move(node.move(action)));
 
             [[maybe_unused]] const int attack_before = state.true_attack;
             state.play_moves<Opp>();
-#if NANA_SUFFIX
+#if !NANA_CC_SEARCH
             {
                 const float step = (float)(state.true_attack - attack_before);
                 node.cold[action].step_attack = step;
@@ -1325,20 +1207,13 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         Reward reward = job.R;
         [[maybe_unused]] bool settled = false;
-#if NANA_EXPECTIMAX
+#if !NANA_CC_SEARCH
         reward = node.report(job.path.back().actionID, job.child_hash, job.R, 1.0f + job.extra_N, true);
-#elif NANA_SUFFIX
-        reward = node.climb(job.path.back().actionID, reward, false);
 #else
-        if constexpr (cc_search) {
-            const float before = node.ccValue();
-            edge.R = reward <= CC_DEAD ? CC_DEAD : node.cold[job.path.back().actionID].move_reward + reward;
-            reward = node.ccValue();
-            settled = reward == before;
-        }
-        else {
-            reward = node.climb(job.path.back().actionID, reward, false);
-        }
+        const float before = node.ccValue();
+        edge.R = reward <= CC_DEAD ? CC_DEAD : node.cold[job.path.back().actionID].move_reward + reward;
+        reward = node.ccValue();
+        settled = reward == before;
 #endif
 
         edge.N += job.extra_N;
@@ -1414,7 +1289,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         }
 
         bool still_chosen = true;
-#if NANA_SUFFIX
+#if !NANA_CC_SEARCH
         {
             Return v = reward;
             for (size_t j = rows.size(); j-- > 0;) {
@@ -1422,41 +1297,15 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 rows[j].edges[0].R += rewardScalar(v);
             }
         }
-        for (HistoryRow& row : rows) {
-            row.edges[0].N += job.extra_N;
-            row.node_N += job.extra_N;
-            still_chosen = still_chosen && row.stillChosen();
-        }
-#else
-        for (HistoryRow& row : rows) {
-            row.edges[0].R += reward;
-            row.edges[0].N += job.extra_N;
-            row.node_N += job.extra_N;
-            still_chosen = still_chosen && row.stillChosen();
-        }
 #endif
-
-        [[maybe_unused]] const int parked = node.N_buffer + job.extra_N + 1;
-        bool leak = false;
-        if constexpr (NANA_LEAK == 1) {
-            constexpr uint32_t scale = 1u << 16;
-            leak = still_chosen && uct.rng[threadIdx].getRand(scale) < (uint32_t)(NANA_LEAK_P * scale);
-        }
-        else if constexpr (NANA_LEAK == 2) {
-            leak = still_chosen && parked >= NANA_LEAK_K;
-        }
-        else if constexpr (NANA_LEAK == 3) {
-            leak = still_chosen && parked >= NANA_LEAK_EPS * node.N;
-        }
-        if (leak) {
-            uct.stats[threadIdx].leaks++;
+        for (HistoryRow& row : rows) {
+            row.edges[0].N += job.extra_N;
+            row.node_N += job.extra_N;
+            still_chosen = still_chosen && row.stillChosen();
         }
 
-        if (still_chosen && !leak) {
+        if (still_chosen) {
             noteParked(threadIdx, node);
-            if constexpr (!NANA_EXPECTIMAX) {
-                node.R_buffer += reward;
-            }
             node.N_buffer += job.extra_N + 1;
 
             for (HistoryRow& row : rows) {
@@ -1473,63 +1322,47 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 node.history = rows;
             }
 
-            if constexpr (NANA_REPLAY_RESTART) {
-                const size_t depth = job.path.size();
-                size_t left = depth + 1;
-                if (job.moves.size() == depth) {
-                    left = replayPath<Opp>(job, node.id, job.state);
-                }
-                else {
-                    job.state = std::move(here);
-                }
-                if (left <= depth) {
-                    if constexpr (!NANA_EXPECTIMAX) {
-                        node.R_buffer -= reward;
-                    }
-                    node.N_buffer -= job.extra_N + 1;
-                    uct.stats[threadIdx].restarts--;
-                    uct.stats[threadIdx].restart_depth -= depth;
-                    uct.stats[threadIdx].replay_diverged++;
-                    uct.stats[threadIdx].replay_diverge_depth += left;
+            const size_t depth = job.path.size();
+            size_t left = depth + 1;
+            if (job.moves.size() == depth) {
+                left = replayPath<Opp>(job, node.id, job.state);
+            }
+            else {
+                job.state = std::move(here);
+            }
+            if (left <= depth) {
+                node.N_buffer -= job.extra_N + 1;
+                uct.stats[threadIdx].restarts--;
+                uct.stats[threadIdx].restart_depth -= depth;
+                uct.stats[threadIdx].replay_diverged++;
+                uct.stats[threadIdx].replay_diverge_depth += left;
 
-                    Msg flush = std::make_unique<Job>(FLUSH);
-                    flush->R = reward + node.R_buffer;
-                    flush->extra_N = job.extra_N + node.N_buffer;
-                    flush->child_hash = job.child_hash;
-                    node.R_buffer = Reward{};
-                    node.N_buffer = 0;
-                    flush->path.assign(job.path.begin() + (left - 1), job.path.end());
-                    send(threadIdx, uct.getOwner(flush->path.back().hash), std::move(flush));
+                Msg flush = std::make_unique<Job>(FLUSH);
+                flush->R = reward + node.R_buffer;
+                flush->extra_N = job.extra_N + node.N_buffer;
+                flush->child_hash = job.child_hash;
+                node.R_buffer = Reward{};
+                node.N_buffer = 0;
+                flush->path.assign(job.path.begin() + (left - 1), job.path.end());
+                send(threadIdx, uct.getOwner(flush->path.back().hash), std::move(flush));
 
-                    job.path.erase(job.path.begin() + left, job.path.end());
-                    job.moves.erase(job.moves.begin() + left, job.moves.end());
-                    job.steps.erase(job.steps.begin() + std::min(left, job.steps.size()), job.steps.end());
-                    job.snapshots.erase(job.snapshots.begin() + std::min(left, job.snapshots.size()), job.snapshots.end());
-                    rows.erase(rows.begin() + std::min(left, rows.size()), rows.end());
-                    job.history = rows;
-                    job.R = Reward{};
-                    job.extra_N = 0;
-                    job.type = SELECT;
-                    send(threadIdx, uct.getOwner(job.state.hash()), std::move(msg));
-                    return;
-                }
-                uct.stats[threadIdx].replay_matched++;
+                job.path.erase(job.path.begin() + left, job.path.end());
+                job.moves.erase(job.moves.begin() + left, job.moves.end());
+                job.steps.erase(job.steps.begin() + std::min(left, job.steps.size()), job.steps.end());
+                job.snapshots.erase(job.snapshots.begin() + std::min(left, job.snapshots.size()), job.snapshots.end());
+                rows.erase(rows.begin() + std::min(left, rows.size()), rows.end());
                 job.history = rows;
                 job.R = Reward{};
                 job.extra_N = 0;
                 job.type = SELECT;
-                send(threadIdx, threadIdx, std::move(msg));
+                send(threadIdx, uct.getOwner(job.state.hash()), std::move(msg));
                 return;
             }
-
-            here.reseed_chance<Opp>();
-
-            job.state = std::move(here);
+            uct.stats[threadIdx].replay_matched++;
             job.history = rows;
             job.R = Reward{};
             job.extra_N = 0;
             job.type = SELECT;
-
             send(threadIdx, threadIdx, std::move(msg));
             return;
         }
@@ -1679,8 +1512,6 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
     } rollout_timer;
 #endif
 
-    [[maybe_unused]] float reward = 0;
-
     uct.stats[threadIdx].nodes++;
     uct.stats[threadIdx].rollouts++;
 
@@ -1696,10 +1527,10 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
     [[maybe_unused]] const Return dead{ 0, 0, 0, 1, 1 };
 
     if (state.game_over) {
-#if NANA_SUFFIX
-        return dead;
+#if NANA_CC_SEARCH
+        return CC_DEAD;
 #else
-        return cc_search ? CC_DEAD : -0.0f;
+        return dead;
 #endif
     }
 
@@ -1719,75 +1550,23 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
     }
 #endif
 
-    if constexpr (NANA_DEPTH_BASELINE) {
-        if (!stuck) {
-            max_eval = depth_baseline[threadIdx].correct(depth, max_eval, parent_board);
-        }
+#if NANA_CC_SEARCH
+    float value = CC_DEAD;
+    for (size_t i = 0; i < node.actionCount(); i++) {
+        value = std::max(value, node.eval(i));
     }
-
-#if !NANA_SUFFIX && !NANA_EXPECTIMAX
-    if constexpr (cc_search) {
-        float value = CC_DEAD;
-        for (size_t i = 0; i < node.actionCount(); i++) {
-            value = std::max(value, node.eval(i));
-        }
-        maybeInsertNode(std::move(node), threadIdx);
-        return value;
-    }
-#endif
-
-#if NANA_EXPECTIMAX
-#if NANA_SUFFIX
-    const Reward value = stuck ? dead : Return{ 0, 0, max_eval, 1, 0 };
-#else
-    const Reward value = stuck ? 0.0f : leafReward<Opp>(state, max_eval);
-#endif
-    node.leaf_V = value;
     maybeInsertNode(std::move(node), threadIdx);
     return value;
 #else
+    if (!stuck) {
+        max_eval = depth_baseline[threadIdx].correct(depth, max_eval, parent_board);
+    }
+    const Reward value = stuck ? dead : Return{ 0, 0, max_eval, 1, 0 };
+    node.leaf_V = value;
     maybeInsertNode(std::move(node), threadIdx);
-
-    if (stuck) {
-#if NANA_SUFFIX
-        return dead;
-#else
-        return 0.0;
-#endif
-    }
-
-#if NANA_SUFFIX
-    return Return{ 0, 0, max_eval, 1, 0 };
-#else
-    return leafReward<Opp>(state, max_eval);
-#endif
+    return value;
 #endif
 }
-
-#if !NANA_SUFFIX
-template <class Opp>
-float Search::leafReward(EmulationGame& state, float max_eval) {
-    float reward = 0;
-    static const NanaConfig& c = config();
-    {
-        float r = (float)c.app_weight * state.true_app() + (float)c.eval_weight * max_eval;
-        reward = std::max(reward, r);
-    }
-
-    if (!Opp::simulated || reward_tuning.app_only) {
-        return reward;
-    }
-
-    if (state.opponent_jeopardy() > 15) {
-        reward += state.opponent_jeopardy() / 20;
-    }
-
-    const float x = std::max(reward, 0.0f);
-    const float r = x / (x + reward_tuning.scale);
-    const float kill = (1.0f - reward_tuning.lambda) * state.expected_kill();
-    return kill + (1.0f - kill) * r;
-}
-#endif
 
 Move Search::bestMove() {
 

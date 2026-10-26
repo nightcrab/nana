@@ -10,7 +10,7 @@ The normal bot does not compile the adapter or its state fields.
 cmake -S . -B build-searchcheck -DCMAKE_BUILD_TYPE=Release -DNANA_GUI=OFF -DNANA_SEARCHCHECK=ON
 cmake --build build-searchcheck --target nana_searchcheck -j4
 # Use default config; custom eval weights/search settings change the experiment.
-env -u NANA_CONFIG NANA_REWARD=app build-searchcheck/cpp/nana_searchcheck 12 > report.json
+env -u NANA_CONFIG build-searchcheck/cpp/nana_searchcheck 12 > report.json
 ```
 
 The executable runs 12 predeclared search seeds for each combination of six

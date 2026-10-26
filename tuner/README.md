@@ -58,7 +58,7 @@ improves (it survives longer), so iterations late in a run can take longer than 
 seed and config, so every config in an iteration plays the same seeds (common random numbers) and
 luck in the pieces mostly cancels in comparisons. Games use TETR.IO rules (`--rules botris` plays
 Botris; the ruleset is kept in `run.json`, `plan.json`, every `evals.jsonl` and `gates.jsonl` record
-and `status.txt`, and the tuner stops if a game reports other rules than it asked for), the APP-only reward (`NANA_REWARD=app`), and the opponent HMM fitted on nana's stadium games as the
+and `status.txt`, and the tuner stops if a game reports other rules than it asked for), and the opponent HMM fitted on nana's stadium games as the
 opponent, with the search modelling the same HMM.
 
 Fitness is attack per piece over a fixed horizon (100 pieces): pieces lost by dying early score no
