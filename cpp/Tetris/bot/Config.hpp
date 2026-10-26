@@ -77,11 +77,11 @@ struct NanaConfig {
                                      695.6269810587003 };
     std::array<double, 4> tspins = { 0, 80.51857794910987, 159.46297822832895, 325.85611242217686 };
 
-    double c_init = 1.25;
-    double c_base = 19652;
+    double c_init = 4.071678062623125;
+    double c_base = 7490.956117941063;
     int depth_step = 3;
-    double prior_exponent = 0.5;
-    double n_cap = 10000;
+    double prior_exponent = 0.5152502993309611;
+    double n_cap = 2600.4416414699426;
     int depth_cap = 0;
     std::string eval = "cc";
     // false: the search models no opponent, so no speculative garbage, kill reward or belief terms
