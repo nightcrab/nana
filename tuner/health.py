@@ -67,24 +67,18 @@ class Monitor:
     def __init__(self):
         self.curse_gaps = []
 
-    def iteration(self, pso, space, scores_x, game_sd, games, best_latest, best_mean, best_games, baseline):
+    def iteration(self, scores_x, game_sd, games, best_latest, best_mean, best_games, baseline):
         warnings = []
         noise = game_sd / math.sqrt(games) if games else float("inf")
         spread = statistics.pstdev(scores_x) if len(scores_x) > 1 else 0.0
         if spread < 1.5 * noise:
-            warnings.append(f"signal: the swarm's scores spread {spread:.4f}, about one evaluation's noise "
+            warnings.append(f"signal: the candidates' scores spread {spread:.4f}, about one evaluation's noise "
                             f"({noise:.4f}); more games per evaluation would help")
         if best_latest is not None:
             self.curse_gaps = (self.curse_gaps + [best_mean - best_latest])[-10:]
             if len(self.curse_gaps) >= 5 and statistics.mean(self.curse_gaps) > 2 * noise:
                 warnings.append(f"winner's curse: the best's fresh scores run {statistics.mean(self.curse_gaps):.4f} "
                                 "below its average; selection may be chasing noise")
-        if pso.diversity() < 0.01:
-            warnings.append(f"collapse: the swarm has converged (diversity {pso.diversity():.4f})")
-        pinned = [space.names()[d] for d, share in enumerate(pso.at_bounds()) if share >= 0.5]
-        if pinned:
-            warnings.append("bounds: most bests sit on a wall for " + ", ".join(pinned[:8])
-                            + ("..." if len(pinned) > 8 else "") + "; widen the bounds or check for an exploit")
         if best_games and baseline:
             died = statistics.mean(g["died"] for g in best_games)
             if died > baseline["died"] + 0.25:

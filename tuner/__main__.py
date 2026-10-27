@@ -14,6 +14,7 @@ import shutil
 import sys
 
 from .health import HealthError
+from .optimizer import OPTIMIZERS
 from .run import Run
 from .runner import Runner
 
@@ -72,7 +73,8 @@ def main():
     start.add_argument("--space", action="append", help="parameter space files (default tuner/spaces/eval.json)")
     start.add_argument("--objective", choices=["strength", "sims-per-second"], default="strength",
                        help="fitness to maximise (default strength; sims-per-second defaults to search.json)")
-    start.add_argument("--iterations", type=int, help="PSO iterations (default 15)")
+    start.add_argument("--optimizer", choices=OPTIMIZERS, default="pso", help="optimizer (default pso)")
+    start.add_argument("--iterations", type=int, help="optimizer iterations (default 15)")
     start.add_argument("--particles", type=int, help="default 24")
     start.add_argument("--games", dest="games_per_eval", type=int, help="games per evaluation (strength: 32; sims-per-second: 4)")
     start.add_argument("--spread", type=float,
@@ -108,7 +110,7 @@ def main():
             spaces = args.space or [os.path.join(HERE, "spaces",
                                                 "search.json" if args.objective == "sims-per-second" else "eval.json")]
             options = {k: getattr(args, k) for k in ("budget_hours", "sims", "iterations", "particles", "games_per_eval",
-                                                     "spread", "gate_games", "holdout_every", "chunk", "seed", "rules", "objective", "threads", "eval")}
+                                                     "spread", "gate_games", "holdout_every", "chunk", "seed", "rules", "objective", "threads", "eval", "optimizer")}
             if not os.path.isfile(args.nana):
                 raise SystemExit(f"no nana_emulate at {args.nana}")
             clear_existing(directory, args.overwrite)

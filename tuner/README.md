@@ -106,6 +106,7 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 |---|---|---|
 | `--budget-hours H` / `--sims N` | (one is required) | the time budget, or a fixed sims count |
 | `--objective` | `strength` | maximise attack/piece or `sims-per-second` (with the smaller defaults above) |
+| `--optimizer` | `pso` | optimizer to use (currently only PSO) |
 | `--threads` | 1 | search threads per game; must divide the CPU count (1–64) |
 | `--iterations` | 15 | PSO iterations |
 | `--particles` | 24 | swarm size; an iteration costs about 2 x particles x games games |
@@ -123,7 +124,34 @@ Ctrl-C stops a run at once: the running games are killed and the last finished i
 `resume` loses at most one iteration.
 
 The inertia falls linearly from 0.9 to 0.4 over the iterations; the other PSO settings are 1.5, 1.5
-and a speed limit of 0.2 (in `DEFAULTS`, `tuner/run.py`).
+and a speed limit of 0.2 (in `PSO_DEFAULTS`, `tuner/pso.py`).
+
+## Optimizer interface
+
+`tuner/optimizer.py` defines the optimizer contract and creation/restore functions. `Run` owns
+parameter decoding, game execution, shared seed blocks, generic health checks, holdouts, and the
+release gate. It uses opaque candidate IDs and does not inspect optimizer internals.
+
+An optimizer supplies:
+
+- `ask()`: candidates in normalized [0, 1] space, including requested reevaluations. This call
+  does not advance the optimizer; all candidates receive the same fresh seeds.
+- `tell(scores)`: per-game scores keyed by candidate ID, with larger scores preferred. It advances
+  the optimizer and returns candidate scores for monitoring, any fresh score of the previous best,
+  and the candidate ID providing game evidence for the current recommendation.
+- `best()`: a recommendation with its unit vector, mean, evaluation count, and an opaque index.
+- `sample_points()` and `evaluation_counts(iterations)`: representative calibration configs and
+  candidate counts for projecting the cost of a complete run.
+- `diagnostics()` and `warnings(parameter_names)`: algorithm-specific metrics and warnings.
+- `state()`: a JSON checkpoint with optimizer name, state format version, and algorithm state.
+
+`PSOOptimizer` in `tuner/pso.py` adapts the original PSO implementation, including its inertia
+schedule, paired personal-best reevaluations, and swarm diagnostics. To add an optimizer, implement
+the contract and extend the defaults, creation, restore, and CLI choices in `tuner/optimizer.py`.
+
+Existing checkpoints with a bare `pso` field still resume. The next save writes the named,
+versioned `optimizer` envelope; optimizer settings remain in `run.json`. Existing command lines
+continue to select PSO by default, and `--particles` and `--spread` retain their meanings.
 
 ## Health warnings
 

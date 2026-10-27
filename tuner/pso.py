@@ -1,4 +1,13 @@
 import numpy as np
+import statistics
+
+from .optimizer import Candidate, Feedback, Optimizer, Recommendation
+
+PSO_DEFAULTS = {
+    "particles": 24,
+    "spread": 0.3,
+    "pso": {"inertia_start": 0.9, "inertia_end": 0.4, "cognitive": 1.5, "social": 1.5, "vmax": 0.2},
+}
 
 
 class PSO:
@@ -103,3 +112,73 @@ class PSO:
         pso.p_count = np.array(s["p_count"], dtype=int)
         pso.rng.bit_generator.state = s["rng"]
         return pso
+
+
+class PSOOptimizer(Optimizer):
+    """Adapt the existing swarm, including paired personal-best reevaluations."""
+
+    name = "pso"
+
+    def __init__(self, swarm, schedule, iterations):
+        self.swarm = swarm
+        self.schedule = dict(schedule)
+        self.iterations = iterations
+
+    @classmethod
+    def create(cls, settings, center):
+        if settings["particles"] < 1:
+            raise ValueError("particles must be positive")
+        options = settings["pso"]
+        swarm = PSO(len(center), settings["particles"], rng_seed=settings.get("seed", 1),
+                    inertia=options["inertia_start"], cognitive=options["cognitive"],
+                    social=options["social"], vmax=options["vmax"])
+        swarm.scatter(center, settings["spread"])
+        return cls(swarm, options, settings["iterations"])
+
+    @classmethod
+    def from_state(cls, settings, state):
+        return cls(PSO.from_state(state), settings["pso"], settings["iterations"])
+
+    def ask(self):
+        return [Candidate(f"{kind}{i}", unit.tolist()) for kind, i, unit in self.swarm.ask()]
+
+    def tell(self, scores):
+        swarm = self.swarm
+        before = swarm.best()
+        means = {(kind, i): statistics.mean(scores[f"{kind}{i}"])
+                 for kind, i, _ in swarm.ask()}
+        frac = swarm.iteration / (self.iterations - 1) if self.iterations > 1 else 1.0
+        swarm.inertia = self.schedule["inertia_start"] + frac * (
+            self.schedule["inertia_end"] - self.schedule["inertia_start"])
+        swarm.tell(means)
+        best = swarm.best()
+        evidence = f"p{best[0]}" if f"p{best[0]}" in scores else f"x{best[0]}"
+        return Feedback([means[("x", i)] for i in range(swarm.n)],
+                        means.get(("p", before[0])) if before else None, evidence)
+
+    def best(self):
+        best = self.swarm.best()
+        return Recommendation(best[0], best[1].tolist(), best[2], best[3]) if best else None
+
+    def sample_points(self):
+        return self.swarm.x.tolist()
+
+    def evaluation_counts(self, iterations):
+        return [self.swarm.n] + [2 * self.swarm.n] * (iterations - 1) if iterations else []
+
+    def diagnostics(self):
+        return {"diversity": self.swarm.diversity(), "inertia": self.swarm.inertia}
+
+    def warnings(self, parameter_names):
+        warnings = []
+        diversity = self.swarm.diversity()
+        if diversity < 0.01:
+            warnings.append(f"collapse: the swarm has converged (diversity {diversity:.4f})")
+        pinned = [parameter_names[d] for d, share in enumerate(self.swarm.at_bounds()) if share >= 0.5]
+        if pinned:
+            warnings.append("bounds: most bests sit on a wall for " + ", ".join(pinned[:8])
+                            + ("..." if len(pinned) > 8 else "") + "; widen the bounds or check for an exploit")
+        return warnings
+
+    def state(self):
+        return {"name": self.name, "version": 1, "state": self.swarm.state()}

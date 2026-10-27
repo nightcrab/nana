@@ -9,7 +9,7 @@ import numpy as np
 
 from .gate import run_gate
 from .health import HealthError, Monitor, check_canary, check_determinism, check_plumbing
-from .pso import PSO
+from .optimizer import create_optimizer, optimizer_defaults, restore_optimizer
 from .runner import Runner, Stage
 from .space import Space
 
@@ -24,15 +24,13 @@ GARBAGE = [(32, 0.25), (128, 0.4), (512, 0.6), (2048, 0.8), (8192, 1.0)]
 CHECK_STAGE = {"name": "check", "sims": 32, "garbage_scale": 0.25}
 
 DEFAULTS = {
+    "optimizer": "pso",
     "threads": 1,
     "objective": "strength",
     "iterations": 15,
-    "particles": 24,
     "games_per_eval": 32,
-    "spread": 0.3,
     "horizon": 100,
     "rules": "tetrio",
-    "pso": {"inertia_start": 0.9, "inertia_end": 0.4, "cognitive": 1.5, "social": 1.5, "vmax": 0.2},
     "gate": {"delta": 0.02, "alpha": 0.05, "beta": 0.05, "max_games": 400},
     "holdout": {"games": 32, "every": 5},
 }
@@ -73,6 +71,7 @@ class Run:
         self.settings = _read_json(self.path("run.json"))
         self.settings.setdefault("objective", "strength")
         self.settings.setdefault("threads", 1)
+        self.settings.setdefault("optimizer", "pso")
         self.space = Space(self.settings["space"])
         self.runner = Runner(self.settings["nana"], self.settings["cpus"], self.dir,
                              chunk=self.settings.get("chunk", 4), threads=self.settings["threads"])
@@ -80,7 +79,7 @@ class Run:
         if self.state and self.state.get("version") != STATE_VERSION:
             raise SystemExit(f"{directory} was made by an older tuner (state version {self.state.get('version')}); "
                              "start a new run")
-        self.pso = PSO.from_state(self.state["pso"]) if self.state else None
+        self.optimizer = restore_optimizer(self.settings, self.state) if self.state else None
         self.monitor = Monitor()
         self.warnings = []
         self.warned = set()
@@ -125,7 +124,8 @@ class Run:
             f.write(json.dumps(record) + "\n")
 
     def save(self):
-        self.state["pso"] = self.pso.state()
+        self.state["optimizer"] = self.optimizer.state()
+        self.state.pop("pso", None)
         _write_json(self.path("state.json"), self.state)
 
     def account(self, started):
@@ -161,6 +161,7 @@ class Run:
             specs += _read_json(path)
         space = Space(specs)
         settings = json.loads(json.dumps(DEFAULTS))
+        settings.update(json.loads(json.dumps(optimizer_defaults(options.get("optimizer") or "pso"))))
         if options.get("objective") == "sims-per-second":
             settings["games_per_eval"] = 4
             settings["holdout"]["games"] = 8
@@ -175,9 +176,10 @@ class Run:
                 settings[key] = value
         if not settings.get("budget_hours") and not settings.get("sims"):
             raise SystemExit("give --budget-hours (the tuner picks the sims) or --sims")
-        for key in ("games_per_eval", "iterations", "particles", "horizon", "chunk"):
+        for key in ("games_per_eval", "iterations", "horizon", "chunk"):
             if settings.get(key, 4) < 1:
                 raise SystemExit(f"{key} must be positive")
+        optimizer = create_optimizer(settings, space.default_unit())
         settings.update({"nana": os.path.abspath(nana), "cpus": cpus, "space": space.specs(),
                          "created": time.strftime("%Y-%m-%d %H:%M:%S")})
         _write_json(os.path.join(directory, "run.json"), settings)
@@ -187,13 +189,10 @@ class Run:
                      "seed_next": TUNING_SEEDS, "gate_seed_next": GATE_SEEDS, "base_config": base,
                      "release": {"values": space.values(space.default_unit()), "source": "defaults", "gates": 0},
                      "plan": None, "baseline": None, "holdouts": [], "iteration_seconds": []}
-        pso = settings["pso"]
-        run.pso = PSO(len(space), settings["particles"], rng_seed=settings.get("seed", 1),
-                      inertia=pso["inertia_start"], cognitive=pso["cognitive"], social=pso["social"], vmax=pso["vmax"])
-        run.pso.scatter(space.default_unit(), settings["spread"])
+        run.optimizer = optimizer
         run.write_release()
         run.save()
-        run.log(f"created run {directory}: {settings['objective']}, {settings['rules']} rules, {len(space)} parameters, {settings['particles']} particles, "
+        run.log(f"created run {directory}: {settings['objective']}, {settings['rules']} rules, {len(space)} parameters, {optimizer.name} optimizer, "
                 f"{settings['iterations']} iterations, {settings['threads']} threads per game, cpus {cpus}")
         return run
 
@@ -206,7 +205,8 @@ class Run:
         started = time.monotonic()
         stage = Stage(dict(CHECK_STAGE, horizon=self.settings["horizon"], env=self.settings.get("env", "hmm"), rules=self.rules()))
         base = self.state["base_config"]
-        center = self.config(self.pso.best()[1] if self.pso.best() else self.pso.x[0])
+        best = self.optimizer.best()
+        center = self.config(best.unit if best else self.optimizer.sample_points()[0])
         random_point = self.config(np.random.default_rng(1).random(len(self.space)))
         self.log("health: plumbing (nana loads the configs we write)")
         check_plumbing(self.runner, [base, center, random_point])
@@ -233,7 +233,8 @@ class Run:
         self.activity(f"timing games at {sims} sims")
         stage = self.make_stage(sims)
         k = max(4 if self.settings["objective"] == "sims-per-second" else 16, 2 * self.runner.workers)
-        requests = [(("cal", i), self.config(self.pso.x[i % self.pso.n]), stage, CALIBRATION_SEEDS + i, 1)
+        points = self.optimizer.sample_points()
+        requests = [(("cal", i), self.config(points[i % len(points)]), stage, CALIBRATION_SEEDS + i, 1)
                     for i in range(k)]
         self.runner.chunk_times = []
         self.runner.play(requests)
@@ -244,9 +245,10 @@ class Run:
         cpus = self.runner.workers
         per_game = core_seconds / cpus
         tail = s.get("chunk", 4) * core_seconds
-        p, g, n = s["particles"], s["games_per_eval"], s["iterations"]
-        iteration = 2 * p * g * per_game + tail
-        tune = p * g * per_game + tail + (n - 1) * iteration
+        g, n = s["games_per_eval"], s["iterations"]
+        counts = self.optimizer.evaluation_counts(n)
+        iteration = counts[-1] * g * per_game + tail
+        tune = sum(count * g * per_game + tail for count in counts)
         every = s["holdout"]["every"]
         holdouts = n // every + (1 if n % every else 0)
         checks = (holdouts + 1) * (s["holdout"]["games"] * per_game + tail)
@@ -320,29 +322,24 @@ class Run:
         s = self.settings
         n = s["games_per_eval"]
         k, total = self.state["iterations"], s["iterations"]
-        frac = k / (total - 1) if total > 1 else 1.0
-        self.pso.inertia = s["pso"]["inertia_start"] + frac * (s["pso"]["inertia_end"] - s["pso"]["inertia_start"])
         seed0 = self.state["seed_next"]
         self.state["seed_next"] += n
-        points = self.pso.ask()
+        points = self.optimizer.ask()
         eta = time.strftime("%H:%M", time.localtime(time.time() + self.hours_left() * 3600))
         self.activity(f"iteration {k + 1}/{total} (run done by {eta})")
-        requests = [((kind, i), self.config(unit), stage, seed0, n) for kind, i, unit in points]
+        requests = [(point.id, self.config(point.unit), stage, seed0, n) for point in points]
         started = time.monotonic()
         scores, games = self.runner.scores(requests)
         means = {key: statistics.mean(s) for key, s in scores.items()}
         if not all(math.isfinite(m) for m in means.values()):
             raise HealthError("a fitness came back NaN or infinite")
-        best_before = self.pso.best()
-        self.pso.tell(means)
-        best = self.pso.best()
-
-        scores_x = [means[("x", i)] for i in range(self.pso.n)]
+        feedback = self.optimizer.tell(scores)
+        best = self.optimizer.best()
         game_sd = statistics.mean([statistics.stdev(s) for s in scores.values() if len(s) > 1] or [0.0])
-        latest = means.get(("p", best_before[0])) if best_before else None
-        best_games = games.get(("p", best[0])) or games.get(("x", best[0]))
-        self.warnings = self.monitor.iteration(self.pso, self.space, scores_x, game_sd, n, latest, best[2],
-                                               best_games, self.state["baseline"] if s["objective"] == "strength" else None)
+        self.warnings = self.monitor.iteration(feedback.candidate_scores, game_sd, n,
+                                               feedback.best_latest, best.mean, games.get(feedback.best_id),
+                                               self.state["baseline"] if s["objective"] == "strength" else None)
+        self.warnings += self.optimizer.warnings(self.space.names())
 
         seconds = time.monotonic() - started
         self.state["hours"] += seconds / 3600
@@ -350,32 +347,32 @@ class Run:
         self.state["iteration_seconds"].append(seconds)
 
         record = {"iteration": self.state["iterations"], "objective": s["objective"], "rules": stage.rules, "sims": stage.sims, "seed0": seed0, "games": n,
-                  "inertia": self.pso.inertia,
-                  "scores": {f"{k}{i}": round(m, 5) for (k, i), m in means.items()},
-                  "best": {"index": best[0], "mean": best[2], "evaluations": best[3],
-                           "values": self.space.values(best[1])},
-                  "diversity": self.pso.diversity(), "warnings": self.warnings, "seconds": seconds}
+                  "optimizer": self.optimizer.name,
+                  "scores": {key: round(m, 5) for key, m in means.items()},
+                  "best": {"index": best.index, "mean": best.mean, "evaluations": best.evaluations,
+                           "values": self.space.values(best.unit)},
+                  **self.optimizer.diagnostics(), "warnings": self.warnings, "seconds": seconds}
         self.append("evals.jsonl", record)
-        _write_json(self.path("best.json"), self.config(best[1]))
+        _write_json(self.path("best.json"), self.config(best.unit))
         return best
 
     def holdout(self, best):
         started = time.monotonic()
         games = self.settings["holdout"]["games"]
         self.activity("holdout")
-        scores, _ = self.runner.scores([("best", self.config(best[1]), self.stage(), HOLDOUT_SEEDS, games)])
+        scores, _ = self.runner.scores([("best", self.config(best.unit), self.stage(), HOLDOUT_SEEDS, games)])
         base = self.state["baseline"]["mean"]
         value = statistics.mean(scores["best"])
         self.account(started)
         self.log(f"holdout: best {value:.4f} vs baseline {base:.4f} ({value - base:+.4f})")
         self.state["holdouts"].append({"iteration": self.state["iterations"], "best": value, "baseline": base})
-        if value < base and best[2] > base:
+        if value < base and best.mean > base:
             self.warnings.append("holdout: the best beats the baseline on tuning seeds but not on held-out ones")
 
     def gate(self, best):
         stage = self.stage()
         settings = self.settings["gate"]
-        candidate_values = self.space.values(best[1])
+        candidate_values = self.space.values(best.unit)
         candidate = self.space.config(candidate_values, self.state["base_config"])
         release = self.space.config(self.state["release"]["values"], self.state["base_config"])
         if candidate == release:
@@ -413,6 +410,10 @@ class Run:
         finish = time.strftime("%a %H:%M", time.localtime(time.time() + hours * 3600))
         return f"done by {finish} at the latest ({hours:.1f} h left)"
 
+    def optimizer_status(self):
+        return ", ".join(f"{key} {value:.3f}" if isinstance(value, (int, float)) else f"{key} {value}"
+                         for key, value in self.optimizer.diagnostics().items())
+
     def status(self, best):
         s, plan = self.settings, self.state["plan"]
         done, total = self.state["iterations"], s["iterations"]
@@ -426,14 +427,14 @@ class Run:
                                              f", {self.eta(self.hours_left())}"))
         if best:
             base = (self.state["baseline"] or {}).get("mean")
-            lines.append(f"best: {best[2]:.4f} over {best[3]} evaluations"
-                         + (f" (baseline {base:.4f}, {best[2] - base:+.4f})" if base is not None else ""))
+            lines.append(f"best: {best.mean:.4f} over {best.evaluations} evaluations"
+                         + (f" (baseline {base:.4f}, {best.mean - base:+.4f})" if base is not None else ""))
         if self.state["holdouts"]:
             h = self.state["holdouts"][-1]
             lines.append(f"holdout after iteration {h['iteration']}: {h['best']:.4f} vs baseline {h['baseline']:.4f} "
                          f"({h['best'] - h['baseline']:+.4f})")
         lines.append(f"release: {self.state['release']['source']} ({self.state['release']['gates']} gates passed)")
-        lines.append(f"diversity {self.pso.diversity():.3f}, inertia {self.pso.inertia:.2f}")
+        lines.append(f"optimizer: {self.optimizer.name}; " + self.optimizer_status())
         lines += ["WARNING " + w for w in self.warnings] or ["no warnings"]
         with open(self.path("status.txt"), "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -445,7 +446,7 @@ class Run:
         self.health_checks()
         if self.state["phase"] == "calibrate":
             self.calibrate()
-            self.status(self.pso.best())
+            self.status(self.optimizer.best())
             if plan_only:
                 self.log("stopping after the plan as asked (resume to tune)", show=True)
                 return
@@ -455,8 +456,8 @@ class Run:
             self.baseline()
             while self.state["iterations"] < total:
                 best = self.iterate()
-                self.log(f"iteration {self.state['iterations']}/{total}: best {best[2]:.4f} ({best[3]} evals), "
-                         f"diversity {self.pso.diversity():.3f}, {self.state['iteration_seconds'][-1] / 60:.1f} min")
+                self.log(f"iteration {self.state['iterations']}/{total}: best {best.mean:.4f} ({best.evaluations} evals), "
+                         f"{self.optimizer_status()}, {self.state['iteration_seconds'][-1] / 60:.1f} min")
                 if self.state["iterations"] % every == 0 or self.state["iterations"] == total:
                     self.holdout(best)
                 if not self.verbose:
@@ -470,8 +471,8 @@ class Run:
             self.state["phase"] = "gate"
             self.save()
         if self.state["phase"] == "gate":
-            self.gate(self.pso.best())
+            self.gate(self.optimizer.best())
             self.state["phase"] = "done"
             self.save()
-            self.status(self.pso.best())
+            self.status(self.optimizer.best())
         self.log(f"done in {self.state['hours']:.2f} h; release.json is the result", show=True)
