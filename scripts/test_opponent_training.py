@@ -15,10 +15,60 @@ import torch
 
 from opponent_model import Predictor
 from opponent_data import positions_from_db, target_player, generate
-from train_opponent import sequence_loss, split_games, gain_intervals, trajectory_metrics
+from train_opponent import (sequence_loss, split_games, gain_intervals, trajectory_metrics,
+                            moment_losses, grouped_batches, fit, parser)
 
 
 class TrainingTests(unittest.TestCase):
+    def test_generated_marginals_and_gradients_match_exhaustive_two_step_distribution(self):
+        torch.manual_seed(19)
+        torch.set_num_threads(1)
+        model = Predictor(horizon=2, board=False, hidden=4, fusion=4, embedding=3)
+        c = model.encode(torch.zeros(1, 1, 20, 10), torch.zeros(1, 3))
+        targets = torch.tensor(list(itertools.product(range(9), repeat=2)))
+        logp = model.decode(c.expand(81, -1), targets).log_softmax(-1)
+        joint = logp.gather(-1, targets[..., None]).squeeze(-1).sum(-1).exp()
+        values = joint.new_tensor([0, 1, 2, 3, 4, 5, 6, 7, 0])
+        exact = (joint*values[targets[:, 1]]).sum()
+        exact_grad, = torch.autograd.grad(exact, model.output.bias, retain_graph=True)
+        sampled = model.rollout_marginals(c, samples=65536)
+        estimate = (sampled[0, 1]*values).sum()
+        sampled_grad, = torch.autograd.grad(estimate, model.output.bias)
+        torch.testing.assert_close(estimate, exact, atol=0.03, rtol=0)
+        torch.testing.assert_close(sampled_grad, exact_grad, atol=0.03, rtol=0)
+        torch.testing.assert_close(sampled.sum(-1), torch.ones(1, 2))
+
+    def test_moments_detect_bucket_errors_even_when_app_matches(self):
+        targets = torch.tensor([[[0, 4], [0, 4]]])
+        p = torch.nn.functional.one_hot(torch.tensor([[2, 2]]), 9).float().requires_grad_()
+        app, buckets = moment_losses(p, targets)
+        self.assertEqual(float(app.detach()), 0)
+        self.assertEqual(float(buckets.detach()), 2)
+        exact = torch.nn.functional.one_hot(targets[:, 0], 9).float()
+        self.assertEqual(tuple(float(v) for v in moment_losses(exact, targets)), (0, 0))
+        (app+buckets).backward()
+        self.assertGreater(float(p.grad.abs().sum()), 0)
+
+    def test_grouped_batches_keep_all_four_samples_of_each_root(self):
+        batches = list(grouped_batches(torch.tensor([2, 0, 1]), 8, 4))
+        self.assertEqual([b.tolist() for b in batches], [[8, 9, 10, 11, 0, 1, 2, 3], [4, 5, 6, 7]])
+
+    def test_moment_training_checkpoint_uses_validation_objective(self):
+        torch.set_num_threads(1)
+        torch.manual_seed(21)
+        with tempfile.TemporaryDirectory() as tmp:
+            args = parser().parse_args(['unused.db', '--out', tmp, '--no-garbage', '--samples', '2',
+                                        '--epochs', '2', '--hidden', '4', '--fusion', '4', '--batch-size', '4'])
+            data = dict(board=torch.zeros(8, 1, 20, 10), context=torch.zeros(8, 3),
+                        real=torch.tensor([[0, 1, 0, 2, 0, 0, 0, 0]]*8),
+                        real_mask=torch.ones(8, 8, dtype=torch.bool), replay=torch.empty(8, 0, 8, dtype=torch.long),
+                        replay_mask=torch.zeros(8, 8, dtype=torch.bool))
+            model, history = fit(args, data, {'train': torch.arange(4), 'validation': torch.arange(4, 8)}, False)
+            checkpoint = torch.load(Path(tmp)/'context.pt', weights_only=False)
+            expected = min(history, key=lambda row: row['validation_objective'])['epoch']
+            self.assertEqual(checkpoint['epoch'], expected)
+            self.assertTrue(all(np.isfinite(row['loss']) for row in history))
+
     def test_no_garbage_uses_only_generated_full_horizon_targets_and_reuses_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)/'games.db'

@@ -1,6 +1,6 @@
 #include "Search.hpp"
 #ifdef NANA_SEARCH_FIXTURE
-#include "SearchFixture.hpp"
+#include "tests/SearchFixture.hpp"
 #endif
 #include "Config.hpp"
 #include <algorithm>
@@ -414,7 +414,7 @@ void Search::continueSearch(EmulationGame state) {
     }
 
     // Collect here rather than in endSearch, so the move is returned first.
-    if (uct.map_size() > 200000) {
+    if (!UCT::retain_for_dump && uct.map_size() > 200000) {
         uct.collect();
     }
 

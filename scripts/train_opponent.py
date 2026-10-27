@@ -45,6 +45,38 @@ def sequence_loss(logits, real, real_mask, replay, replay_mask, weight, replay_l
     return loss
 
 
+def moment_losses(marginals, targets):
+    """Per-root APP and per-offset bucket frequencies from complete continuations."""
+    frequencies = torch.nn.functional.one_hot(targets, BINS).to(marginals.dtype).mean(1)
+    values = marginals.new_tensor([0, 1, 2, 3, 4, 5, 6, 7, 0])
+    app_error = ((marginals-frequencies)*values).sum(-1).mean(-1)
+    return app_error.square().mean(), (marginals-frequencies).square().sum(-1).mean()
+
+
+def grouped_batches(indices, batch_size, samples):
+    """Keep all cached continuations at a root together without changing the cache."""
+    offsets = torch.arange(samples)
+    for roots in indices.split(max(1, batch_size//samples)):
+        yield (roots[:, None]*samples + offsets).flatten()
+
+
+@torch.no_grad()
+def validate_moments(model, data, indices, batch_size, samples):
+    app_sum = bucket_sum = count = 0
+    # Fixed draws make epoch comparisons reproducible without changing training RNG.
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(10001)
+        for selected in grouped_batches(indices, batch_size, samples):
+            roots = selected[::samples]
+            c = model.encode(data['board'][roots], data['context'][roots])
+            app, bucket = moment_losses(model.rollout_marginals(c),
+                                        data['real'][selected].reshape(len(roots), samples, -1))
+            count += len(roots)
+            app_sum += float(app)*len(roots)
+            bucket_sum += float(bucket)*len(roots)
+    return dict(app_mse=app_sum/count, bucket_mse=bucket_sum/count)
+
+
 def predict(model, data, indices, batch):
     """Conditional probabilities along true prefixes, for sequence likelihood only."""
     model.eval()
@@ -126,39 +158,60 @@ def fit(args, data, splits, use_board):
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     rng = torch.Generator().manual_seed(args.seed)
     best_loss, best, best_epoch, stale = math.inf, None, 0, 0
+    samples = args.samples if args.no_garbage else 1
+    moment_weight = args.moment_weight if args.no_garbage else 0
+    train_roots = torch.unique(splits['train']//samples)
+    val_roots = torch.unique(splits['validation']//samples)
     history = []
     print(f"{label}: {sum(p.numel() for p in model.parameters()):,} parameters", flush=True)
     for epoch in range(1, args.epochs+1):
         start = time.perf_counter()
         model.train()
-        indices = splits["train"][torch.randperm(len(splits["train"]), generator=rng)]
-        loss_sum = 0.0
-        for selected in indices.split(args.batch_size):
-            conditioning = model.encode(data["board"][selected], data["context"][selected])
+        indices = train_roots[torch.randperm(len(train_roots), generator=rng)]
+        loss_sum = nll_sum = app_sum = bucket_sum = 0.0
+        for selected in grouped_batches(indices, args.batch_size, samples):
+            roots = selected[::samples]
+            root_conditioning = model.encode(data['board'][roots], data['context'][roots])
+            conditioning = root_conditioning[:, None].expand(-1, samples, -1).reshape(len(selected), -1)
             logits = model.decode(conditioning, data["real"][selected])
             replay = data["replay"][selected]
             replay_logits = None
             if args.replay_weight > 0 and replay.shape[1]:
-                n, samples, horizon = replay.shape
+                n, replay_samples, horizon = replay.shape
                 replay_logits = model.decode(
-                    conditioning[:, None].expand(-1, samples, -1).reshape(n*samples, -1),
-                    replay.reshape(n*samples, horizon)).reshape(n, samples, horizon, BINS)
-            loss = sequence_loss(logits, data["real"][selected], data["real_mask"][selected],
-                                 replay, data["replay_mask"][selected], args.replay_weight, replay_logits)
+                    conditioning[:, None].expand(-1, replay_samples, -1).reshape(n*replay_samples, -1),
+                    replay.reshape(n*replay_samples, horizon)).reshape(n, replay_samples, horizon, BINS)
+            nll = sequence_loss(logits, data["real"][selected], data["real_mask"][selected],
+                                replay, data["replay_mask"][selected], args.replay_weight, replay_logits)
+            loss = nll
+            if moment_weight:
+                app, bucket = moment_losses(model.rollout_marginals(root_conditioning),
+                                            data['real'][selected].reshape(len(roots), samples, -1))
+                loss = loss + moment_weight*(app+bucket)
+                app_sum += float(app.detach())*len(selected)
+                bucket_sum += float(bucket.detach())*len(selected)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
             optimizer.step()
             loss_sum += float(loss.detach()) * len(selected)
+            nll_sum += float(nll.detach()) * len(selected)
         val = splits["validation"]
         prob = predict(model, data, val, args.batch_size)
         val_bits = metrics(prob, data["real"][val], data["real_mask"][val])[str(args.horizon)]["bits_per_piece"]
-        elapsed = time.perf_counter()-start
-        row = dict(epoch=epoch, loss=loss_sum/len(indices), validation_bits=val_bits, seconds=elapsed)
+        denom = len(splits['train'])
+        validation_moments = (validate_moments(model, data, val_roots, args.batch_size, samples)
+                              if moment_weight else {})
+        val_loss = val_bits*math.log(2) + moment_weight*sum(validation_moments.values())
+        row = dict(epoch=epoch, loss=loss_sum/denom, nll=nll_sum/denom,
+                   app_mse=app_sum/denom, bucket_mse=bucket_sum/denom,
+                   validation_bits=val_bits, validation_moments=validation_moments,
+                   validation_objective=val_loss, seconds=time.perf_counter()-start)
         history.append(row)
-        print(f"{label} epoch {epoch}: loss {row['loss']:.4f}, val {val_bits:.4f} bits/piece, {elapsed:.1f}s", flush=True)
-        if val_bits < best_loss:
-            best_loss, best, best_epoch, stale = val_bits, copy.deepcopy(model.state_dict()), epoch, 0
+        print(f"{label} epoch {epoch}: loss {row['loss']:.4f}, val {val_bits:.4f} bits/piece, "
+              f"moments {validation_moments}, objective {val_loss:.4f}, {row['seconds']:.1f}s", flush=True)
+        if val_loss < best_loss:
+            best_loss, best, best_epoch, stale = val_loss, copy.deepcopy(model.state_dict()), epoch, 0
         else:
             stale += 1
         if stale >= args.patience:
@@ -194,6 +247,8 @@ def parser():
     p.add_argument("--replay-weight", type=float, default=0.5, help="0 skips replay generation")
     p.add_argument('--no-garbage', action='store_true',
                    help='supervise only generated no-garbage continuations; ignore recorded attacks')
+    p.add_argument('--moment-weight', type=float, default=1.0,
+                   help='no-garbage APP/frequency loss weight; 0 uses sequence NLL alone')
     p.add_argument('--prepare-only', action='store_true', help='cache targets without fitting models')
     p.add_argument('--exclude-positions', action='append', default=[], metavar='JSONL',
                    help='exclude roots in a saved cc_predictability run; repeatable')
@@ -227,6 +282,8 @@ def main():
                  "heads", "width", "fusion", "hidden", "embedding", "epochs", "patience", "batch_size", "threads"):
         if getattr(args, name) <= 0:
             raise ValueError(f"--{name.replace('_', '-')} must be positive")
+    if not math.isfinite(args.moment_weight) or args.moment_weight < 0:
+        raise ValueError('moment weight must be finite and nonnegative')
     if args.replay_weight < 0 or args.blocks < 0 or args.max_positions < 0:
         raise ValueError("replay weight, blocks, and position limit must be nonnegative")
     if args.beam < 3:

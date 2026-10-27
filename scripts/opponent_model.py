@@ -65,6 +65,29 @@ class Predictor(nn.Module):
     def forward(self, board, context, targets):
         return self.decode(self.encode(board, context), targets)
 
+    def rollout_marginals(self, conditioning, samples=8):
+        """Sample our own prefixes; estimate marginals with score-function gradients.
+
+        The zero-valued score term differentiates the probability of sampling each
+        prefix. Omitting it would only train conditionals on detached model prefixes.
+        Death remains absorbing. Values are ordinary Monte Carlo marginals.
+        """
+        n = len(conditioning)
+        c = conditioning[:, None].expand(-1, samples, -1).reshape(n*samples, -1)
+        hidden = self.initial(c)[None].contiguous()
+        previous = torch.full((n*samples,), START, dtype=torch.long, device=c.device)
+        prefix_logp = c.new_zeros(n*samples)
+        marginals = []
+        for _ in range(self.horizon):
+            inputs = torch.cat((self.embedding(previous), c), -1)[:, None]
+            states, hidden = self.gru(inputs, hidden)
+            prob = self.absorbing(self.output(states[:, 0]), previous).softmax(-1)
+            estimate = prob + prob.detach() * (prefix_logp-prefix_logp.detach())[:, None]
+            marginals.append(estimate.reshape(n, samples, BINS).mean(1))
+            previous = torch.multinomial(prob.detach(), 1).squeeze(-1)
+            prefix_logp = prefix_logp + prob.gather(-1, previous[:, None]).squeeze(-1).clamp_min(1e-30).log()
+        return torch.stack(marginals, dim=1)
+
     @torch.no_grad()
     def trajectories(self, board, context, beam=32, topk=3):
         """Batched beam search; log probabilities are absolute, never top-k normalized.

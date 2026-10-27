@@ -1,7 +1,24 @@
 import math
 import statistics
 
-CANARY = {"eval": "nana", "height": 46.0, "top_half": 130.0, "top_quarter": 499.0, "cavity_cells": 176.0}
+# Make the failure obvious even at the health check's small search budget.
+# Mildly reversing a few board weights can still play well enough to pass short games.
+CANARY = {
+    "eval": "nana",
+    "height": 10000.0,
+    "top_half": 10000.0,
+    "top_quarter": 10000.0,
+    "cavity_cells": 10000.0,
+    "cavity_cells_sq": 1000.0,
+    "covered_cells": 1000.0,
+    "bumpiness": 1000.0,
+    "bumpiness_sq": 1000.0,
+    "row_transitions": 1000.0,
+    "clears": [0, -100000.0, -100000.0, -100000.0, -100000.0],
+    "tspins": [0, 0, 0, 0],
+    "perfect_clear": 0.0,
+    "wasted_t": 0.0,
+}
 
 
 class HealthError(RuntimeError):

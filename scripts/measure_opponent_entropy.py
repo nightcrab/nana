@@ -87,16 +87,18 @@ def main():
     pooled = empirical.mean(0)
     pooled_ce = -(empirical * np.log2(np.maximum(pooled, 1e-30))).sum(-1)
     joint_nll, top3_hits, oracle_hits, held_model, held_oracle = [], [], [], [], []
-    timing_hits = []
+    timing_hits, top10_hits = [], []
     with torch.no_grad():
-        candidates, scores = model.trajectories(board, ctx, beam=32)
+        candidates, scores = model.trajectories(board, ctx, beam=128, topk=10)
         for i, target in enumerate(targets):
             t = torch.tensor(target, dtype=torch.long)
             c = model.encode(board[i:i+1], ctx[i:i+1]).expand(len(t), -1)
             logp = model.decode(c, t).log_softmax(-1).gather(-1, t[..., None]).squeeze(-1)
             joint_nll.append((-logp.sum(-1)/math.log(2)).mean().item())
             seqs = list(map(tuple, target))
-            choices = set(map(tuple, candidates[i].tolist()))
+            choices = set(map(tuple, candidates[i, :3].tolist()))
+            choices10 = set(map(tuple, candidates[i].tolist()))
+            top10_hits.append(sum(s in choices10 for s in seqs)/len(seqs))
             timing_choices = {tuple(0 < a < 8 for a in s) for s in choices}
             timing_hits.append(sum(tuple(0 < a < 8 for a in s) in timing_choices for s in seqs)/len(seqs))
             top3_hits.append(sum(s in choices for s in seqs)/len(seqs))
@@ -112,6 +114,9 @@ def main():
     model_attack = prediction[:, :, 1:8].sum(-1)
     attack_values = np.asarray([0, 1, 2, 3, 4, 5, 6, 7, 0])
     total_error = ((prediction-empirical)*attack_values).sum((1, 2))
+    joint_entropy = float(np.mean([
+        -sum((n/len(t))*math.log2(n/len(t)) for n in Counter(map(tuple, t)).values())
+        for t in targets]))
     offsets = [dict(piece=k+1, target_entropy_mm=float(corrected[:, k].mean()),
                     target_entropy_plugin=float(plugin[:, k].mean()),
                     model_cross_entropy=float(ce[:, k].mean()),
@@ -128,16 +133,24 @@ def main():
                   samples_per_seed=args.samples, offsets=offsets,
                   joint_sequence_bits=float(np.mean(joint_nll)),
                   joint_bits_per_piece=float(np.mean(joint_nll)/model.horizon),
+                  empirical_joint_entropy_bits=joint_entropy,
+                  joint_empirical_kl_bits=float(np.mean(joint_nll))-joint_entropy,
                   model_top3_coverage=float(np.mean(top3_hits)),
+                  model_top10_coverage=float(np.mean(top10_hits)),
                   model_top3_attack_timing_coverage=float(np.mean(timing_hits)),
                   expected_capped_total_attack_mae=float(np.abs(total_error).mean()),
                   expected_capped_total_attack_bias=float(total_error.mean()),
+                  target_capped_app=float((empirical*attack_values).sum(-1).mean()),
+                  model_capped_app=float((prediction*attack_values).sum(-1).mean()),
+                  target_bucket_frequencies=empirical.mean(0).tolist(),
+                  model_bucket_frequencies=prediction.mean(0).tolist(),
+                  bucket_frequency_mse=float(((prediction-empirical)**2).sum(-1).mean()),
                   empirical_top3_coverage=float(np.mean(oracle_hits)),
                   held_queue_model_top3_coverage=float(np.mean(held_model)),
                   held_queue_empirical_top3_coverage=float(np.mean(held_oracle)),
-                  model_top3_probability_mass=float(scores.exp().sum(-1).mean()),
+                  model_top3_probability_mass=float(scores[:, :3].exp().sum(-1).mean()),
                   caveats=['Targets are the original no-incoming-garbage, 4000-think entropy experiment.',
-                           'Model trained on a separate 1000-think stadium collection with incoming garbage.',
+                           'Training target generator, budget, and garbage policy are recorded in checkpoint args.',
                            'Model input omits bag state; entropy conditions on each complete saved position.',
                            'Marginals use Monte Carlo model prefixes; joint sequence scoring is exact.',
                            'Empirical entropies and top-three ceilings use only 64 target samples per position.'])

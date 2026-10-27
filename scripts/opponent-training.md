@@ -25,6 +25,22 @@ must be positive to enable generation, but its numerical value does not weight
 the synthetic examples: each generated continuation has equal supervised weight.
 All continuations from the same source game stay together in train/validation/test.
 
+No-garbage training keeps the cached continuations at each root together. Its loss
+is sequence NLL (natural logs) plus `--moment-weight` (default 1) times the sum of:
+
+- Squared error between predicted and target attack per piece, averaged over the horizon.
+- Squared bucket-frequency error, summed over nine bins and averaged over offsets.
+
+Targets are the per-root empirical frequencies of the cached continuations. Predictions
+use eight sampled model prefixes per root, averaging the next-bin distributions rather
+than only hard sampled bins. This is open-loop supervision: preceding attacks come from
+the model itself. Score-function terms propagate gradients through prefix sampling;
+they do not change the forward probability estimates. These finite-sample moment losses
+have Monte Carlo noise. APP caps 7+ at 7 and assigns zero attack after death; bucket
+frequencies retain the separate death bin. Validation uses fixed sampling draws and
+selects the checkpoint using the same combined objective. Set `--moment-weight 0` for
+the sequence-NLL control. Recorded-pressure training retains its existing objective.
+
 Prepare targets **without training**, using a fresh output directory and a hard
 memory limit on the remote machine (the example assumes the already measured
 host with 15 GiB RAM; replay concurrency should be sized from measured peak RSS):

@@ -168,6 +168,9 @@ class UCTNode {
     uint32_t id;
     int N;
 
+    // Only retained for emulator tree dumps; the first state represented by this node.
+    std::unique_ptr<EmulationGame> dump_state;
+
     Reward R_buffer{};
     int N_buffer = 0;
 
@@ -350,6 +353,9 @@ public:
 // one of these shared by all threads
 class UCT {
    public:
+
+    // Set before starting workers. Keeps states and disables between-move collection.
+    static inline bool retain_for_dump = false;
 
     struct padded_map {
         using T = std::unordered_map<int, UCTNode>;

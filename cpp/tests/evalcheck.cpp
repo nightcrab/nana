@@ -66,7 +66,7 @@ static void boardChecks() {
 static void moveChecks() {
     const auto& c = config();
     check(c.b2b_clear != 0 && c.combo_garbage != 0 && c.move_time != 0 && c.mini_tspins[1] != 0,
-          "run with NANA_CONFIG=cpp/evalcheck.json to exercise enabled features");
+          "run with NANA_CONFIG=cpp/tests/evalcheck.json to exercise enabled features");
     Game g;
     g.mode = TetrioS1();
     g.current_piece = PieceType::I;

@@ -12,7 +12,7 @@
 #include <cmath>
 #include <iostream>
 #ifdef NANA_SEARCH_FIXTURE
-#include "SearchFixture.hpp"
+#include "tests/SearchFixture.hpp"
 #endif
 
 using namespace Distribution;
@@ -230,6 +230,7 @@ Move PackedMove::unpack() const {
 }
 
 UCTNode::UCTNode(const EmulationGame &state) {
+    if (UCT::retain_for_dump) dump_state = std::make_unique<EmulationGame>(state);
 #ifdef NANA_SEARCH_FIXTURE
     if (state.fixture_active) { search_fixture::initialize(*this, state); return; }
 #endif

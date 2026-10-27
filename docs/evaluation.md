@@ -56,7 +56,7 @@ Build with `-DNANA_EVALCHECK=ON`, then run the checks with the supplied nonzero-
 fixture (PowerShell):
 
 ```powershell
-$env:NANA_CONFIG = (Resolve-Path cpp/evalcheck.json).Path
+$env:NANA_CONFIG = (Resolve-Path cpp/tests/evalcheck.json).Path
 & out/build/<build>/cpp/nana_evalcheck.exe
 ```
 

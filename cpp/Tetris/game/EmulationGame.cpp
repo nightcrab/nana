@@ -9,7 +9,7 @@
 #include <cstring>
 #include <iostream>
 #ifdef NANA_SEARCH_FIXTURE
-#include "SearchFixture.hpp"
+#include "tests/SearchFixture.hpp"
 #endif
 
 const char* EmulationGame::rules() {

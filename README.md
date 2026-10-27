@@ -81,6 +81,9 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 | `nana_speed` | Measures simulations per second. |
 | `nana_msgbench` | Microbenchmark for message passing. |
 
+`nana_emulate --tree-dump-dir DIR` writes each game's retained search nodes and
+visit targets, then frees the tree. See [tree dump format and collection](docs/tree-dumps.md).
+
 CMake options (pass with `-D`):
 
 * `NANA_GUI=OFF` skips `nana_interactive` to run headless.

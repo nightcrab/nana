@@ -1,6 +1,7 @@
 // survival benchmark: seeded games against the emulated opponent
 // usage: nana_emulate [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
 //                  [--opponent-log FILE]
+//                  [--tree-dump-dir DIR]
 //                  [--sims N] [--search-seed 0|1] [--cpu K | --cpus K,L,...] [--print-config] [--garbage-scale X]
 
 #include "EmulateCommon.hpp"
@@ -11,14 +12,17 @@
 #include "Config.hpp"
 #include "Util/Affinity.hpp"
 #include "Util/FastSeed.hpp"
+#include "Util/json.hpp"
 #include "engine/Utility.hpp"
 
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -35,6 +39,7 @@ struct Options {
     int ramp = 0;
     int max_pieces = 2000;
     std::string opponent_log;
+    std::string tree_dump_dir;
     uint64_t sims = 0;
     bool search_seed = false;
     int cpu = -1;
@@ -63,6 +68,60 @@ struct GameResult {
     double oversleep_seconds = 0;
     double stop_seconds = 0;
 };
+
+// Workers are stopped by playGame before this is called. Stream one node at a time.
+static void dumpTree(const Options& options, uint64_t seed, const GameResult& result) {
+    using Json = nlohmann::json;
+    constexpr int min_visits = 10;
+    const auto path = std::filesystem::path(options.tree_dump_dir) / ("tree-" + std::to_string(seed) + ".jsonl");
+    // Refuse to overwrite a previous collection, including another worker's output.
+    std::ofstream out(path, std::ios::out | std::ios::noreplace);
+    if (!out) throw std::runtime_error("can't create tree dump: " + path.string());
+    out.exceptions(std::ios::badbit | std::ios::failbit);
+    out << Json{{"kind", "header"}, {"version", 1}, {"seed", seed},
+        {"rules", EmulationGame::rules()}, {"pieces", result.pieces}, {"died", result.died},
+        {"min_node_N", min_visits},
+        {"threads", options.threads}, {"sims", options.sims}, {"ms", options.ms},
+        {"search_seed", options.search_seed}, {"max_pieces", options.max_pieces},
+        {"ramp", options.ramp}, {"garbage_scale", options.garbage_scale},
+        {"config", Json::parse(configJson(config()))},
+        {"coordinates", "absolute; board is 10 uint32 columns, bit 0 is bottom"}}.dump() << '\n';
+    for (const auto* side : {&Search::uct.nodes_left, &Search::uct.nodes_right}) {
+        for (const auto& shard : *side) {
+            for (const auto& [id, node] : shard.obj_) {
+                if (node.N < min_visits) continue;
+                const auto& state = *node.dump_state;
+                const auto& game = state.game;
+                const int garbage_height = game.board.get_garbage_height();
+                Json queue = Json::array(), bag = Json::array(), actions = Json::array();
+                for (auto p : game.queue) queue.push_back((int)p);
+                for (size_t i = state.rng.bagiterator; i < state.rng.bag.size(); ++i)
+                    bag.push_back((int)state.rng.bag[i]);
+                for (size_t i = 0; i < node.actionCount(); ++i) {
+                    const auto& move = node.cold[i].move;
+                    const auto& edge = node.stats(i);
+                    actions.push_back({{"type", (int)move.type}, {"rotation", (int)move.rotation},
+                        {"x", move.position.x}, {"y", move.position.y + garbage_height},
+                        {"spin", (int)move.spin}, {"N", edge.N}, {"R", edge.R},
+                        {"prior", edge.prior}, {"eval", node.eval(i)},
+                        {"move_reward", node.cold[i].move_reward}});
+                }
+                Json row{{"kind", "node"}, {"id", node.id}, {"N", node.N},
+                    {"board", game.board.board}, {"current", (int)game.current_piece.type},
+                    {"hold", game.hold ? Json((int)*game.hold) : Json(nullptr)},
+                    {"queue", queue}, {"bag_left", bag}, {"b2b", game.b2b}, {"combo", game.combo},
+                    {"garbage_meter", state.garbage_meter}, {"phantom_meter", state.phantom_meter},
+                    {"actions", actions}};
+                if (state.track_belief) {
+                    const auto belief = state.belief.root();
+                    row["belief"] = {{"fresh", belief.fresh}, {"state", belief.state}, {"since", belief.since}};
+                }
+                out << row.dump() << '\n';
+            }
+        }
+    }
+    out.close();
+}
 
 static GameResult playGame(EmulationGame& game, const Options& options, uint64_t game_seed, std::ostream* opponent_log) {
     using clock = std::chrono::steady_clock;
@@ -207,8 +266,8 @@ static bool parse(int argc, const char** argv, Options& options) {
         if (i + 1 >= argc) {
             return false;
         }
-        if (arg == "--opponent-log") {
-            options.opponent_log = argv[++i];
+        if (arg == "--opponent-log" || arg == "--tree-dump-dir") {
+            (arg == "--opponent-log" ? options.opponent_log : options.tree_dump_dir) = argv[++i];
             continue;
         }
         if (arg == "--cpus") {
@@ -255,6 +314,7 @@ int main(int argc, const char** argv) {
         std::cerr << "usage: " << argv[0]
             << " [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]"
             << " [--opponent-log FILE] [--sims N] [--search-seed 0|1] [--cpu K | --cpus K,L,...] [--print-config] [--garbage-scale X]"
+            << " [--tree-dump-dir DIR]"
             << std::endl;
         return 1;
     }
@@ -272,6 +332,15 @@ int main(int argc, const char** argv) {
         return 1;
     }
     Search::simulation_limit = options.sims;
+    UCT::retain_for_dump = !options.tree_dump_dir.empty();
+    if (UCT::retain_for_dump) {
+        try {
+            std::filesystem::create_directories(options.tree_dump_dir);
+        } catch (const std::exception& e) {
+            std::cerr << "can't create tree dump directory: " << e.what() << std::endl;
+            return 1;
+        }
+    }
 
 #ifdef _WIN32
     timeBeginPeriod(1);
@@ -297,6 +366,15 @@ int main(int argc, const char** argv) {
         fast_seed_reset(options.search_seed ? (uint64_t)seedFor(game_seed, 2) | 1 : 0);
         EmulationGame game = newGame(game_seed, options.ramp, options.garbage_scale);
         GameResult result = playGame(game, options, game_seed, opponent_log ? &opponent_log : nullptr);
+        if (UCT::retain_for_dump) {
+            try {
+                dumpTree(options, game_seed, result);
+            } catch (const std::exception& e) {
+                std::cerr << "tree dump failed: " << e.what() << std::endl;
+                return 1;
+            }
+            Search::uct = UCT();
+        }
 
         deaths += result.died;
         total_pieces += result.pieces;
