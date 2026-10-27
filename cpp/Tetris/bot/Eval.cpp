@@ -1,5 +1,8 @@
 #include "Eval.hpp"
 #include "Config.hpp"
+#include "EvalSlots.hpp"
+#include <cmath>
+#include <limits>
 
 #include <algorithm>
 #include <fstream>
@@ -10,6 +13,20 @@
 #include "engine/Board.hpp"
 #include "engine/Game.hpp"
 #include "Move.hpp"
+
+Eval::BeliefTerm::BeliefTerm(const OpponentFilter* filter, int meter) : filter(filter), meter(meter) {
+    cache.fill(std::numeric_limits<float>::quiet_NaN());
+}
+
+float Eval::BeliefTerm::value(int attack, bool cleared) {
+    // Large attacks must not share the cached value for attack 15.
+    if (attack > 15) return filter->valueAfter(attack, cleared, cleared ? 0 : meter, config().belief_weights);
+    float& v = cache[(cleared ? 16 : 0) + attack];
+    if (std::isnan(v)) {
+        v = filter->valueAfter(attack, cleared, cleared ? 0 : meter, config().belief_weights);
+    }
+    return v;
+}
 
 static bool Eval::is_top_quarter(const Board& board) {
     // do NOT touch anything this vectorizes
@@ -61,27 +78,20 @@ static bool is_perfect_clear(const Board& board) {
     return ret;
 }
 
+// All buried empty cells are cavities. The overhang feature additionally counts
+// those with an open side at the same row, treating both directions equally.
 std::pair<int, int> Eval::cavities_overhangs(const Board& board) {
-    int cavities = 0;
-    int overhangs = 0;
-
-    for (int i = 0; i < Board::width; ++i) {
-        auto col = board.board[i];
-        col = ~col;
-        col = col << std::countl_one(col);
-        cavities += (board.board[i] != 0) * std::popcount(col);
+    int cavities = 0, overhangs = 0;
+    for (int x = 0; x < Board::width; ++x) {
+        const uint64_t col = board.board[x];
+        const int height = 32 - std::countl_zero(board.board[x]);
+        const uint64_t holes = ~col & ((uint64_t(1) << height) - 1);
+        uint64_t open_side = 0;
+        if (x > 0) open_side |= ~uint64_t(0) << (32 - std::countl_zero(board.board[x - 1]));
+        if (x + 1 < Board::width) open_side |= ~uint64_t(0) << (32 - std::countl_zero(board.board[x + 1]));
+        cavities += std::popcount(holes);
+        overhangs += std::popcount(holes & open_side);
     }
-
-    for (int i = 1; i < Board::width; ++i) {
-        auto col1 = board.board[i - 1];
-        auto col2 = board.board[i];
-        col1 = col1 >> (32 - std::countl_zero(col2));
-        auto col3 = col1;
-        col1 = ~col1;
-        col1 = col1 << std::countl_one(col1);
-        overhangs += (col3 != 0) * std::popcount(col1);
-    }
-
     return { cavities, overhangs };
 }
 
@@ -121,22 +131,17 @@ std::pair<int, int> Eval::height_features(const Board& board) {
 }
 
 std::pair<int, int> Eval::n_covered_cells(Board board) {
-    int covered = 0;
-    int covered_sq = 0;
-
-    for (int i = 0; i < Board::width; ++i) {
-        auto col = board.board[i];
-        int col_covered = 0;
-        int zeros = std::countl_zero(col);
-        col <<= zeros; // 00011101 -> 11101
-        int ones = std::countl_one(col);
-        if (zeros + ones != 32) {
-            col_covered += col_covered + ones;
+    int covered = 0, covered_sq = 0;
+    for (uint32_t col : board.board) {
+        const int height = 32 - std::countl_zero(col);
+        uint64_t holes = ~uint64_t(col) & ((uint64_t(1) << height) - 1);
+        for (; holes; holes &= holes - 1) {
+            const int y = std::countr_zero(holes);
+            const int cells = std::popcount(uint64_t(col) >> (y + 1));
+            covered += cells;
+            covered_sq += cells * cells;
         }
-        covered += col_covered;
-        covered_sq += col_covered * col_covered;
     }
-
     return { covered, covered_sq };
 }
 
@@ -173,46 +178,36 @@ static std::pair<int, int> Eval::get_bumpiness(const Board& board) {
     return { bumpiness, bumpiness_sq };
 }
 
-// Identify clean count to 4
-static bool Eval::ct4(const Board& board) {
-
-    int garbage_height = height_features(board).first;
-
-    bool quad_ready = false;
-
-    for (int i = 0; i < Board::width; ++i) {
-        auto& col = board.board[i];
-        quad_ready = quad_ready && ((((col >> garbage_height) | 0b1111) & 0b1111) == 0b1111);
+// Four complete rows beside a single well above the common stack base.
+bool Eval::ct4(const Board& board) {
+    const auto [bottom, top] = height_features(board);
+    if (top != bottom + 4) return false;
+    int wells = 0;
+    for (uint32_t col : board.board) {
+        const uint64_t above = uint64_t(col) >> bottom;
+        if (above == 0) ++wells;
+        else if (above != 0b1111) return false;
     }
-
-    if (!quad_ready) {
-        return false;
-    }
-
-    if (garbage_height == 0) {
-        return true;
-    }
-
-    for (int i = 0; i < Board::width; ++i) {
-        if (!board.get(i, garbage_height - 1)) {
-            // check we have exactly 4 rows filled above this hole
-            if (std::countl_zero(board.board[i]) != 28 - garbage_height) {
-                return false;
-            }
-        }
-    }
-
-    return true;
+    return wells == 1;
 }
 
 int Eval::get_row_transitions(const Board& board) {
-    int transitions = 0;
-    for (int i = 0; i < Board::width - 1; i += 2) {
-        auto& col1 = board.board[i];
-        auto& col2 = board.board[i + 1];
-        transitions += std::popcount(col1 ^ col2);
+    int transitions = std::popcount(~board.board.front()) + std::popcount(~board.board.back());
+    for (int x = 1; x < Board::width; ++x) {
+        transitions += std::popcount(board.board[x - 1] ^ board.board[x]);
     }
     return transitions;
+}
+
+int Eval::well_depth(const Board& board, int well, int cap) {
+    uint32_t beside = UINT32_MAX;
+    for (int x = 0; x < Board::width; ++x) {
+        if (x != well) beside &= board.board[x];
+    }
+    const int bottom = 32 - std::countl_zero(board.board[well]);
+    // Preserve CC's visible-field limit for the new well-depth feature.
+    if (bottom >= 20) return 0;
+    return std::min({std::countr_one(beside >> bottom), 20 - bottom, cap});
 }
 
 // Convex: the no-spin style, leaving out the features that only score boards with an overhang or cavity above
@@ -269,7 +264,9 @@ static double evalBoard(const Board& board, int lines, bool tspin, bool waste_t)
     score += values.first * c.bumpiness;
     score += values.second * c.bumpiness_sq;
 
-    score += c.well_columns[Eval::well_position(board)];
+    const int well = Eval::well_position(board);
+    score += c.well_columns[well];
+    score += c.well_depth * Eval::well_depth(board, well, c.max_well_depth);
     score += c.clears[lines];
 
     score += Eval::get_row_transitions(board) * c.row_transitions;
@@ -289,71 +286,143 @@ double Eval::nanaBoard(const Board& board, int lines, bool tspin, bool waste_t) 
     return evalBoard<false>(board, lines, tspin, waste_t);
 }
 
-double Eval::evalNana(const Game& game, const Piece& piece, double* move_part) {
-    // only the board changes, so only the board is copied
-    Board board = game.board;
-    board.set(piece);
-    int lines = board.clearLines();
-    spinType spin = piece.spin;
-    bool tspin = false;
-    if (spin == spinType::normal &&
-        (piece.type == PieceType::T || !std::holds_alternative<TetrioS1>(game.mode))) {
-        tspin = true;
-    }
+namespace {
 
-    bool waste_t = false;
-
-    if (piece.type == PieceType::T) {
-        if (!tspin) {
-            waste_t = true;
-        }
+double slotPotential(const Game& after, const std::vector<PieceType>& bag_left) {
+    const auto& weights = config().tslot;
+    if (std::all_of(weights.begin(), weights.end(), [](double w) { return w == 0; })) return 0;
+    auto board = EvalSlots::CCBoard::from(after.board);
+    if (board.surfaceConvex()) return 0;
+    unsigned bag = 0;
+    for (PieceType p : bag_left) {
+        if (p != PieceType::Empty) bag |= 1u << (int)p;
     }
-
-    if (move_part) {
-        static const NanaConfig& c = config();
-        double score = c.clears[lines];
-        if (tspin && lines < (int)std::size(c.tspins)) {
-            score += c.tspins[lines];
-        }
-        if (waste_t) {
-            score += c.wasted_t;
-        }
-        *move_part = score / 10000;
+    auto refill = [&](PieceType p) {
+        if (p == PieceType::Empty) return;
+        if (bag == 0x7F) bag = 0;
+        bag |= 1u << (int)p;
+    };
+    for (auto it = after.queue.rbegin(); it != after.queue.rend(); ++it) refill(*it);
+    refill(after.current_piece.type);
+    const int available = ((bag >> (int)PieceType::T) & 1) + (std::popcount(bag) <= 3 ? 1 : 0)
+                        + (after.hold == PieceType::T ? 1 : 0);
+    double score = 0;
+    for (int i = 0; i < available; ++i) {
+        if (board.surfaceConvex()) break;
+        const auto slot = EvalSlots::findTslot(board);
+        if (!slot) break;
+        const int cleared = EvalSlots::cutout(board, *slot);
+        score += weights[std::min(cleared, 3)];
+        if (cleared < 2) break;
     }
-    return nanaBoard(board, lines, tspin, waste_t);
+    // Only slot potential uses the hypothetical cutouts; all other features use the actual board.
+    return score;
 }
 
-double Eval::evalConvex(const Game& game, const Piece& piece, double* move_part, bool* convex) {
-    static const NanaConfig& c = config();
-    // death is worth 0, so every live board stays at least one point above it
-    constexpr double alive = 1.0 / 10000;
-    // only the board changes, so only the board is copied
-    Board board = game.board;
-    board.set(piece);
-    int lines = board.clearLines();
-    const bool is_convex = board.surface_convex();
-    if (convex) {
-        *convex = is_convex;
+}
+
+double Eval::evalNana(const Context& context, const Piece& piece, double* move_part, bool* convex) {
+    const auto& c = config();
+    const bool no_spin = context.mode == EvalMode::Convex;
+
+    Game after = context.game;
+    const int b2b_before = after.b2b;
+    const bool held = piece.type != after.current_piece.type;
+
+    after.place_piece(piece);
+    const int lines = after.board.clearLines();
+
+    spinType spin = piece.spin;
+    if (std::holds_alternative<TetrioS1>(after.mode) && piece.type != PieceType::T) {
+        spin = spinType::null;
     }
-    if (!is_convex) {
+
+    const bool full = spin == spinType::normal;
+    const bool mini = spin == spinType::mini;
+    const bool pc = after.board.is_empty();
+    const int attack = after.damage_sent(lines, spin, pc);
+    const bool waste_t = piece.type == PieceType::T && !full;
+
+    const auto surface = EvalSlots::CCBoard::from(after.board);
+    const bool is_convex = surface.surfaceConvex();
+
+    if (convex) {
+        *convex = no_spin ? is_convex : true;
+    }
+
+    constexpr double alive = 1.0 / 10000;
+    if (no_spin && !is_convex) {
         if (move_part) {
             *move_part = 0;
         }
-        return std::max((c.nonconvex + 10000) / 10000, alive);
+
+        return std::max(1 + c.nonconvex / 10000, alive);
     }
+
+    // nanaBoard includes the legacy move features; expose the same amounts for search backup.
+    double move = c.clears[lines] + (pc ? c.perfect_clear : 0);
+
+    if (!no_spin && full && lines < (int)c.tspins.size()) {
+        move += c.tspins[lines];
+    }
+
+    if (!no_spin && waste_t) {
+        move += c.wasted_t;
+    }
+
+    double extra_move = 0;
+
+    if (!no_spin && mini && lines < (int)c.mini_tspins.size()) {
+        extra_move += c.mini_tspins[lines];
+    }
+
+    if (lines > 0 && (lines == 4 || spin != spinType::null) && b2b_before > 0) {
+        extra_move += c.b2b_clear;
+    }
+
+    if (lines > 0) {
+        extra_move += c.combo_garbage * attack;
+    }
+
+    static constexpr int rotations[] = { 0, 1, 2, 1 };
+    const int time = std::abs(piece.position.x - 4)
+                   + rotations[(int)piece.rotation]
+                   + held
+                   + (lines > 0 ? 40 : 0);
+
+    extra_move += c.move_time * time;
+    extra_move += std::trunc(c.jeopardy * std::max(surface.highest() - 10, 0) * time / 10);
+
+    double position = after.b2b > 0 ? c.back_to_back : 0;
+
+    if (!no_spin) {
+        position += slotPotential(after, context.bag_left);
+    }
+
+    if (context.belief) {
+        position += context.belief->value(attack, lines > 0);
+    }
+
     if (move_part) {
-        *move_part = c.clears[lines] / 10000;
+        *move_part = (move + extra_move) / 10000;
     }
-    return std::max(evalBoard<true>(board, lines, false, false), alive);
+
+    const double board = no_spin
+        ? evalBoard<true>(after.board, lines, false, false)
+        : nanaBoard(after.board, lines, full, waste_t);
+
+    const double total = board + (extra_move + position) / 10000;
+    return no_spin ? std::max(total, alive) : total;
+}
+
+double Eval::evalNana(const Game& game, const Piece& piece, double* move_part) {
+    return evalNana(Context{game, EvalMode::Nana}, piece, move_part);
+}
+
+double Eval::evalConvex(const Game& game, const Piece& piece, double* move_part, bool* convex) {
+    return evalNana(Context{game, EvalMode::Convex}, piece, move_part, convex);
 }
 
 double Eval::evaluate(const Context& context, const Piece& piece, double* move_part, bool* convex) {
-    switch (context.mode) {
-    case EvalMode::CC:
-        return evalCC(context.game, piece, context.bag_left, move_part, context.belief, context.meter);
-    case EvalMode::Convex:
-        return evalConvex(context.game, piece, move_part, convex);
-    default:
-        return evalNana(context.game, piece, move_part);
-    }
+    return evalNana(context, piece, move_part, convex);
 }

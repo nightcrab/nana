@@ -17,10 +17,10 @@ class ThreadTests(unittest.TestCase):
             space = os.path.join(directory, "space.json")
             with open(space, "w") as f:
                 json.dump([{"name": "steal_topk", "default": 4, "low": 1, "high": 8}], f)
-            for mode in ("cc", "convex"):
+            for mode in ("nana", "convex"):
                 with self.subTest(mode=mode), patch.object(Runner, "print_config",
                         side_effect=lambda config: dict(config)) as loaded:
-                    run = Run.create(os.path.join(directory, mode), binary, [0], [space],
+                    run = Run.create(os.path.join(directory, "run-" + mode), binary, [0], [space],
                                      {"sims": 128, "eval": mode})
                     loaded.assert_called_once_with({"eval": mode})
                 resumed = Run(run.dir)

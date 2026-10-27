@@ -15,7 +15,6 @@ list(TRANSFORM SHAKTRIS_SOURCES PREPEND "${SHAKTRIS_DIR}/")
 
 set(TETRIS_SOURCES
 	"Tetris/bot/Eval.cpp"
-	"Tetris/bot/EvalCC.cpp"
 	"Tetris/bot/Eval.hpp"
 	"Tetris/bot/Config.cpp"
 	"Tetris/bot/Config.hpp"
@@ -110,6 +109,11 @@ nana_add_executable(nana_emulate nana_core "emulate.cpp")
 nana_add_executable(nana_emulate_tbp nana_core "emulate_tbp.cpp")
 nana_add_executable(nana_eval_dump nana_core "eval_dump.cpp")
 
+option(NANA_EVALCHECK "Build evaluator regression checks" OFF)
+if(NANA_EVALCHECK)
+    nana_add_executable(nana_evalcheck nana_core "evalcheck.cpp")
+endif()
+
 option(NANA_STATCHECK "Build exact-reference sampling and backup diagnostics" OFF)
 if(NANA_STATCHECK)
     nana_add_executable(nana_statcheck nana_core "statcheck.cpp")
@@ -123,9 +127,9 @@ if(NANA_SEARCHCHECK)
     nana_add_executable(nana_searchcheck nana_core_searchcheck "searchcheck.cpp")
 endif()
 
-# nana_cctree: the CC search's whole tree on one position, for scripts/cc_tree_compare.py to set
-# against Cold Clear's. NANA_CCTREE_LOAD_FACTOR 1 runs one simulation at a time, as Cold Clear does on one thread
-option(NANA_CCTREE "Build nana_cctree, CC-search tree dumps for comparing with Cold Clear" OFF)
+# nana_cctree: the experimental CC search with the unified nana evaluator.
+# NANA_CCTREE_LOAD_FACTOR 1 runs one simulation at a time.
+option(NANA_CCTREE "Build nana_cctree, CC-search tree dumps using the unified evaluator" OFF)
 set(NANA_CCTREE_LOAD_FACTOR 1 CACHE STRING "jobs in flight in nana_cctree's search")
 if(NANA_CCTREE)
     nana_add_core(nana_core_cctree ${NANA_MARCH})

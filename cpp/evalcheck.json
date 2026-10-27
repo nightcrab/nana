@@ -1,0 +1,12 @@
+{
+  "back_to_back": 52,
+  "b2b_clear": 104,
+  "combo_garbage": 150,
+  "move_time": -3,
+  "jeopardy": -11,
+  "well_depth": 57,
+  "mini_tspins": [0, -158, -93],
+  "tslot": [8, 148, 192, 407],
+  "opponent": true,
+  "belief_weights": [1, 2, 3, 4, 5, 6, 7, 8]
+}

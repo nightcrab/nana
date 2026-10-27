@@ -60,6 +60,15 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("well_columns", c.well_columns);
     visit("clears", c.clears);
     visit("tspins", c.tspins);
+    visit("back_to_back", c.back_to_back);
+    visit("b2b_clear", c.b2b_clear);
+    visit("combo_garbage", c.combo_garbage);
+    visit("move_time", c.move_time);
+    visit("jeopardy", c.jeopardy);
+    visit("well_depth", c.well_depth);
+    visit("max_well_depth", c.max_well_depth);
+    visit("mini_tspins", c.mini_tspins);
+    visit("tslot", c.tslot);
     visit("c_init", c.c_init);
     visit("c_base", c.c_base);
     visit("depth_step", c.depth_step);
@@ -69,38 +78,6 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("eval", c.eval);
     visit("opponent", c.opponent);
     visit("belief_weights", c.belief_weights);
-    visit("cc_back_to_back", c.cc.back_to_back);
-    visit("cc_bumpiness", c.cc.bumpiness);
-    visit("cc_bumpiness_sq", c.cc.bumpiness_sq);
-    visit("cc_row_transitions", c.cc.row_transitions);
-    visit("cc_height", c.cc.height);
-    visit("cc_top_half", c.cc.top_half);
-    visit("cc_top_quarter", c.cc.top_quarter);
-    visit("cc_jeopardy", c.cc.jeopardy);
-    visit("cc_cavity_cells", c.cc.cavity_cells);
-    visit("cc_cavity_cells_sq", c.cc.cavity_cells_sq);
-    visit("cc_overhang_cells", c.cc.overhang_cells);
-    visit("cc_overhang_cells_sq", c.cc.overhang_cells_sq);
-    visit("cc_covered_cells", c.cc.covered_cells);
-    visit("cc_covered_cells_sq", c.cc.covered_cells_sq);
-    visit("cc_tslot", c.cc.tslot);
-    visit("cc_well_depth", c.cc.well_depth);
-    visit("cc_max_well_depth", c.cc.max_well_depth);
-    visit("cc_well_column", c.cc.well_column);
-    visit("cc_move_time", c.cc.move_time);
-    visit("cc_wasted_t", c.cc.wasted_t);
-    visit("cc_b2b_clear", c.cc.b2b_clear);
-    visit("cc_clear1", c.cc.clear1);
-    visit("cc_clear2", c.cc.clear2);
-    visit("cc_clear3", c.cc.clear3);
-    visit("cc_clear4", c.cc.clear4);
-    visit("cc_tspin1", c.cc.tspin1);
-    visit("cc_tspin2", c.cc.tspin2);
-    visit("cc_tspin3", c.cc.tspin3);
-    visit("cc_mini_tspin1", c.cc.mini_tspin1);
-    visit("cc_mini_tspin2", c.cc.mini_tspin2);
-    visit("cc_perfect_clear", c.cc.perfect_clear);
-    visit("cc_combo_garbage", c.cc.combo_garbage);
     visit("app_weight", c.app_weight);
     visit("eval_weight", c.eval_weight);
 }
@@ -140,6 +117,7 @@ void readValue(const nlohmann::json& j, const char* key, std::array<T, N>& out) 
 }
 
 void finish(NanaConfig& c) {
+    if (c.max_well_depth < 0 || c.max_well_depth > 32) fail("max_well_depth must be in [0, 32]");
     if (c.rules != "tetrio" && c.rules != "botris") fail("rules must be tetrio or botris");
     if (c.threads < 1) fail("threads must be at least 1");
     if (c.pin_layout != "compact" && c.pin_layout != "spread") fail("pin_layout must be compact or spread");
@@ -156,8 +134,8 @@ void finish(NanaConfig& c) {
     if (!(c.n_cap >= 1)) {
         fail("n_cap must be at least 1");
     }
-    if (c.eval != "nana" && c.eval != "cc" && c.eval != "convex") {
-        fail("eval must be nana, cc or convex");
+    if (c.eval != "nana" && c.eval != "convex") {
+        fail("eval must be nana or convex; the CC evaluator has been removed");
     }
     if (!(c.nonconvex_prior >= 0 && c.nonconvex_prior <= 1)) {
         fail("nonconvex_prior must be in [0, 1]");
@@ -252,8 +230,7 @@ const NanaConfig& config() {
 }
 
 EvalMode evalMode() {
-    static const EvalMode mode = config().eval == "cc" ? EvalMode::CC
-        : config().eval == "convex" ? EvalMode::Convex : EvalMode::Nana;
+    static const EvalMode mode = config().eval == "convex" ? EvalMode::Convex : EvalMode::Nana;
     return mode;
 }
 

@@ -1,14 +1,10 @@
-// Runs nana's CC search (NANA_CC_SEARCH) on one position and dumps the whole tree, every selection
-// step and the position with the future the search played, for scripts/cc_tree_compare.py to set
-// against Cold Clear's tree on the same position.
+// Runs the experimental CC search using the unified nana evaluator and dumps its tree.
+// Scores and selection traces are not Cold Clear evaluation parity references.
 // usage: nana_cctree [--seed S] [--pieces P] [--position FILE] [--sims N] [--search-seed X]
 //                    [--lockstep-seed L] [--future K] [--canonical] [--clear-meter]
-// The position is game S after P greedy moves under the CC eval, or the first line of FILE in
-// nana_eval_dump's format (board, queue [current, next...], hold, bag left after the queue, b2b,
-// combo). --canonical ranks ties by occupied cells and weighs in integer score units, as
-// tree_dump --canonical does, so the two stay in step past arbitrary tie orders. --clear-meter
-// drops the position's incoming garbage, which Cold Clear's search can't see. Needs NANA_CONFIG
-// with "eval": "cc". Writes one JSON object to stdout.
+// The position is game S after P greedy moves under the unified eval, or the first line
+// of FILE in nana_eval_dump's format. --canonical provides deterministic tie ordering;
+// --clear-meter drops incoming garbage. Writes one JSON object to stdout.
 
 #include "CCTrace.hpp"
 #include "Config.hpp"
@@ -237,7 +233,8 @@ static EmulationGame fromSeed(uint64_t seed, int pieces) {
         double best = -1e18;
         int best_index = -1;
         for (size_t i = 0; i < placements.size(); i++) {
-            const double total = Eval::evalCC(game.game, placements[i], left);
+            const Eval::Context context{game.game, evalMode(), left};
+            const double total = Eval::evaluate(context, placements[i]);
             if (total > best) {
                 best = total;
                 best_index = (int)i;
@@ -288,10 +285,6 @@ int main(int argc, const char** argv) {
             std::cerr << "unknown option " << arg << std::endl;
             return 2;
         }
-    }
-    if (evalMode() != EvalMode::CC) {
-        std::cerr << "nana_cctree compares against Cold Clear's eval: set NANA_CONFIG to a config with \"eval\": \"cc\"" << std::endl;
-        return 2;
     }
 
     EmulationGame game;

@@ -210,5 +210,77 @@
   "default": 325.85611242217686,
   "low": 0.0,
   "high": 2000.0
+ },
+ {
+  "name": "back_to_back",
+  "default": 0,
+  "low": -200,
+  "high": 300
+ },
+ {
+  "name": "b2b_clear",
+  "default": 0,
+  "low": -200,
+  "high": 400
+ },
+ {
+  "name": "combo_garbage",
+  "default": 0,
+  "low": 0,
+  "high": 300
+ },
+ {
+  "name": "move_time",
+  "default": 0,
+  "low": -10,
+  "high": 0
+ },
+ {
+  "name": "jeopardy",
+  "default": 0,
+  "low": -30,
+  "high": 0
+ },
+ {
+  "name": "well_depth",
+  "default": 0,
+  "low": 0,
+  "high": 100
+ },
+ {
+  "name": "mini_tspins[1]",
+  "default": 0,
+  "low": -300,
+  "high": 500
+ },
+ {
+  "name": "mini_tspins[2]",
+  "default": 0,
+  "low": -300,
+  "high": 500
+ },
+ {
+  "name": "tslot[0]",
+  "default": 0,
+  "low": 0,
+  "high": 800
+ },
+ {
+  "name": "tslot[1]",
+  "default": 0,
+  "low": 0,
+  "high": 800
+ },
+ {
+  "name": "tslot[2]",
+  "default": 0,
+  "low": 0,
+  "high": 800
+ },
+ {
+  "name": "tslot[3]",
+  "default": 0,
+  "low": 0,
+  "high": 800
  }
 ]

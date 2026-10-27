@@ -82,7 +82,7 @@ def main():
     start.add_argument("--chunk", type=int, help="games per nana_emulate process (default 4)")
     start.add_argument("--seed", type=int, help="the optimiser's seed (default 1)")
     start.add_argument("--rules", choices=["tetrio", "botris"], help="the ruleset games are played with (default tetrio)")
-    start.add_argument("--eval", choices=["cc", "nana", "convex"], help="evaluator to tune (default: nana_emulate's configured default)")
+    start.add_argument("--eval", choices=["nana", "convex"], help="evaluator style to tune (default: nana_emulate's configured default)")
     start.add_argument("--plan-only", action="store_true", help="calibrate, print the plan and stop; resume tunes")
     start.add_argument("-v", "--verbose", action="store_true", help="print everything (log.txt always has it)")
     start.add_argument("--overwrite", action="store_true", help="replace a run of the same name without asking")

@@ -257,7 +257,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	static const EvalMode eval_mode = evalMode();
 	const bool use_convex_eval = eval_mode == EvalMode::Convex;
 	Eval::Context context{ state.game, eval_mode };
-	if (eval_mode == EvalMode::CC) {
+	if (eval_mode != EvalMode::Convex) {
 		context.bag_left.assign(state.rng.bag.begin() + std::min<size_t>(state.rng.bagiterator, state.rng.bag.size()), state.rng.bag.end());
 	}
 
@@ -272,7 +272,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		meter += garbage;
 	}
 	std::optional<Eval::BeliefTerm> belief;
-	if (eval_mode == EvalMode::CC && belief_weighted && state.track_belief) {
+	if (belief_weighted && state.track_belief) {
 		belief.emplace(&state.belief, meter);
 		context.belief = &*belief;
 	}

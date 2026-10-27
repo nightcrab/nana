@@ -3,42 +3,6 @@
 #include <array>
 #include <string>
 
-struct CCWeights {
-    double back_to_back = 52;
-    double bumpiness = -24;
-    double bumpiness_sq = -7;
-    double row_transitions = -5;
-    double height = -39;
-    double top_half = -150;
-    double top_quarter = -511;
-    double jeopardy = -11;
-    double cavity_cells = -173;
-    double cavity_cells_sq = -3;
-    double overhang_cells = -34;
-    double overhang_cells_sq = -1;
-    double covered_cells = -17;
-    double covered_cells_sq = -1;
-    std::array<double, 4> tslot = { 8, 148, 192, 407 };
-    double well_depth = 57;
-    int max_well_depth = 17;
-    std::array<double, 10> well_column = { 20, 23, 20, 50, 59, 21, 59, 10, -10, 24 };
-
-    double move_time = -3;
-    double wasted_t = -152;
-    double b2b_clear = 104;
-    double clear1 = -143;
-    double clear2 = -100;
-    double clear3 = -58;
-    double clear4 = 390;
-    double tspin1 = 121;
-    double tspin2 = 410;
-    double tspin3 = 602;
-    double mini_tspin1 = -158;
-    double mini_tspin2 = -93;
-    double perfect_clear = 999;
-    double combo_garbage = 150;
-};
-
 struct NanaConfig {
     std::string rules = "tetrio";
     int threads = 3;
@@ -81,17 +45,27 @@ struct NanaConfig {
                                      695.6269810587003 };
     std::array<double, 4> tspins = { 0, 80.51857794910987, 159.46297822832895, 325.85611242217686 };
 
+    // Additional nana features start disabled until the unified evaluator is retuned.
+    double back_to_back = 0;
+    double b2b_clear = 0;
+    double combo_garbage = 0;  // actual attack sent, including combo/B2B/PC effects
+    double move_time = 0;
+    double jeopardy = 0;
+    double well_depth = 0;
+    int max_well_depth = 17;
+    std::array<double, 3> mini_tspins{};  // additive bonuses, as with tspins
+    std::array<double, 4> tslot{};
+
     double c_init = 4.071678062623125;
     double c_base = 7490.956117941063;
     int depth_step = 3;
     double prior_exponent = 0.5152502993309611;
     double n_cap = 2600.4416414699426;
     int depth_cap = 0;
-    std::string eval = "cc";
+    std::string eval = "nana";
     // false: the search models no opponent, so no speculative garbage, kill reward or belief terms
     bool opponent = false;
     std::array<double, 8> belief_weights{};
-    CCWeights cc;
 
     double app_weight = 0.6421088128536776;
     double eval_weight = 0.9756232465113018;
@@ -108,8 +82,8 @@ void loadTbpConfig();
 
 const NanaConfig& config();
 
-// the eval named by config().eval: "cc" (Cold Clear's eval), "nana" (nana's own), "convex" (nana's, no-spin style)
-enum class EvalMode { CC, Nana, Convex };
+// The unified evaluator, with an optional no-spin style.
+enum class EvalMode { Nana, Convex };
 EvalMode evalMode();
 
 std::string configJson(const NanaConfig& config);
