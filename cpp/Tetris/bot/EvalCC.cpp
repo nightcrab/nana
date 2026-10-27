@@ -13,43 +13,32 @@
 
 namespace {
 
+// Cold Clear's eval works on 40 rows, so the board's columns are widened to 64 bits (bit y = row y). Cells
+// outside the 10 x 40 field count as filled
 struct CCBoard {
-    std::array<uint16_t, 40> rows{};
+    static constexpr int HEIGHT = 40;
+    static constexpr uint64_t ROWS = (uint64_t(1) << HEIGHT) - 1;
+    std::array<uint64_t, 10> cols{};
     std::array<int, 10> heights{};
 
-    // heights from each column's top bit, rows by transposing the columns up to the tallest one
     static CCBoard from(const Board& board) {
-        static_assert(Board::height <= 40);
+        static_assert(Board::height <= HEIGHT);
         CCBoard b;
-        int top = 0;
         for (int x = 0; x < 10; x++) {
-            b.heights[x] = (int)Board::height - std::countl_zero(board.board[x]);
-            top = std::max(top, b.heights[x]);
+            b.cols[x] = board.board[x];
         }
-        for (int y = 0; y < top; y++) {
-            unsigned row = 0;
-            for (int x = 0; x < 10; x++) {
-                row |= ((board.board[x] >> y) & 1u) << x;
-            }
-            b.rows[y] = uint16_t(row);
-        }
+        b.computeHeights();
         return b;
     }
 
-    // scans down from the top row, setting each column's height at its first filled cell
     void computeHeights() {
-        heights.fill(0);
-        unsigned found = 0;
-        for (int y = 39; y >= 0 && found != 0x3FFu; y--) {
-            for (unsigned fresh = rows[y] & ~found; fresh; fresh &= fresh - 1) {
-                heights[std::countr_zero(fresh)] = y + 1;
-            }
-            found |= rows[y];
+        for (int x = 0; x < 10; x++) {
+            heights[x] = 64 - std::countl_zero(cols[x]);
         }
     }
 
     bool occupied(int x, int y) const {
-        return x < 0 || y < 0 || x >= 10 || y >= 40 || (rows[y] >> x & 1);
+        return x < 0 || y < 0 || x >= 10 || y >= HEIGHT || ((cols[x] >> y) & 1);
     }
 
     int highest() const {
@@ -181,21 +170,23 @@ std::optional<TSpot> caveTslot(const CCBoard& b, TSpot start) {
 int cutout(CCBoard& b, const TSpot& t) {
     for (const auto& c : T_CELLS[t.rot]) {
         const int x = t.x + c[0], y = t.y + c[1];
-        if (x >= 0 && x < 10 && y >= 0 && y < 40) {
-            b.rows[y] |= uint16_t(1u << x);
+        if (x >= 0 && x < 10 && y >= 0 && y < CCBoard::HEIGHT) {
+            b.cols[x] |= uint64_t(1) << y;
         }
     }
-    int lines = 0;
-    int to = 0;
-    for (int y = 0; y < 40; y++) {
-        if (b.rows[y] == 0x3FF) {
-            lines++;
-            continue;
-        }
-        b.rows[to++] = b.rows[y];
+    uint64_t full = CCBoard::ROWS;
+    for (const uint64_t col : b.cols) {
+        full &= col;
     }
-    while (to < 40) {
-        b.rows[to++] = 0;
+    const int lines = std::popcount(full);
+    // remove the full rows from the top down, dropping everything above each one
+    for (uint64_t rows = full; rows; ) {
+        const int y = 63 - std::countl_zero(rows);
+        rows &= ~(uint64_t(1) << y);
+        const uint64_t below = (uint64_t(1) << y) - 1;
+        for (uint64_t& col : b.cols) {
+            col = (col & below) | ((col >> 1) & ~below);
+        }
     }
     b.computeHeights();
     return lines;
@@ -409,15 +400,13 @@ double ccScore(Game game, const Piece& piece, const std::vector<PieceType>& bag_
         }
     }
     if constexpr (has(bit(WellDepth) | bit(WellColumn))) {
-    int depth = 0;
-    for (int y = board.heights[well]; y < 20; y++) {
-        bool filled = true;
-        for (int x = 0; x < 10 && filled; x++) {
-            filled = x == well || board.occupied(x, y);
-        }
-        if (!filled) break;
-        depth++;
+    // full rows beside the well, counted up from the well's top, below row 20
+    uint64_t beside = CCBoard::ROWS;
+    for (int x = 0; x < 10; x++) {
+        if (x != well) beside &= board.cols[x];
     }
+    const int bottom = board.heights[well];
+    int depth = bottom < 20 ? std::min(std::countr_one(beside >> bottom), 20 - bottom) : 0;
     depth = std::min(depth, w.max_well_depth);
     transient += w.well_depth * depth;
     rec(WellDepth, w.well_depth * depth);
@@ -428,10 +417,10 @@ double ccScore(Game game, const Piece& piece, const std::vector<PieceType>& bag_
     }
 
     if constexpr (has(bit(RowTransitions))) {
-    int transitions = 0;
-    for (int y = 0; y < 40; y++) {
-        const unsigned r = board.rows[y];
-        transitions += std::popcount((r | 0x400u) ^ (1u | (r << 1)));
+    // changes between neighbouring cells along each of the 40 rows, the walls counting as filled
+    int transitions = std::popcount(~board.cols[0] & CCBoard::ROWS) + std::popcount(~board.cols[9] & CCBoard::ROWS);
+    for (int x = 1; x < 10; x++) {
+        transitions += std::popcount(board.cols[x] ^ board.cols[x - 1]);
     }
     transient += w.row_transitions * transitions;
     rec(RowTransitions, w.row_transitions * transitions);
@@ -453,14 +442,16 @@ double ccScore(Game game, const Piece& piece, const std::vector<PieceType>& bag_
     }
 
     if constexpr (has(bit(CavityCells) | bit(CavityCellsSq) | bit(OverhangCells) | bit(OverhangCellsSq))) {
+        // empty cells under each column's top; an overhang when a neighbour side is low enough to slide into it
         int cavities = 0, overhangs = 0;
-        for (int y = 0; y < highest; y++) {
-            for (int x = 0; x < 10; x++) {
-                if (board.occupied(x, y) || y >= board.heights[x]) continue;
-                if (x > 1 && board.heights[x - 1] <= y - 1 && board.heights[x - 2] <= y) { overhangs++; continue; }
-                if (x < 8 && board.heights[x + 1] <= y - 1 && board.heights[x + 2] <= y) { overhangs++; continue; }
-                cavities++;
-            }
+        auto from_row = [](int y) { return y >= 64 ? uint64_t(0) : ~uint64_t(0) << std::max(y, 0); };
+        for (int x = 0; x < 10; x++) {
+            const uint64_t empty = ~board.cols[x] & ((uint64_t(1) << board.heights[x]) - 1);
+            uint64_t slide = 0;
+            if (x > 1) slide |= from_row(std::max(board.heights[x - 1] + 1, board.heights[x - 2]));
+            if (x < 8) slide |= from_row(std::max(board.heights[x + 1] + 1, board.heights[x + 2]));
+            overhangs += std::popcount(empty & slide);
+            cavities += std::popcount(empty & ~slide);
         }
         transient += w.cavity_cells * cavities + w.cavity_cells_sq * cavities * cavities;
         rec(CavityCells, w.cavity_cells * cavities);
@@ -471,14 +462,15 @@ double ccScore(Game game, const Piece& piece, const std::vector<PieceType>& bag_
     }
 
     if constexpr (has(bit(CoveredCells) | bit(CoveredCellsSq))) {
+        // each empty cell at least 2 below its column's top: the filled cells above it, at most 6
         int covered = 0, covered_sq = 0;
         for (int x = 0; x < 10; x++) {
-            for (int y = board.heights[x] - 3; y >= 0; y--) {
-                if (!board.occupied(x, y)) {
-                    const int cells = std::min(6, board.heights[x] - y - 1);
-                    covered += cells;
-                    covered_sq += cells * cells;
-                }
+            const int h = board.heights[x];
+            if (h < 3) continue;
+            for (uint64_t empty = ~board.cols[x] & ((uint64_t(1) << (h - 2)) - 1); empty; empty &= empty - 1) {
+                const int cells = std::min(6, h - std::countr_zero(empty) - 1);
+                covered += cells;
+                covered_sq += cells * cells;
             }
         }
         transient += w.covered_cells * covered + w.covered_cells_sq * covered_sq;

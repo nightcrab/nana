@@ -212,6 +212,9 @@ NanaConfig load() {
                 known++;
             }
         });
+        if (c.eval == "convex" && !j.contains("low_water")) {
+            c.low_water = 0;
+        }
         if (known != j.size()) {
             std::string unknown;
             for (auto& [key, value] : j.items()) {
