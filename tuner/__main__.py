@@ -75,10 +75,10 @@ def main():
                        help="fitness to maximise (default strength; sims-per-second defaults to search.json)")
     start.add_argument("--optimizer", choices=OPTIMIZERS, default="pso", help="optimizer (default pso)")
     start.add_argument("--iterations", type=int, help="optimizer iterations (default 15)")
-    start.add_argument("--particles", type=int, help="default 24")
+    start.add_argument("--particles", type=int, help="swarm/population size (default 24; CMA-ES requires at least 2)")
     start.add_argument("--games", dest="games_per_eval", type=int, help="games per evaluation (strength: 32; sims-per-second: 4)")
     start.add_argument("--spread", type=float,
-                       help="the starting swarm's spread around the defaults, in unit-cube units (default 0.3)")
+                       help="initial spread around defaults in unit-cube units (CMA-ES sigma; default 0.3)")
     start.add_argument("--gate-games", type=int, help="the release gate's limit on paired games (strength: 400; sims-per-second: 32)")
     start.add_argument("--holdout-every", type=int, help="iterations between holdouts (default 5)")
     start.add_argument("--chunk", type=int, help="games per nana_emulate process (default 4)")

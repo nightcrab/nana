@@ -1,14 +1,14 @@
 # nana's autotuner
 
 Tunes nana's constants (eval weights, PUCT, the rollout score) by playing seeded games and running
-particle swarm optimisation on the result. You give it a time budget; it measures how long games take
+PSO (the default) or CMA-ES on the result. You give it a time budget; it measures how long games take
 on this machine and tunes at the largest search budget that fits.
 
 - **one budget knob**: `--budget-hours` picks the sims count, and the plan is printed before any
   tuning starts;
-- **a fixed number of iterations** (15 by default), whatever the swarm does;
-- **explore, then exploit**: the swarm starts widely scattered around the defaults and its inertia
-  falls over the run, so it settles at the end;
+- **a fixed number of iterations** (15 by default);
+- **adaptive exploration**: PSO reduces inertia over the run; CMA-ES learns a covariance matrix
+  and adapts its step size, starting from the defaults;
 - **a release gate**: `release.json` only changes when the tuned best beats the defaults in a
   sequential test on paired games;
 - **checkpoints** every iteration, and **health checks** that catch a run that isn't measuring anything.
@@ -22,6 +22,17 @@ python -m tuner status eval1          # from another terminal, any time
 # Ctrl-C (or a reboot) stops it; then
 python -m tuner resume eval1
 ```
+
+To use CMA-ES with the existing evaluation/game infrastructure:
+
+```
+python -m tuner start cma1 --nana out/build/<build>/cpp/nana_emulate.exe --cpus 0,2,4,6 --budget-hours 8 --optimizer cmaes --particles 24 --spread 0.3
+```
+
+CMA-ES uses NumPy only, with no additional dependency. `--particles` is its population size
+(at least 2); `--spread` is its initial standard deviation in normalized parameter space
+(finite and positive). Both default to the same values as PSO. Resume restores the optimizer
+and its random state from the checkpoint.
 
 Use one logical cpu per physical core (`--cpus`). By default each game uses one thread, pinned to
 its cpu. `--threads N` assigns N search threads and N CPUs to each game, taking consecutive groups
@@ -38,7 +49,7 @@ python -m tuner start speed1 --nana out/build/<build>/cpp/nana_emulate.exe --cpu
 
 This defaults to `spaces/search.json`, 4 games per evaluation (instead of 32), 8 holdout games
 (instead of 32), and at most 32 release-gate pairs (instead of 400). `--space`, `--games`, and
-`--gate-games` still override their defaults. Both the PSO and the holdouts/release gate maximise
+`--gate-games` still override their defaults. Both optimizers and the holdouts/release gate maximise
 sims/s: `1000 * sims_per_move / ms_per_move`, averaged across games. This measures search time,
 including search start/stop overhead, without process startup. It does not reward dying early by
 counting shorter games as faster. Timing varies, so increase `--games` if signal warnings persist;
@@ -68,16 +79,16 @@ python -m tuner start smoke --nana ... --cpus ... --sims 64 --iterations 3 --par
    (`--print-config`), the same seeds replay the same games with one thread, and a deliberately broken eval (height
    penalties flipped) scores clearly worse.
 2. **Calibration**: two waves of games over the cpus at each sims count of a ladder (256, 512, ...,
-   131072), with the swarm's starting configs. From the seconds per game it projects the whole run,
+   131072), with the optimizer's starting configs. From the seconds per game it projects the whole run,
    and picks the largest sims count that fits what's left of the budget. It stops climbing as soon as
    a rung won't fit (or clearly won't, at twice the last rung's cost). `--sims N` skips the choice.
    The measurements and the plan go to `plan.json`.
-3. **Tuning**: `--iterations` PSO iterations at that sims count. A holdout (the best against the
+3. **Tuning**: `--iterations` optimizer iterations at that sims count. A holdout (the best against the
    defaults on fixed seeds) every `--holdout-every` iterations and after the last.
 4. **The gate**: the best against the release (the defaults) on fresh paired seeds, until an SPRT
    decides or `--gate-games` pairs are played. Only an accepted candidate becomes `release.json`.
 
-The plan counts the gate at its limit, so most runs finish early. Games get longer as the swarm
+The plan counts the gate at its limit, so most runs finish early. Games get longer as the bot
 improves (it survives longer), so iterations late in a run can take longer than calibration said;
 `status` re-projects from the latest iterations.
 
@@ -106,12 +117,12 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 |---|---|---|
 | `--budget-hours H` / `--sims N` | (one is required) | the time budget, or a fixed sims count |
 | `--objective` | `strength` | maximise attack/piece or `sims-per-second` (with the smaller defaults above) |
-| `--optimizer` | `pso` | optimizer to use (currently only PSO) |
+| `--optimizer` | `pso` | optimizer: `pso` or `cmaes` |
 | `--threads` | 1 | search threads per game; must divide the CPU count (1–64) |
-| `--iterations` | 15 | PSO iterations |
-| `--particles` | 24 | swarm size; an iteration costs about 2 x particles x games games |
+| `--iterations` | 15 | optimizer iterations |
+| `--particles` | 24 | swarm/population size; PSO costs about 2 x particles x games per iteration, CMA-ES costs (particles + 1) x games |
 | `--games` | 32 | games per evaluation: more is less noise and slower iterations |
-| `--spread` | 0.3 | the starting swarm's spread around the defaults (unit-cube units per parameter) |
+| `--spread` | 0.3 | initial spread around defaults in unit-cube units; CMA-ES initial sigma |
 | `--gate-games` | 400 | the gate's limit on paired games |
 | `--holdout-every` | 5 | iterations between holdouts |
 | `--rules` | `tetrio` | the ruleset games are played with: `tetrio` or `botris` |
@@ -148,6 +159,21 @@ An optimizer supplies:
 `PSOOptimizer` in `tuner/pso.py` adapts the original PSO implementation, including its inertia
 schedule, paired personal-best reevaluations, and swarm diagnostics. To add an optimizer, implement
 the contract and extend the defaults, creation, restore, and CLI choices in `tuner/optimizer.py`.
+
+`CMAESOptimizer` in `tuner/cmaes.py` implements positive-weight full-covariance CMA-ES with
+rank-one and rank-mu covariance updates and cumulative step-size adaptation, using the learning
+rates from [Hansen's tutorial](https://arxiv.org/abs/1604.00772). Its Gaussian operates in unbounded
+coordinates; a periodic reflection maps candidates into [0, 1] before the existing parameter
+decoder applies bounds, log scales, and integer rounding. It supports one-dimensional spaces too.
+
+Each CMA-ES generation evaluates the population plus the incumbent (initially the defaults) on
+the same fresh seeds. The generation winner replaces the incumbent only if its fresh mean beats
+the incumbent's fresh mean. A retained incumbent accumulates an average across evaluations;
+a replacement starts a new average. Only the population updates the search distribution.
+This provides paired comparisons for the final recommendation; covariance adaptation still uses
+noisy population rankings, so increase `--games` when signal is weak. The fixed iteration limit,
+holdouts, and release gate apply to both optimizers. CMA-ES reports sigma, covariance condition,
+and population diversity, with warnings for tiny steps, poor conditioning, and a best near bounds.
 
 Existing checkpoints with a bare `pso` field still resume. The next save writes the named,
 versioned `optimizer` envelope; optimizer settings remain in `run.json`. Existing command lines

@@ -28,7 +28,8 @@ Corrected board features:
   during search backup.
 
 New weights are `back_to_back`, `b2b_clear`, `combo_garbage`, `move_time`, `jeopardy`,
-`well_depth`, `mini_tspins[0..2]`, and `tslot[0..3]`. They default to zero pending tuning.
+`well_depth`, `mini_tspins[0..2]`, and `tslot[0..3]`. Their defaults come from the
+[2026-10-28 CC-search tune](../tuner/releases/unified-cc-20261028.md).
 `max_well_depth` defaults to 17; well depth counts consecutive complete rows beside the
 selected well, below row 20. `combo_garbage` weights actual ruleset attack, including
 combo/B2B/PC effects. Mini-spin bonuses are additive to ordinary clear rewards.
@@ -48,9 +49,10 @@ and spin bonuses, as appropriate for its no-spin style.
 
 Old `eval: cc` and `cc_*` production configs must be migrated to nana's unprefixed keys.
 Weights for similarly named features are not interchangeable because formulas differ.
-The tuner space `tuner/spaces/eval.json` includes the new weights. Start a new tuning run:
-old nana weights were tuned against the buggy features, and CC weights were tuned
-against different definitions. Playing strength has not been established by regression tests.
+The tuner space `tuner/spaces/eval.json` starts from the released unified weights.
+The full release is preserved in `tuner/releases/unified-cc-20261028.json`; its provenance
+note records the CC-search holdout and release-gate results. Older nana weights were
+tuned against the buggy features, and original CC weights used different definitions.
 
 Build with `-DNANA_EVALCHECK=ON`, then run the checks with the supplied nonzero-weight
 fixture (PowerShell):

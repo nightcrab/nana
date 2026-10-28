@@ -179,7 +179,10 @@ class Run:
         for key in ("games_per_eval", "iterations", "horizon", "chunk"):
             if settings.get(key, 4) < 1:
                 raise SystemExit(f"{key} must be positive")
-        optimizer = create_optimizer(settings, space.default_unit())
+        try:
+            optimizer = create_optimizer(settings, space.default_unit())
+        except ValueError as e:
+            raise SystemExit(str(e)) from e
         settings.update({"nana": os.path.abspath(nana), "cpus": cpus, "space": space.specs(),
                          "created": time.strftime("%Y-%m-%d %H:%M:%S")})
         _write_json(os.path.join(directory, "run.json"), settings)

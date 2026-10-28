@@ -15,271 +15,271 @@
  },
  {
   "name": "top_half",
-  "default": -50.809334726527226,
+  "default": 0.0,
   "low": -400.0,
   "high": 0.0
  },
  {
   "name": "top_quarter",
-  "default": -630.2445620700462,
+  "default": -1299.1469468005557,
   "low": -2000.0,
   "high": 0.0
  },
  {
   "name": "low",
-  "default": -33.44361147332671,
+  "default": -48.85876885951201,
   "low": -100.0,
   "high": 0.0
  },
  {
   "name": "cavity_cells",
-  "default": -349.58985804116384,
+  "default": -188.0067334857314,
   "low": -1000.0,
   "high": 0.0
  },
  {
   "name": "cavity_cells_sq",
-  "default": -25.400362612478148,
+  "default": -11.570201454979951,
   "low": -80.0,
   "high": 0.0
  },
  {
   "name": "overhangs",
-  "default": -132.6695694448751,
+  "default": -148.49422381243872,
   "low": -400.0,
   "high": 0.0
  },
  {
   "name": "overhangs_sq",
-  "default": -1.1524309867331013,
+  "default": -15.506437892380262,
   "low": -50.0,
   "high": 0.0
  },
  {
   "name": "covered_cells",
-  "default": -30.498162474880733,
+  "default": -9.488219920162521,
   "low": -80.0,
   "high": 0.0
  },
  {
   "name": "covered_cells_sq",
-  "default": -7.8721414742404825,
+  "default": -17.734649365123673,
   "low": -50.0,
   "high": 0.0
  },
  {
   "name": "bumpiness",
-  "default": -25.761192630778556,
+  "default": -39.19399757617383,
   "low": -80.0,
   "high": 0.0
  },
  {
   "name": "bumpiness_sq",
-  "default": -28.108590764188037,
+  "default": -17.479073263689287,
   "low": -80.0,
   "high": 0.0
  },
  {
   "name": "height",
-  "default": -45.15022159907045,
+  "default": -74.72915773438541,
   "low": -150.0,
   "high": 0.0
  },
  {
   "name": "row_transitions",
-  "default": -24.575704740846128,
+  "default": -24.964292593387626,
   "low": -80.0,
   "high": 0.0
  },
  {
   "name": "counting",
-  "default": 61.9347727280756,
+  "default": 123.13225038738523,
   "low": 0.0,
   "high": 200.0
  },
  {
   "name": "perfect_clear",
-  "default": 229.5585551568744,
+  "default": 459.1382875053675,
   "low": 0.0,
   "high": 2500.0
  },
  {
   "name": "wasted_t",
-  "default": -48.3875036786517,
+  "default": -325.3322806159243,
   "low": -400.0,
   "high": 0.0
  },
  {
   "name": "well_columns[0]",
-  "default": 22.206568640471783,
+  "default": -14.027905244456235,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[1]",
-  "default": 23.75351666383591,
+  "default": 143.94860745779067,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[2]",
-  "default": -9.705152993022665,
+  "default": 105.79624872097673,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[3]",
-  "default": 64.4055163819902,
+  "default": -2.1409300770281163,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[4]",
-  "default": 38.01976098740804,
+  "default": 94.62568763831229,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[5]",
-  "default": 33.32048980372693,
+  "default": -13.993603529444357,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[6]",
-  "default": 84.8998702340318,
+  "default": 37.377988551410795,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[7]",
-  "default": 36.54866592169482,
+  "default": -13.576156508389971,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[8]",
-  "default": -17.853911656640292,
+  "default": 29.175353144995455,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "well_columns[9]",
-  "default": 6.390785928250345,
+  "default": 64.08152580941095,
   "low": -150.0,
   "high": 150.0
  },
  {
   "name": "clears[1]",
-  "default": 329.40179942811164,
+  "default": -430.9044614913619,
   "low": -1000.0,
   "high": 1000.0
  },
  {
   "name": "clears[2]",
-  "default": -2.9680199204562143,
+  "default": -82.00526559129185,
   "low": -250.0,
   "high": 250.0
  },
  {
   "name": "clears[3]",
-  "default": -98.8208607848226,
+  "default": -75.40366226353456,
   "low": -250.0,
   "high": 250.0
  },
  {
   "name": "clears[4]",
-  "default": 695.6269810587003,
+  "default": 568.7142035120609,
   "low": 0.0,
   "high": 2000.0
  },
  {
   "name": "tspins[1]",
-  "default": 80.51857794910987,
+  "default": 211.23662056914796,
   "low": 0.0,
   "high": 400.0
  },
  {
   "name": "tspins[2]",
-  "default": 159.46297822832895,
+  "default": 449.9985423281276,
   "low": 0.0,
   "high": 1500.0
  },
  {
   "name": "tspins[3]",
-  "default": 325.85611242217686,
+  "default": 805.1118520957763,
   "low": 0.0,
   "high": 2000.0
  },
  {
   "name": "back_to_back",
-  "default": 0,
+  "default": 178.00779835117402,
   "low": -200,
   "high": 300
  },
  {
   "name": "b2b_clear",
-  "default": 0,
+  "default": 310.7901540056264,
   "low": -200,
   "high": 400
  },
  {
   "name": "combo_garbage",
-  "default": 0,
+  "default": 163.39949694939244,
   "low": 0,
   "high": 300
  },
  {
   "name": "move_time",
-  "default": 0,
+  "default": -0.9451011861378422,
   "low": -10,
   "high": 0
  },
  {
   "name": "jeopardy",
-  "default": 0,
+  "default": -3.3658024240299156,
   "low": -30,
   "high": 0
  },
  {
   "name": "well_depth",
-  "default": 0,
+  "default": 4.7611948323678055,
   "low": 0,
   "high": 100
  },
  {
   "name": "mini_tspins[1]",
-  "default": 0,
+  "default": 273.6576108015987,
   "low": -300,
   "high": 500
  },
  {
   "name": "mini_tspins[2]",
-  "default": 0,
+  "default": 262.13060522082867,
   "low": -300,
   "high": 500
  },
  {
   "name": "tslot[0]",
-  "default": 0,
+  "default": 3.037242442511007,
   "low": 0,
   "high": 800
  },
  {
   "name": "tslot[1]",
-  "default": 0,
+  "default": 662.3104264385768,
   "low": 0,
   "high": 800
  },
  {
   "name": "tslot[2]",
-  "default": 0,
+  "default": 220.5678195237515,
   "low": 0,
   "high": 800
  },
  {
   "name": "tslot[3]",
-  "default": 0,
+  "default": 12.800471695771156,
   "low": 0,
   "high": 800
  }
