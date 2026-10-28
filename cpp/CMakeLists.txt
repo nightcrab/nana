@@ -5,6 +5,9 @@
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris/game)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris/opponent)
+# the neural opponent's inference code, built for the architecture in architecture/generated.hpp
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/opponent_inference ${CMAKE_CURRENT_SOURCE_DIR}/opponent_inference/architecture)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Tetris/bot)
 
 add_subdirectory("Tetris/game/ShakTrisLib" EXCLUDE_FROM_ALL)
@@ -20,8 +23,9 @@ set(TETRIS_SOURCES
 	"Tetris/bot/Config.hpp"
 	"Tetris/game/EmulationGame.cpp"
 	"Tetris/game/EmulationGame.hpp"
-	"Tetris/game/MarkovOpponent.cpp"
-	"Tetris/game/OpponentEncoder.cpp"
+	"Tetris/opponent/IOHMM.cpp"
+	"Tetris/opponent/BoardEncoder.cpp"
+	"Tetris/opponent/Neural.cpp"
 	"Tetris/bot/UCT.cpp"
 	"Tetris/bot/UCT.hpp"
 	"Tetris/bot/Search.cpp"
@@ -33,17 +37,6 @@ set(TETRIS_SOURCES
 	"Util/fasthash.cpp"
 )
 set(NANA_ICON "icon.rc")
-
-# Optional experimental checkpoint; generated dimensions and weights stay outside source control.
-set(NANA_NEURAL_MODEL_DIR "" CACHE PATH "Exported neural opponent checkpoint directory")
-if(NANA_NEURAL_MODEL_DIR)
-    if(NOT EXISTS "${NANA_NEURAL_MODEL_DIR}/generated.hpp")
-        message(FATAL_ERROR "NANA_NEURAL_MODEL_DIR must contain generated.hpp")
-    endif()
-    include_directories("${NANA_NEURAL_MODEL_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/opponent_inference")
-    add_compile_definitions(NANA_NEURAL_MODEL_DIR="${NANA_NEURAL_MODEL_DIR}")
-endif()
-
 
 option(NANA_MIMALLOC "Use mimalloc for C++ allocations" ON)
 
@@ -119,14 +112,12 @@ nana_add_executable(nana_emulate nana_core "emulate.cpp")
 nana_add_executable(nana_emulate_tbp nana_core "emulate_tbp.cpp")
 nana_add_executable(nana_eval_dump nana_core "eval_dump.cpp")
 nana_add_executable(nana_policy_fit nana_core "policy_fit.cpp")
-if(NANA_NEURAL_MODEL_DIR)
-    nana_add_executable(nana_neuralcheck nana_core "tests/neuralcheck.cpp")
-endif()
 
 option(NANA_EVALCHECK "Build evaluator regression checks" OFF)
 if(NANA_EVALCHECK)
     nana_add_executable(nana_evalcheck nana_core "tests/evalcheck.cpp")
     nana_add_executable(nana_policycheck nana_core "tests/policycheck.cpp")
+    nana_add_executable(nana_neuralcheck nana_core "tests/neuralcheck.cpp")
 endif()
 
 if(NANA_VARIANTS)

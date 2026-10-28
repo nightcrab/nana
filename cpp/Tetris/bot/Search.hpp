@@ -46,13 +46,13 @@ namespace Search {
 
     extern uint64_t simulation_limit;
 
-    extern const RootOpponent* root_opponent;
-    extern const OpponentFilter* root_filter;
+    extern const opponent::Root* root_opponent;
+    extern const opponent::Belief* root_belief;
     bool waitForSimulations(std::chrono::milliseconds timeout);
 
     void maybeInsertNode(UCTNode node, const int threadIdx);
 
-    // Opp is MarkovOpponent or NoOpponent, chosen once per search from config "opponent"
+    // Opp is opponent::IOHMM, opponent::Neural or opponent::None, chosen once per search from config "opponent"
     template <class Opp>
     void search(std::stop_token stop, int threadIdx);
 

@@ -1,6 +1,6 @@
-#include "OpponentEncoder.hpp"
-#include "MarkovOpponentParams.hpp"
-#include "OpponentEncoderParams.hpp"
+#include "BoardEncoder.hpp"
+#include "IOHMMParams.hpp"
+#include "BoardEncoderParams.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -8,9 +8,9 @@
 #include <cstdlib>
 #include <iostream>
 
-namespace markov {
+namespace opponent {
 
-std::array<float, ENCODER_FEATURES> boardFeatures(const Board& board, int combo, int b2b) {
+std::array<float, BOARD_FEATURES> board_features(const Board& board, int combo, int b2b) {
     constexpr uint32_t rows = (1u << 20) - 1;
     std::array<uint32_t, Board::width> col;
     std::array<int, Board::width> height;
@@ -53,10 +53,10 @@ std::array<float, ENCODER_FEATURES> boardFeatures(const Board& board, int combo,
              (float)(max_height >= 15) };
 }
 
-double hmmFingerprint() {
+double iohmm_fingerprint() {
     double fingerprint = 0;
     int i = 0;
-    for (const auto& row : fitted_params.emission) {
+    for (const auto& row : fitted_iohmm.emission) {
         double total = 0;
         for (float p : row) {
             total += p;
@@ -68,12 +68,12 @@ double hmmFingerprint() {
     return fingerprint;
 }
 
-bool encoderAvailable() {
+bool board_encoder_available() {
     static const bool available = [] {
-        if (fitted_encoder.fingerprint == 0) {
+        if (fitted_board_encoder.fingerprint == 0) {
             return false;
         }
-        if (std::abs(fitted_encoder.fingerprint - hmmFingerprint()) > 1e-3) {
+        if (std::abs(fitted_board_encoder.fingerprint - iohmm_fingerprint()) > 1e-3) {
             std::cerr << "warning: the opponent encoder was trained against another opponent HMM; it's off" << std::endl;
             return false;
         }
@@ -84,10 +84,10 @@ bool encoderAvailable() {
 
 namespace {
 template <size_t N>
-void softmaxHead(const std::array<float, ENCODER_FEATURES>& x, const std::array<std::array<float, N>, ENCODER_FEATURES>& w,
+void softmaxHead(const std::array<float, BOARD_FEATURES>& x, const std::array<std::array<float, N>, BOARD_FEATURES>& w,
                  const std::array<float, N>& b, std::array<float, N>& out) {
     std::array<float, N> logits = b;
-    for (int f = 0; f < ENCODER_FEATURES; f++) {
+    for (int f = 0; f < BOARD_FEATURES; f++) {
         for (size_t k = 0; k < N; k++) {
             logits[k] += x[f] * w[f][k];
         }
@@ -104,31 +104,31 @@ void softmaxHead(const std::array<float, ENCODER_FEATURES>& x, const std::array<
 }
 }
 
-bool encodeOpponent(const Board& board, int combo, int b2b, std::array<float, STATES>& state,
+bool encode_board(const Board& board, int combo, int b2b, std::array<float, STATES>& state,
                     std::array<float, SINCE>& since) {
-    if (!encoderAvailable()) {
+    if (!board_encoder_available()) {
         return false;
     }
-    const auto features = boardFeatures(board, combo, b2b);
-    std::array<float, ENCODER_FEATURES> x;
-    for (int f = 0; f < ENCODER_FEATURES; f++) {
-        x[f] = (features[f] - fitted_encoder.mean[f]) / fitted_encoder.scale[f];
+    const auto features = board_features(board, combo, b2b);
+    std::array<float, BOARD_FEATURES> x;
+    for (int f = 0; f < BOARD_FEATURES; f++) {
+        x[f] = (features[f] - fitted_board_encoder.mean[f]) / fitted_board_encoder.scale[f];
     }
-    softmaxHead(x, fitted_encoder.state_weights, fitted_encoder.state_bias, state);
-    softmaxHead(x, fitted_encoder.since_weights, fitted_encoder.since_bias, since);
+    softmaxHead(x, fitted_board_encoder.state_weights, fitted_board_encoder.state_bias, state);
+    softmaxHead(x, fitted_board_encoder.since_weights, fitted_board_encoder.since_bias, since);
     return true;
 }
 
-bool opponentEvidence(const Board& board, int combo, int b2b, std::array<float, STATES>& state,
+bool board_evidence(const Board& board, int combo, int b2b, std::array<float, STATES>& state,
                       std::array<float, SINCE>& since) {
-    if (!encodeOpponent(board, combo, b2b, state, since)) {
+    if (!encode_board(board, combo, b2b, state, since)) {
         return false;
     }
     for (int z = 0; z < STATES; z++) {
-        state[z] /= std::max(fitted_encoder.state_prior[z], 1e-6f);
+        state[z] /= std::max(fitted_board_encoder.state_prior[z], 1e-6f);
     }
     for (int s = 0; s < SINCE; s++) {
-        since[s] /= std::max(fitted_encoder.since_prior[s], 1e-6f);
+        since[s] /= std::max(fitted_board_encoder.since_prior[s], 1e-6f);
     }
     return true;
 }

@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <type_traits>
 
 const char* EmulationGame::rules() {
     return config().rules.c_str();
@@ -87,7 +88,7 @@ void EmulationGame::chance_move() {
         return;
     }
 
-    int garbage_amount = (int)markov.play();
+    int garbage_amount = (int)opponent_attack<Opp>();
     if (phantom_garbage && garbage_amount > 0) {
         phantom_meter.insert(phantom_meter.begin(), garbage_amount);
     }
@@ -100,7 +101,7 @@ void EmulationGame::chance_move() {
             garbage_amount -= cancelled;
         }
         if (outgoing_garbage.front() > 0) {
-            markov.receiveAttack(outgoing_garbage.front());
+            opponent_receive(outgoing_garbage.front());
         }
         std::shift_left(outgoing_garbage.begin(), outgoing_garbage.end(), 1);
         outgoing_garbage.back() = 0;
@@ -130,8 +131,9 @@ void EmulationGame::chance_move() {
     }
 };
 
-template void EmulationGame::chance_move<MarkovOpponent>();
-template void EmulationGame::chance_move<NoOpponent>();
+template void EmulationGame::chance_move<opponent::IOHMM>();
+template void EmulationGame::chance_move<opponent::Neural>();
+template void EmulationGame::chance_move<opponent::None>();
 
 template <class Opp>
 void EmulationGame::play_moves(){
@@ -235,7 +237,7 @@ void EmulationGame::play_moves(){
             outgoing_garbage.back() += damage;
         }
         else {
-            markov.receiveAttack(damage);
+            opponent_receive(damage);
         }
     }
     last_sent = damage;
@@ -279,16 +281,17 @@ void EmulationGame::play_moves(){
 
     true_attack += damage;
 
-    if (Opp::simulated && track_belief && tetrio) {
-        belief.turn(sent, cleared_lines > 0, landed);
+    if (std::is_same_v<Opp, opponent::IOHMM> && track_belief && tetrio) {
+        belief.update(sent, cleared_lines > 0, landed);
     }
 
     //game.app = app();
 
 };
 
-template void EmulationGame::play_moves<MarkovOpponent>();
-template void EmulationGame::play_moves<NoOpponent>();
+template void EmulationGame::play_moves<opponent::IOHMM>();
+template void EmulationGame::play_moves<opponent::Neural>();
+template void EmulationGame::play_moves<opponent::None>();
 
 void EmulationGame::objectively_play_moves() {
 
@@ -440,20 +443,76 @@ float EmulationGame::b2b() {
     return (float) game.b2b; 
 }
 
-double EmulationGame::opponent_jeopardy() const {
-    return markov.jeopardy();
+double EmulationGame::opponent_meter() const {
+    return opponent.meter;
 }
 
 double EmulationGame::opponent_deaths() const {
-    return markov.deaths;
+    return opponent.deaths;
 }
 
 bool EmulationGame::opponent_dead() const {
-    return markov.is_dead();
+    return opponent.dead;
 }
 
-void EmulationGame::reset_opponent_rng() {
-    markov.reset_rng();
+// the cap on garbage that lands on the opponent per piece outside stadium rules
+constexpr float OPPONENT_GARBAGE_CAP = 8;
+
+template <class Opp>
+double EmulationGame::opponent_attack() {
+    if constexpr (!Opp::simulated) {
+        return 0;
+    }
+    else {
+        OpponentState& o = opponent;
+        Opp& m = model<Opp>();
+        if (o.dead) {
+            if (!m.respawn()) {
+                return 0;
+            }
+            o.dead = false;
+        }
+
+        const opponent::Prediction prediction = m.predict(o.received, o.meter, o.rng);
+        o.received = 0;
+        if (prediction.dies) {
+            o.dead = true;
+            o.deaths++;
+            o.last_attack = 0;
+            return 0;
+        }
+
+        o.pieces++;
+        double attack = prediction.attack;
+        o.last_attack = attack;
+        if (attack > 0) {
+            const double cancelled = std::min<double>(attack, o.meter);
+            o.meter -= (float)cancelled;
+            attack -= cancelled;
+        }
+        else if (!opponent::iohmm_params().stadium_rules) {
+            o.meter -= std::min(o.meter, OPPONENT_GARBAGE_CAP);
+        }
+        o.total_damage += (float)attack;
+        return attack;
+    }
+}
+
+void EmulationGame::opponent_receive(double amount) {
+    OpponentState& o = opponent;
+    o.received += (float)amount;
+    o.meter += (float)amount;
+    if (opponent::iohmm_params().stadium_rules && o.last_attack <= 0) {
+        o.meter = 0;
+    }
+}
+
+void EmulationGame::adopt_opponent(const opponent::Root& root) {
+    opponent.meter = root.meter;
+    opponent.last_attack = root.last_attack;
+    opponent.received = 0;
+    opponent.dead = false;
+    iohmm.adopt(root);
 }
 
 template <class Opp>
@@ -469,26 +528,30 @@ void EmulationGame::reseed_chance() {
         std::swap(rng.bag[i], rng.bag[left + rng.getRand(i - left + 1)]);
     }
     if constexpr (Opp::simulated) {
-        reset_opponent_rng();
+        opponent.rng.reseed();
     }
 }
 
-template void EmulationGame::reseed_chance<MarkovOpponent>();
-template void EmulationGame::reseed_chance<NoOpponent>();
+template void EmulationGame::reseed_chance<opponent::IOHMM>();
+template void EmulationGame::reseed_chance<opponent::Neural>();
+template void EmulationGame::reseed_chance<opponent::None>();
 
 template <class Opp>
 void EmulationGame::start_from_root() {
     reseed_chance<Opp>();
     if constexpr (Opp::simulated) {
-        markov.resample_from_root();
+        model<Opp>().sample_root(opponent.rng);
     }
 }
 
-template void EmulationGame::start_from_root<MarkovOpponent>();
-template void EmulationGame::start_from_root<NoOpponent>();
+template void EmulationGame::start_from_root<opponent::IOHMM>();
+template void EmulationGame::start_from_root<opponent::Neural>();
+template void EmulationGame::start_from_root<opponent::None>();
 
 void EmulationGame::reset_opponent() {
-    markov = MarkovOpponent();
+    opponent = {};
+    iohmm = {};
+    neural = {};
 }
 
 void EmulationGame::write_opponent_header(std::ostream& out) {
@@ -496,7 +559,7 @@ void EmulationGame::write_opponent_header(std::ostream& out) {
 }
 
 void EmulationGame::write_opponent_step(std::ostream& out, uint64_t game_id) const {
-    const double opp_attack = markov.last_attack;
+    const double opp_attack = opponent.last_attack;
     out << game_id << ',' << ramp_pieces << ',' << last_sent << ',' << opp_attack << ',' << last_received << ','
-        << opponent_jeopardy() << ',' << (opponent_dead() ? 1 : 0) << '\n';
+        << opponent_meter() << ',' << (opponent_dead() ? 1 : 0) << '\n';
 }

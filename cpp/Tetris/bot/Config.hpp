@@ -81,8 +81,10 @@ struct NanaConfig {
     double n_cap = 2600.4416414699426;
     int depth_cap = 0;
     std::string eval = "nana";
-    // false: the search models no opponent, so no speculative garbage, kill reward or belief terms
-    bool opponent = false;
+    // the opponent the search models: none (no speculative garbage, kill reward or belief terms), iohmm or neural
+    std::string opponent = "none";
+    // the neural opponent's exported model directory
+    std::string neural_model;
     std::array<double, 8> belief_weights{};
 
     double app_weight = 0.6421088128536776;

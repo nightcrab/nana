@@ -77,7 +77,7 @@
   "n_cap": 2600.4416414699426,
   "depth_cap": 0,
   "eval": "nana",
-  "opponent": false,
+  "opponent": "none",
   "belief_weights": [
     0.0,
     0.0,

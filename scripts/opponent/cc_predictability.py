@@ -8,7 +8,7 @@ the game really dealt, to check the replay against what Cold Clear did in the ga
 arrives during a rollout, and Cold Clear's search ignores the meter, so a rollout is Cold Clear's
 own plan for the position.
 
-Attack per piece is binned as MarkovOpponent's emissions are: min(attack, 7), plus a death bin.
+Attack per piece is binned as the IOHMM's emissions are: min(attack, 7), plus a death bin.
 
 usage: python scripts/opponent/cc_predictability.py STADIUM.db [...] [--player 2] [--stride 5] [--max-positions 40]
            [--horizon 8] [--thinks 4000] [--queue-seeds 16] [--repeats 4] [--jobs 2] [--out FILE.jsonl]

@@ -21,7 +21,7 @@ inline EmulationGame newGame(uint64_t game_seed, int ramp, float garbage_scale) 
     game.rng.makebag();
 
     game.reset_opponent();
-    game.markov.seed(seedFor(game_seed, 1));
+    game.opponent.rng.seed(seedFor(game_seed, 1));
 
     game.game.current_piece = game.rng.getPiece();
     for (auto& piece : game.game.queue) {

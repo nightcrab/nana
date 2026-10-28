@@ -132,7 +132,7 @@ static void moveChecks() {
     const double high_total = Eval::evalNana(g, o, &move);
     check(near(move * 10000, c.move_time * 3 + std::trunc(c.jeopardy * 3 * 3 / 10)),
           "jeopardy couples move time with height above ten");
-    OpponentFilter filter;
+    opponent::Belief filter;
     Eval::BeliefTerm belief(&filter, 6);
     Eval::Context context{g, EvalMode::Nana}; context.belief = &belief; context.meter = 6;
     double belief_move = 0;
@@ -140,7 +140,7 @@ static void moveChecks() {
           "opponent belief contributes position value");
     check(near(move, belief_move), "belief must not enter move reward");
     belief.value(15, true);
-    check(near(belief.value(20, true), filter.valueAfter(20, true, 0, c.belief_weights)),
+    check(near(belief.value(20, true), filter.value_after(20, true, 0, c.belief_weights)),
           "large attacks do not alias the attack-15 belief cache");
 }
 

@@ -491,7 +491,7 @@ int main(int argc, const char** argv) {
                 << ",\"attack\":" << game.attack
                 << ",\"true_attack\":" << game.true_attack
                 << ",\"lines\":" << game.lines
-                << ",\"opponent_attack\":" << game.markov.total_damage
+                << ",\"opponent_attack\":" << game.opponent.total_damage
                 << ",\"ms_per_move\":" << 1000.0 * result.think_seconds / moves
                 << "}" << std::endl;
         }

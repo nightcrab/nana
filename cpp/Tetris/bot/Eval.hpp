@@ -4,7 +4,7 @@
 #include "engine/Board.hpp"
 #include "engine/Game.hpp"
 #include "Move.hpp"
-#include "OpponentFilter.hpp"
+#include "Belief.hpp"
 
 #include <vector>
 
@@ -12,10 +12,10 @@
 // belongs to the move itself (clears, spins, attack) rather than the board left behind.
 namespace Eval {
 	struct BeliefTerm {
-		const OpponentFilter* filter = nullptr;
+		const opponent::Belief* filter = nullptr;
 		int meter = 0;
 		std::array<float, 32> cache;
-		BeliefTerm(const OpponentFilter* filter, int meter);
+		BeliefTerm(const opponent::Belief* filter, int meter);
 		float value(int attack, bool cleared);
 	};
 

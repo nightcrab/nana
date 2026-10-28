@@ -86,7 +86,7 @@ struct BlobKind {
 static void write_job(Job& j) {
 	j.state.pieces++;
 	j.state.game.board.board[0] ^= 1;
-	j.state.markov.meter += 1e-6f;
+	j.state.opponent.meter += 1e-6f;
 	if (!j.path.empty()) j.path.back().actionID++;
 }
 
@@ -94,7 +94,7 @@ static uint64_t touch_state(const EmulationGame& s) {
 	uint64_t x = s.game.board.board[0] + s.pieces;
 	if (!s.garbage_meter.empty()) x += s.garbage_meter[0];
 	if (!s.buffered_garbage.empty()) x += s.buffered_garbage[0];
-	x += (uint64_t)s.markov.meter;
+	x += (uint64_t)s.opponent.meter;
 	return x;
 }
 

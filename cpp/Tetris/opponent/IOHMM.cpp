@@ -1,10 +1,10 @@
-#include "MarkovOpponent.hpp"
-#include "MarkovOpponentParams.hpp"
+#include "IOHMM.hpp"
+#include "IOHMMParams.hpp"
 
 #include <cmath>
 #include <cstdlib>
 
-namespace markov {
+namespace opponent {
 
 template <size_t N>
 static void toCdf(std::array<float, N>& row) {
@@ -42,8 +42,8 @@ static void sharpen(std::array<float, N>& row, float a, size_t n = N) {
     }
 }
 
-static Params makeCdfs() {
-    Params p = fitted_params;
+static IOHMMParams makeCdfs() {
+    IOHMMParams p = fitted_iohmm;
     const float a = sharpenExponent();
     if (a != 1.0f) {
         for (auto& by_jeopardy : p.transition) {
@@ -75,8 +75,8 @@ static Params makeCdfs() {
     return p;
 }
 
-const Params& params() {
-    static const Params cdfs = makeCdfs();
+const IOHMMParams& iohmm_params() {
+    static const IOHMMParams cdfs = makeCdfs();
     return cdfs;
 }
 

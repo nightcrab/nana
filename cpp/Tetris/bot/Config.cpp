@@ -80,6 +80,7 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("depth_cap", c.depth_cap);
     visit("eval", c.eval);
     visit("opponent", c.opponent);
+    visit("neural_model", c.neural_model);
     visit("belief_weights", c.belief_weights);
     visit("app_weight", c.app_weight);
     visit("eval_weight", c.eval_weight);
@@ -119,6 +120,15 @@ void readValue(const nlohmann::json& j, const char* key, std::array<T, N>& out) 
     }
 }
 
+// Relative paths are relative to the config file, or to the executable for the defaults.
+std::filesystem::path resolvePath(const NanaConfig& c, const std::string& value) {
+    std::filesystem::path path = value;
+    if (path.is_relative()) {
+        path = (c.source == "defaults" ? executableDirectory() : std::filesystem::absolute(c.source).parent_path()) / path;
+    }
+    return path;
+}
+
 void finish(NanaConfig& c) {
     if (c.max_well_depth < 0 || c.max_well_depth > 32) fail("max_well_depth must be in [0, 32]");
     if (c.rules != "tetrio" && c.rules != "botris") fail("rules must be tetrio or botris");
@@ -150,10 +160,7 @@ void finish(NanaConfig& c) {
     if (c.policy == "softmax") {
         if (c.eval != "nana") fail("softmax policy requires eval nana");
         if (c.policy_model.empty()) fail("softmax policy requires policy_model");
-        std::filesystem::path path = c.policy_model;
-        if (path.is_relative()) {
-            path = (c.source == "defaults" ? executableDirectory() : std::filesystem::absolute(c.source).parent_path()) / path;
-        }
+        const std::filesystem::path path = resolvePath(c, c.policy_model);
         try {
             std::ifstream in(path);
             if (!in) fail("can't read policy model " + path.string());
@@ -170,9 +177,15 @@ void finish(NanaConfig& c) {
         }
         c.policy_model = std::filesystem::absolute(path).lexically_normal().string();
     }
-    if (!c.opponent) {
+    if (c.opponent != "none" && c.opponent != "iohmm" && c.opponent != "neural") {
+        fail("opponent must be none, iohmm or neural");
+    }
+    if (!c.neural_model.empty()) {
+        c.neural_model = resolvePath(c, c.neural_model).string();
+    }
+    if (c.opponent != "iohmm") {
         for (double w : c.belief_weights) {
-            if (w != 0) fail("belief_weights need an opponent; set opponent true or zero them");
+            if (w != 0) fail("belief_weights need the iohmm opponent; set opponent iohmm or zero them");
         }
     }
     for (int r = 1; r <= NanaConfig::PRIOR_TABLE; r++) {

@@ -14,16 +14,16 @@
 #include "engine/Game.hpp"
 #include "Move.hpp"
 
-Eval::BeliefTerm::BeliefTerm(const OpponentFilter* filter, int meter) : filter(filter), meter(meter) {
+Eval::BeliefTerm::BeliefTerm(const opponent::Belief* filter, int meter) : filter(filter), meter(meter) {
     cache.fill(std::numeric_limits<float>::quiet_NaN());
 }
 
 float Eval::BeliefTerm::value(int attack, bool cleared) {
     // Large attacks must not share the cached value for attack 15.
-    if (attack > 15) return filter->valueAfter(attack, cleared, cleared ? 0 : meter, config().belief_weights);
+    if (attack > 15) return filter->value_after(attack, cleared, cleared ? 0 : meter, config().belief_weights);
     float& v = cache[(cleared ? 16 : 0) + attack];
     if (std::isnan(v)) {
-        v = filter->valueAfter(attack, cleared, cleared ? 0 : meter, config().belief_weights);
+        v = filter->value_after(attack, cleared, cleared ? 0 : meter, config().belief_weights);
     }
     return v;
 }

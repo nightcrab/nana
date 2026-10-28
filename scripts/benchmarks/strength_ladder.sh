@@ -78,7 +78,7 @@ config = {}
 if sys.argv[1]:
     with open(sys.argv[1], encoding="utf-8") as source:
         config = json.load(source)
-config.update(opponent=False, belief_weights=[0] * 8)
+config.update(opponent="none", belief_weights=[0] * 8)
 with open(sys.argv[2], "w", encoding="utf-8") as target:
     json.dump(config, target, indent=2)
     target.write("\n")

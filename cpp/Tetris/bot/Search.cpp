@@ -50,8 +50,8 @@ std::condition_variable min_work_cv;
 std::atomic_bool min_work_bool;
 
 uint64_t Search::simulation_limit = 0;
-const RootOpponent* Search::root_opponent = nullptr;
-const OpponentFilter* Search::root_filter = nullptr;
+const opponent::Root* Search::root_opponent = nullptr;
+const opponent::Belief* Search::root_belief = nullptr;
 static std::mutex budget_mutex;
 static std::condition_variable budget_cv;
 static std::atomic_bool budget_reached;
@@ -154,32 +154,48 @@ static void loadTuning() {
 #endif
 
 // config "opponent", read once per search: picks which compiled search the workers run
-static bool search_opponent = false;
+enum class SearchOpponent { None, IOHMM, Neural };
+static SearchOpponent search_opponent = SearchOpponent::None;
+
+// Calls f.template operator()<Opp>() with the opponent type the search models.
+template <class F>
+static decltype(auto) withOpponent(F&& f) {
+    switch (search_opponent) {
+    case SearchOpponent::IOHMM:
+        return f.template operator()<opponent::IOHMM>();
+    case SearchOpponent::Neural:
+        return f.template operator()<opponent::Neural>();
+    default:
+        return f.template operator()<opponent::None>();
+    }
+}
 
 static void loadSearchOpponent() {
-    search_opponent = config().opponent;
-    if (search_opponent) {
-        return;
+    const std::string& name = config().opponent;
+    search_opponent = name == "iohmm" ? SearchOpponent::IOHMM
+                    : name == "neural" ? SearchOpponent::Neural
+                    : SearchOpponent::None;
+    if (search_opponent == SearchOpponent::Neural && !opponent::forecast.active) {
+        std::cerr << "the neural opponent needs a forecast of the real opponent, which only nana_tbp encodes"
+                  << std::endl;
+        std::exit(2);
     }
     if constexpr (NANA_OPPONENT_ORACLE || NANA_FUTURE_ORACLE) {
-        std::cerr << "the opponent and future oracles need opponent true" << std::endl;
-        std::exit(2);
+        if (search_opponent != SearchOpponent::IOHMM) {
+            std::cerr << "the opponent and future oracles need opponent iohmm" << std::endl;
+            std::exit(2);
+        }
     }
 }
 
 static void startFromRoot(EmulationGame& state) {
-    if (search_opponent) {
-        state.start_from_root<MarkovOpponent>();
-    }
-    else {
-        state.start_from_root<NoOpponent>();
-    }
+    withOpponent([&]<class Opp>() { state.start_from_root<Opp>(); });
 }
 
 static void adoptOpponentBelief(EmulationGame& root) {
-    markov::root_belief.active = false;
+    opponent::root_prior.active = false;
     if (Search::root_opponent) {
-        root.markov.adopt(*Search::root_opponent);
+        root.adopt_opponent(*Search::root_opponent);
         Search::root_opponent->publish();
     }
 }
@@ -194,37 +210,32 @@ static void searchGarbage(EmulationGame& root) {
     }
     if constexpr (cc_search) {
         EmulationGame::deterministic_chance = false;
-        if (search_opponent) {
-            root.reseed_chance<MarkovOpponent>();
-        }
-        else {
-            root.reseed_chance<NoOpponent>();
-        }
+        withOpponent([&]<class Opp>() { root.reseed_chance<Opp>(); });
         EmulationGame::deterministic_chance = true;
     }
     if constexpr (NANA_PHANTOM_GARBAGE || cc_search) {
         root.garbage_scale = 0;
-        root.phantom_garbage = NANA_PHANTOM_GARBAGE && !cc_search && search_opponent;
+        root.phantom_garbage = NANA_PHANTOM_GARBAGE && !cc_search && search_opponent != SearchOpponent::None;
         root.phantom_meter.clear();
     }
 }
 
 static void searchOpponent(EmulationGame& root) {
-    if (!search_opponent) {
-        markov::root_belief.active = false;
+    if (search_opponent == SearchOpponent::None) {
+        opponent::root_prior.active = false;
         root.track_belief = false;
         return;
     }
     if constexpr (NANA_OPPONENT_ORACLE || NANA_FUTURE_ORACLE) {
-        markov::root_belief.active = false;
+        opponent::root_prior.active = false;
     }
     else {
         root.reset_opponent();
         adoptOpponentBelief(root);
     }
-    root.track_belief = Search::root_filter != nullptr;
+    root.track_belief = search_opponent == SearchOpponent::IOHMM && Search::root_belief != nullptr;
     if (root.track_belief) {
-        root.belief = *Search::root_filter;
+        root.belief = *Search::root_belief;
     }
 }
 
@@ -334,7 +345,7 @@ static void resetWorkerLocal(int core_count) {
 using Worker = void (*)(std::stop_token, int);
 
 static Worker worker() {
-    return search_opponent ? &Search::search<MarkovOpponent> : &Search::search<NoOpponent>;
+    return withOpponent([]<class Opp>() -> Worker { return &Search::search<Opp>; });
 }
 
 void Search::startSearch(const EmulationGame &state, int core_count) {
@@ -618,12 +629,7 @@ void Search::endSearch() {
             while (!queues[i]->isempty()) {
                 Msg msg = queues[i]->dequeue();
                 if (msg->type == FLUSH) {
-                    if (search_opponent) {
-                        processJob<MarkovOpponent>(i, std::move(msg));
-                    }
-                    else {
-                        processJob<NoOpponent>(i, std::move(msg));
-                    }
+                    withOpponent([&]<class Opp>() { processJob<Opp>(i, std::move(msg)); });
                     delivered = true;
                 }
             }

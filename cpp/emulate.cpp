@@ -7,7 +7,7 @@
 
 #include "EmulateCommon.hpp"
 #include "EmulationGame.hpp"
-#include "OpponentFilter.hpp"
+#include "Belief.hpp"
 #include "Search.hpp"
 #include "UCT.hpp"
 #include "Config.hpp"
@@ -141,10 +141,10 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
 
     GameResult result;
     bool first = true;
-    OpponentFilter opponent_filter;
-    RootOpponent root_opponent;
+    opponent::Belief opponent_belief;
+    opponent::Root root_opponent;
     Search::root_opponent = &root_opponent;
-    Search::root_filter = &opponent_filter;
+    Search::root_belief = &opponent_belief;
     const Search::FlushStats flush_start = Search::flush_stats;
 
     while (true) {
@@ -165,7 +165,7 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
         }
 
         auto start = clock::now();
-        root_opponent = opponent_filter.root();
+        root_opponent = opponent_belief.root();
         if (first) {
             Search::startSearch(game, options.threads);
             first = false;
@@ -238,7 +238,7 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
         game.play_moves();
         const int attack = game.attack - attack_before;
         const bool cleared = game.lines > lines_before;
-        opponent_filter.turn(attack, cleared, cleared ? 0 : std::max(0, meter - attack));
+        opponent_belief.update(attack, cleared, cleared ? 0 : std::max(0, meter - attack));
         game.chance_move();
 #if NANA_FUTURE_ORACLE
         bool exact = prediction.game.queue == game.game.queue
@@ -246,8 +246,8 @@ static GameResult playGame(EmulationGame& game, const Options& options, uint64_t
             && prediction.rng.bagiterator == game.rng.bagiterator && prediction.hole_rng == game.hole_rng
             && prediction.garbage_meter == game.garbage_meter
             && prediction.last_received == game.last_received
-            && prediction.markov.last_attack == game.markov.last_attack
-            && prediction.markov.deaths == game.markov.deaths;
+            && prediction.opponent.last_attack == game.opponent.last_attack
+            && prediction.opponent.deaths == game.opponent.deaths;
         for (int x = 0; x < Board::width; ++x)
             exact = exact && prediction.game.board.get_column(x) == game.game.board.get_column(x);
         if (!exact) {
@@ -416,8 +416,8 @@ int main(int argc, const char** argv) {
             << ",\"app\":" << (result.pieces ? (double)game.attack / result.pieces : 0.0)
             << ",\"true_attack\":" << game.true_attack
             << ",\"lines\":" << game.lines
-            << ",\"opponent_attack\":" << game.markov.total_damage
-            << ",\"opponent_deaths\":" << game.markov.deaths
+            << ",\"opponent_attack\":" << game.opponent.total_damage
+            << ",\"opponent_deaths\":" << game.opponent.deaths
             << ",\"sims_per_move\":" << result.simulations / moves
             << ",\"restarts_per_sim\":" << (double)result.restarts / std::max<uint64_t>(result.simulations, 1)
             << ",\"root_per_sim\":" << (double)result.root_backprops / std::max<uint64_t>(result.simulations, 1)

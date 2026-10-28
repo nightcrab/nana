@@ -1,11 +1,13 @@
 #pragma once
-#include "MarkovOpponent.hpp"
-#include "OpponentFilter.hpp"
+#include "IOHMM.hpp"
+#include "Neural.hpp"
+#include "Belief.hpp"
 #include "engine/Game.hpp"
 #include "util/rng.hpp"
 
 #include <ostream>
 #include <queue>
+#include <type_traits>
 
 #ifndef NANA_FUTURE_ORACLE
 #define NANA_FUTURE_ORACLE 0
@@ -55,9 +57,24 @@ class EmulationGame {
         }
         return rng.getRand(Board::width);
     }
-    MarkovOpponent markov;
+    // The opponent's side of the garbage exchange. The opponent models only predict its attacks; the rules for
+    // cancelling, its meter and its deaths are applied here.
+    struct OpponentState {
+        float meter = 0;
+        // garbage it received since its last piece
+        float received = 0;
+        double last_attack = 0;
+        bool dead = false;
+        double deaths = 0;
+        float pieces = 0;
+        float total_damage = 0;
+        opponent::Rng rng;
+    };
+    OpponentState opponent;
+    opponent::IOHMM iohmm;
+    opponent::Neural neural;
     bool track_belief = false;
-    OpponentFilter belief;
+    opponent::Belief belief;
 
     void set_tetrio_rules();
 
@@ -87,11 +104,12 @@ class EmulationGame {
     void set_move(Move move);
     Move specific_move(Move move);
 
-    // Opp is MarkovOpponent or NoOpponent; the search picks one per run and the environment always uses the default
-    template <class Opp = MarkovOpponent>
+    // Opp is opponent::IOHMM, opponent::Neural or opponent::None; the search picks one per run and the environment
+    // always uses the default
+    template <class Opp = opponent::IOHMM>
     void chance_move();
 
-    template <class Opp = MarkovOpponent>
+    template <class Opp = opponent::IOHMM>
     void play_moves();
     void objectively_play_moves();
 
@@ -100,17 +118,34 @@ class EmulationGame {
 
     uint32_t hash() const;
 
-    double opponent_jeopardy() const;
+    // The opponent's attack this piece after cancelling against its meter, and the garbage it receives from us.
+    template <class Opp>
+    double opponent_attack();
+    void opponent_receive(double amount);
+    void adopt_opponent(const opponent::Root& root);
+
+    double opponent_meter() const;
     double opponent_deaths() const;
     bool opponent_dead() const;
-    void reset_opponent_rng();
-    template <class Opp = MarkovOpponent>
+    template <class Opp = opponent::IOHMM>
     void reseed_chance();
     static inline bool deterministic_chance = false;
-    template <class Opp = MarkovOpponent>
+    template <class Opp = opponent::IOHMM>
     void start_from_root();
     void reset_opponent();
 
     static void write_opponent_header(std::ostream& out);
     void write_opponent_step(std::ostream& out, uint64_t game_id) const;
+
+private:
+    template <class Opp>
+    Opp& model() {
+        if constexpr (std::is_same_v<Opp, opponent::IOHMM>) {
+            return iohmm;
+        }
+        else {
+            static_assert(std::is_same_v<Opp, opponent::Neural>);
+            return neural;
+        }
+    }
 };

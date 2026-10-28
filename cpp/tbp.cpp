@@ -5,13 +5,10 @@
 
 #include "Search.hpp"
 #include "Config.hpp"
-#include "OpponentEncoder.hpp"
-#include "OpponentFilter.hpp"
+#include "BoardEncoder.hpp"
+#include "Belief.hpp"
+#include "Neural.hpp"
 #include "Util/json.hpp"
-#ifdef NANA_NEURAL_MODEL_DIR
-#include "inference.hpp"
-#include <chrono>
-#endif
 
 auto type_to_json(PieceType type) -> nlohmann::json {
     switch (type) {
@@ -162,16 +159,40 @@ auto rotation_to_json(RotationDirection dir) -> nlohmann::json {
     return nullptr;
 }
 
+static int garbageRows(const Board& expected, const Board& after) {
+    for (int k = 0; k <= 20; k++) {
+        const uint32_t low = k ? (1u << k) - 1 : 0;
+        int holes = 0;
+        bool ok = true;
+        for (int x = 0; x < Board::width && ok; x++) {
+            const uint32_t raised = (uint32_t)((uint64_t)expected.board[x] << k);
+            const uint32_t col = after.board[x];
+            if ((col & ~low) != raised) {
+                ok = false;
+            }
+            const uint32_t bits = col & low;
+            if (k && bits == 0) {
+                holes++;
+            }
+            else if (bits != low) {
+                ok = false;
+            }
+        }
+        if (ok && (k == 0 || holes == 1)) {
+            return k;
+        }
+    }
+    return -1;
+}
+
 struct SeenOpponent {
     bool have = false;
     Board board{};
     int combo = 0;
     int b2b = 0;
-#ifdef NANA_NEURAL_MODEL_DIR
     std::vector<PieceType> queue;
     PieceType hold = PieceType::Empty;
     int meter = 0;
-#endif
 };
 
 static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
@@ -186,11 +207,9 @@ static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
             const auto& v = player["back_to_back"];
             out.b2b = v.is_boolean() ? (v.get<bool>() ? 1 : 0) : (v.is_number() ? v.get<int>() : 0);
         }
-#ifdef NANA_NEURAL_MODEL_DIR
         out.queue = player.contains("queue") ? json_to_queue(player["queue"]) : std::vector<PieceType>{};
         out.hold = player.contains("hold") ? json_to_type(player["hold"]) : PieceType::Empty;
         out.meter = player.value("meter", 0);
-#endif
         out.have = true;
         return true;
     }
@@ -199,53 +218,9 @@ static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
     }
 }
 
-#ifdef NANA_NEURAL_MODEL_DIR
-static void predictOpponent(const SeenOpponent& seen) {
-    using namespace opponent_inference;
-    static_assert(CONTEXT_SIZE == 52 && HORIZON == 8);
-    neural_opponent::forecast.active = false;
-    if (!config().opponent) return;
-    if (!seen.have || seen.queue.size() < 6)
-        throw std::runtime_error("neural opponent requires a TBP2 board, hold and six visible pieces");
-    static const Model model(NANA_NEURAL_MODEL_DIR);
-    const auto started = std::chrono::steady_clock::now();
-    std::array<float, CELLS> board{};
-    std::array<float, CONTEXT_SIZE> context{};
-    for (int y = 0; y < 20; ++y) for (int x = 0; x < 10; ++x) board[y*10+x] = seen.board.get(x, y);
-    context[0] = std::log1p(std::max(0, seen.combo));
-    context[1] = std::log1p(std::max(0, seen.b2b));
-    context[2] = std::log1p(std::max(0, seen.meter));
-    // Same I,O,T,L,J,S,Z one-hot order as opponent_data.context().
-    constexpr std::array<PieceType, 7> order{PieceType::I, PieceType::O, PieceType::T, PieceType::L,
-                                           PieceType::J, PieceType::S, PieceType::Z};
-    for (int token = 0; token < 7; ++token) {
-        const PieceType piece = token == 0 ? seen.hold : seen.queue[token-1];
-        for (int j = 0; j < 7; ++j) context[3+token*7+j] = piece == order[j] ? 1.0f : 0.0f;
-    }
-    const auto candidates = trajectories(model, board.data(), context.data());
-    auto& forecast = neural_opponent::forecast;
-    float total = 0;
-    for (int k = 0; k < 3; ++k) {
-        std::copy(candidates[k].sequence.begin(), candidates[k].sequence.end(), forecast.sequences[k].begin());
-        total += std::exp(candidates[k].logp);
-        forecast.cdf[k] = total;
-    }
-    forecast.retained_mass = total;
-    for (float& p : forecast.cdf) p /= total;
-    forecast.cdf.back() = 1;
-    forecast.active = true;
-    static unsigned count = 0;
-    static double total_ms = 0;
-    total_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-started).count();
-    if (++count == 1 || count % 1000 == 0)
-        std::cerr << "neural forecasts=" << count << " mean_ms=" << total_ms/count
-                  << " top3_mass=" << total << std::endl;
-}
-#endif
-
-static RootOpponent rootOpponent(const OpponentFilter& filter, const SeenOpponent& seen, OpponentFilter& search) {
-    std::array<float, markov::STATES> state;
-    std::array<float, markov::SINCE> since;
+static opponent::Root rootOpponent(const opponent::Belief& filter, const SeenOpponent& seen, opponent::Belief& search) {
+    std::array<float, opponent::STATES> state;
+    std::array<float, opponent::SINCE> since;
     search = filter;
     if (!seen.have) {
         return filter.root();
@@ -255,13 +230,13 @@ static RootOpponent rootOpponent(const OpponentFilter& filter, const SeenOpponen
         empty = empty && column == 0;
     }
     if (!filter.started()) {
-        RootOpponent out;
-        out.fresh = empty || !markov::encodeOpponent(seen.board, seen.combo, seen.b2b, out.state, out.since);
-        search = OpponentFilter::fromRoot(out);
+        opponent::Root out;
+        out.fresh = empty || !opponent::encode_board(seen.board, seen.combo, seen.b2b, out.state, out.since);
+        search = opponent::Belief::from_root(out);
         return out;
     }
-    if (markov::opponentEvidence(seen.board, seen.combo, seen.b2b, state, since)) {
-        search.applyEvidence(&state, &since);
+    if (opponent::board_evidence(seen.board, seen.combo, seen.b2b, state, since)) {
+        search.apply_evidence(&state, &since);
         return filter.root(&state, &since);
     }
     return filter.root();
@@ -333,10 +308,9 @@ int main() {
     try {
         loadTbpConfig();
         int core_count = config().threads;
-#ifdef NANA_NEURAL_MODEL_DIR
-        std::cerr << "neural opponent " << (config().opponent ? "enabled" : "disabled")
-                  << " config=" << config().source << std::endl;
-#endif
+        if (config().opponent == "neural") {
+            std::cerr << "neural opponent " << config().neural_model << " config=" << config().source << std::endl;
+        }
 
         // send info state to the client
         std::vector<PieceType> queue;
@@ -347,25 +321,28 @@ int main() {
 
         EmulationGame game;
 
-        OpponentFilter opponent_filter;
+        opponent::Belief opponent_belief;
         SeenOpponent seen_opponent;
-        RootOpponent root_opponent;
-        OpponentFilter search_filter;
+        opponent::Root root_opponent;
+        opponent::Belief search_belief;
         auto refreshRoot = [&] {
-#ifdef NANA_NEURAL_MODEL_DIR
-            if (Search::searching) Search::endSearch();
-            predictOpponent(seen_opponent);
-#endif
-            root_opponent = rootOpponent(opponent_filter, seen_opponent, search_filter);
-            Search::root_opponent = &root_opponent;
-            Search::root_filter = &search_filter;
-#ifdef NANA_NEURAL_MODEL_DIR
-            if (neural_opponent::forecast.active) {
-                root_opponent.fresh = true;
+            if (config().opponent == "neural") {
+                // the workers read the forecast until their search ends
+                if (Search::searching) Search::endSearch();
+                if (!seen_opponent.have) {
+                    throw std::runtime_error("the neural opponent needs the opponent's TBP2 board");
+                }
+                opponent::Neural::encode(seen_opponent.board, seen_opponent.combo, seen_opponent.b2b,
+                                         seen_opponent.meter, seen_opponent.hold, seen_opponent.queue);
+                root_opponent = opponent::Root{};
                 root_opponent.meter = (float)seen_opponent.meter;
-                Search::root_filter = nullptr;
+                Search::root_belief = nullptr;
             }
-#endif
+            else {
+                root_opponent = rootOpponent(opponent_belief, seen_opponent, search_belief);
+                Search::root_belief = &search_belief;
+            }
+            Search::root_opponent = &root_opponent;
         };
         bool have_suggestion = false;
         Move last_suggestion;
@@ -478,14 +455,14 @@ int main() {
                     const int landed = garbageRows(expected.game.board, board);
                     if (landed >= 0) {
                         const bool cleared = expected.lines > lines_before && landed == 0;
-                        opponent_filter.turn(expected.attack - attack_before, cleared, landed);
+                        opponent_belief.update(expected.attack - attack_before, cleared, landed);
                     }
                     else {
-                        opponent_filter.reset();
+                        opponent_belief.reset();
                     }
                 }
                 else {
-                    opponent_filter.reset();
+                    opponent_belief.reset();
                 }
                 have_suggestion = false;
 
@@ -635,7 +612,7 @@ int main() {
                 const int lines_before = game.lines;
                 game.play_moves();
 
-                opponent_filter.turn(game.attack - attack_before, game.lines > lines_before, 0);
+                opponent_belief.update(game.attack - attack_before, game.lines > lines_before, 0);
                 have_suggestion = false;
 
                 refreshRoot();
