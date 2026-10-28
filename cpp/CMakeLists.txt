@@ -34,6 +34,16 @@ set(TETRIS_SOURCES
 )
 set(NANA_ICON "icon.rc")
 
+# Optional experimental checkpoint; generated dimensions and weights stay outside source control.
+set(NANA_NEURAL_MODEL_DIR "" CACHE PATH "Exported neural opponent checkpoint directory")
+if(NANA_NEURAL_MODEL_DIR)
+    if(NOT EXISTS "${NANA_NEURAL_MODEL_DIR}/generated.hpp")
+        message(FATAL_ERROR "NANA_NEURAL_MODEL_DIR must contain generated.hpp")
+    endif()
+    include_directories("${NANA_NEURAL_MODEL_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/opponent_inference")
+    add_compile_definitions(NANA_NEURAL_MODEL_DIR="${NANA_NEURAL_MODEL_DIR}")
+endif()
+
 
 option(NANA_MIMALLOC "Use mimalloc for C++ allocations" ON)
 
@@ -109,35 +119,14 @@ nana_add_executable(nana_emulate nana_core "emulate.cpp")
 nana_add_executable(nana_emulate_tbp nana_core "emulate_tbp.cpp")
 nana_add_executable(nana_eval_dump nana_core "eval_dump.cpp")
 nana_add_executable(nana_policy_fit nana_core "policy_fit.cpp")
+if(NANA_NEURAL_MODEL_DIR)
+    nana_add_executable(nana_neuralcheck nana_core "tests/neuralcheck.cpp")
+endif()
 
 option(NANA_EVALCHECK "Build evaluator regression checks" OFF)
 if(NANA_EVALCHECK)
     nana_add_executable(nana_evalcheck nana_core "tests/evalcheck.cpp")
     nana_add_executable(nana_policycheck nana_core "tests/policycheck.cpp")
-endif()
-
-option(NANA_STATCHECK "Build exact-reference sampling and backup diagnostics" OFF)
-if(NANA_STATCHECK)
-    nana_add_executable(nana_statcheck nana_core "tests/statcheck.cpp")
-endif()
-
-option(NANA_SEARCHCHECK "Build full scheduler exact-value integration tests" OFF)
-if(NANA_SEARCHCHECK)
-    nana_add_core(nana_core_searchcheck ${NANA_MARCH})
-    target_compile_definitions(nana_core_searchcheck PUBLIC NANA_SEARCH_FIXTURE=1)
-    target_sources(nana_core_searchcheck PRIVATE "tests/SearchFixture.cpp")
-    nana_add_executable(nana_searchcheck nana_core_searchcheck "tests/searchcheck.cpp")
-endif()
-
-# nana_cctree: the experimental CC search with the unified nana evaluator.
-# NANA_CCTREE_LOAD_FACTOR 1 runs one simulation at a time.
-option(NANA_CCTREE "Build nana_cctree, CC-search tree dumps using the unified evaluator" OFF)
-set(NANA_CCTREE_LOAD_FACTOR 1 CACHE STRING "jobs in flight in nana_cctree's search")
-if(NANA_CCTREE)
-    nana_add_core(nana_core_cctree ${NANA_MARCH})
-    target_compile_definitions(nana_core_cctree PUBLIC NANA_CC_SEARCH=1 NANA_CC_LOCKSTEP=1
-        NANA_LOAD_FACTOR=${NANA_CCTREE_LOAD_FACTOR})
-    nana_add_executable(nana_cctree nana_core_cctree "cctree.cpp")
 endif()
 
 if(NANA_VARIANTS)

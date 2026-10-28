@@ -8,9 +8,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#ifdef NANA_SEARCH_FIXTURE
-#include "tests/SearchFixture.hpp"
-#endif
 
 const char* EmulationGame::rules() {
     return config().rules.c_str();
@@ -61,18 +58,12 @@ void EmulationGame::set_move(Move move) {
 };
 
 Move EmulationGame::specific_move(Move move) {
-#ifdef NANA_SEARCH_FIXTURE
-    if (fixture_active) return move;
-#endif
     move.piece.position.y += game.board.get_garbage_height();
     return move;
 };
 
 template <class Opp>
 void EmulationGame::chance_move() {
-#ifdef NANA_SEARCH_FIXTURE
-    if (fixture_active) { search_fixture::advance(*this); return; }
-#endif
     for (auto& piece : game.queue) {
         if (piece == PieceType::Empty) {
             piece = rng.getPiece();
@@ -144,13 +135,6 @@ template void EmulationGame::chance_move<NoOpponent>();
 
 template <class Opp>
 void EmulationGame::play_moves(){
-#ifdef NANA_SEARCH_FIXTURE
-    if (fixture_active) {
-        fixture_action = move.piece.position.x;
-        ++pieces;
-        return;
-    }
-#endif
     last_sent = 0;
 
     if (game_over) {
@@ -415,9 +399,6 @@ std::vector<Move> EmulationGame::legal_moves() {
 #endif
 
 uint32_t EmulationGame::hash() const {
-#ifdef NANA_SEARCH_FIXTURE
-    if (fixture_active) return search_fixture::hash_base + fixture_node;
-#endif
     Board board = game.board;
     int gheight = board.get_garbage_height();
     for (auto& row : board.board) {

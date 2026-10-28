@@ -1,5 +1,4 @@
 #include "UCT.hpp"
-#include "CCTrace.hpp"
 #include "Config.hpp"
 #include "Util/MPSC.hpp"
 #include "Util/Distribution.hpp"
@@ -12,9 +11,6 @@
 #include <cstring>
 #include <cmath>
 #include <iostream>
-#ifdef NANA_SEARCH_FIXTURE
-#include "tests/SearchFixture.hpp"
-#endif
 
 using namespace Distribution;
 
@@ -153,9 +149,6 @@ static bool counts(const ChildTable& t) {
 
 Reward UCTNode::report(size_t i, uint32_t child, Reward V, float k, bool fresh) {
 	ChildTable& t = cold[i].children;
-#ifdef NANA_SEARCH_FIXTURE
-    if (search_fixture::inject_weights && child == search_fixture::hash_base+2) k *= 4;
-#endif
 	t.put(child, V, k);
 	t.completed = fresh ? t.completed * (float)decay() + k : t.completed + k;
 	Reward arm;
@@ -232,9 +225,6 @@ Move PackedMove::unpack() const {
 
 UCTNode::UCTNode(const EmulationGame &state) {
     if (UCT::retain_for_dump) dump_state = std::make_unique<EmulationGame>(state);
-#ifdef NANA_SEARCH_FIXTURE
-    if (state.fixture_active) { search_fixture::initialize(*this, state); return; }
-#endif
 	std::vector<Piece> raw_actions = state.placements();
 	std::erase_if(raw_actions, [&](const Piece& piece) {
 		return Shaktris::Utility::collides(state.game.board, piece);
@@ -564,11 +554,6 @@ size_t UCTNode::select_CC(RNG& rng, int exclude, float* p_chosen) const {
 	if (p_chosen) {
 		*p_chosen = 1.0f;
 	}
-#if NANA_CC_LOCKSTEP
-	if (cc_trace::select_hook) {
-		return cc_trace::select_hook(*this);
-	}
-#endif
 	static thread_local std::vector<std::pair<float, uint32_t>> ranked;
 	static thread_local std::vector<double> weights;
 	ranked.clear();
@@ -608,11 +593,7 @@ size_t UCTNode::select_CC(RNG& rng, int exclude, float* p_chosen) const {
 			skip = ranked.size();
 		}
 	}
-#if NANA_CC_LOCKSTEP
-	const double u = cc_trace::uniform();
-#else
 	const double u = ccUniform(rng);
-#endif
 	double target = u * drawable;
 	size_t pick = ranked.size() - 1;
 	if (pick == skip && pick > 0) {
@@ -631,13 +612,6 @@ size_t UCTNode::select_CC(RNG& rng, int exclude, float* p_chosen) const {
 	if (p_chosen && total > 0) {
 		*p_chosen = (float)(weights[pick] / total);
 	}
-#if NANA_CC_LOCKSTEP
-	cc_trace::Step step{ id, {}, u, (uint32_t)pick };
-	for (size_t rank = 0; rank < ranked.size(); rank++) {
-		step.ranked.push_back({ ranked[rank].second, ranked[rank].first, weights[rank] });
-	}
-	cc_trace::steps.push_back(std::move(step));
-#endif
 	return ranked[pick].second;
 }
 

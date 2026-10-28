@@ -8,6 +8,10 @@
 #include "OpponentEncoder.hpp"
 #include "OpponentFilter.hpp"
 #include "Util/json.hpp"
+#ifdef NANA_NEURAL_MODEL_DIR
+#include "inference.hpp"
+#include <chrono>
+#endif
 
 auto type_to_json(PieceType type) -> nlohmann::json {
     switch (type) {
@@ -163,6 +167,11 @@ struct SeenOpponent {
     Board board{};
     int combo = 0;
     int b2b = 0;
+#ifdef NANA_NEURAL_MODEL_DIR
+    std::vector<PieceType> queue;
+    PieceType hold = PieceType::Empty;
+    int meter = 0;
+#endif
 };
 
 static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
@@ -177,6 +186,11 @@ static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
             const auto& v = player["back_to_back"];
             out.b2b = v.is_boolean() ? (v.get<bool>() ? 1 : 0) : (v.is_number() ? v.get<int>() : 0);
         }
+#ifdef NANA_NEURAL_MODEL_DIR
+        out.queue = player.contains("queue") ? json_to_queue(player["queue"]) : std::vector<PieceType>{};
+        out.hold = player.contains("hold") ? json_to_type(player["hold"]) : PieceType::Empty;
+        out.meter = player.value("meter", 0);
+#endif
         out.have = true;
         return true;
     }
@@ -184,6 +198,50 @@ static bool readOpponent(const nlohmann::json& player, SeenOpponent& out) {
         return false;
     }
 }
+
+#ifdef NANA_NEURAL_MODEL_DIR
+static void predictOpponent(const SeenOpponent& seen) {
+    using namespace opponent_inference;
+    static_assert(CONTEXT_SIZE == 52 && HORIZON == 8);
+    neural_opponent::forecast.active = false;
+    if (!config().opponent) return;
+    if (!seen.have || seen.queue.size() < 6)
+        throw std::runtime_error("neural opponent requires a TBP2 board, hold and six visible pieces");
+    static const Model model(NANA_NEURAL_MODEL_DIR);
+    const auto started = std::chrono::steady_clock::now();
+    std::array<float, CELLS> board{};
+    std::array<float, CONTEXT_SIZE> context{};
+    for (int y = 0; y < 20; ++y) for (int x = 0; x < 10; ++x) board[y*10+x] = seen.board.get(x, y);
+    context[0] = std::log1p(std::max(0, seen.combo));
+    context[1] = std::log1p(std::max(0, seen.b2b));
+    context[2] = std::log1p(std::max(0, seen.meter));
+    // Same I,O,T,L,J,S,Z one-hot order as opponent_data.context().
+    constexpr std::array<PieceType, 7> order{PieceType::I, PieceType::O, PieceType::T, PieceType::L,
+                                           PieceType::J, PieceType::S, PieceType::Z};
+    for (int token = 0; token < 7; ++token) {
+        const PieceType piece = token == 0 ? seen.hold : seen.queue[token-1];
+        for (int j = 0; j < 7; ++j) context[3+token*7+j] = piece == order[j] ? 1.0f : 0.0f;
+    }
+    const auto candidates = trajectories(model, board.data(), context.data());
+    auto& forecast = neural_opponent::forecast;
+    float total = 0;
+    for (int k = 0; k < 3; ++k) {
+        std::copy(candidates[k].sequence.begin(), candidates[k].sequence.end(), forecast.sequences[k].begin());
+        total += std::exp(candidates[k].logp);
+        forecast.cdf[k] = total;
+    }
+    forecast.retained_mass = total;
+    for (float& p : forecast.cdf) p /= total;
+    forecast.cdf.back() = 1;
+    forecast.active = true;
+    static unsigned count = 0;
+    static double total_ms = 0;
+    total_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-started).count();
+    if (++count == 1 || count % 1000 == 0)
+        std::cerr << "neural forecasts=" << count << " mean_ms=" << total_ms/count
+                  << " top3_mass=" << total << std::endl;
+}
+#endif
 
 static RootOpponent rootOpponent(const OpponentFilter& filter, const SeenOpponent& seen, OpponentFilter& search) {
     std::array<float, markov::STATES> state;
@@ -275,6 +333,10 @@ int main() {
     try {
         loadTbpConfig();
         int core_count = config().threads;
+#ifdef NANA_NEURAL_MODEL_DIR
+        std::cerr << "neural opponent " << (config().opponent ? "enabled" : "disabled")
+                  << " config=" << config().source << std::endl;
+#endif
 
         // send info state to the client
         std::vector<PieceType> queue;
@@ -290,9 +352,20 @@ int main() {
         RootOpponent root_opponent;
         OpponentFilter search_filter;
         auto refreshRoot = [&] {
+#ifdef NANA_NEURAL_MODEL_DIR
+            if (Search::searching) Search::endSearch();
+            predictOpponent(seen_opponent);
+#endif
             root_opponent = rootOpponent(opponent_filter, seen_opponent, search_filter);
             Search::root_opponent = &root_opponent;
             Search::root_filter = &search_filter;
+#ifdef NANA_NEURAL_MODEL_DIR
+            if (neural_opponent::forecast.active) {
+                root_opponent.fresh = true;
+                root_opponent.meter = (float)seen_opponent.meter;
+                Search::root_filter = nullptr;
+            }
+#endif
         };
         bool have_suggestion = false;
         Move last_suggestion;

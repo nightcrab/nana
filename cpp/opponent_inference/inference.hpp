@@ -184,4 +184,55 @@ struct Model {
         for (int j = 0; j < BINS; ++j) logits[j] = output.row(hidden, j);
     }
 };
+
+struct BeamTrajectory {
+    std::array<uint8_t, HORIZON> sequence{};
+    std::array<float, HIDDEN> hidden{};
+    float logp = 0;
+};
+
+inline std::vector<BeamTrajectory> trajectories(const Model& model, const float* board, const float* context,
+                                                int beam = 128, int topk = 3) {
+    if (topk < 1 || beam < topk) throw std::runtime_error("invalid beam size");
+    Scratch scratch;
+    std::vector<float> features(HEADS*CELLS+CONTEXT_SIZE), conditioning(FUSION), gates(3*HIDDEN);
+    for (int h = 0; h < HEADS; ++h) model.encode_head(h, board, features.data()+h*CELLS, scratch);
+    std::copy_n(context, CONTEXT_SIZE, features.data()+HEADS*CELLS);
+    for (int j = 0; j < FUSION; ++j) conditioning[j] = std::max(0.0f, model.fusion.row(features.data(), j));
+    std::vector<BeamTrajectory> current(1);
+    for (int j = 0; j < 4*HIDDEN; ++j)
+        model.prepare_row(j, conditioning.data(), gates.data(), current[0].hidden.data());
+    std::array<float, 3*HIDDEN> recurrent;
+    std::array<float, BINS> logits;
+    for (int step = 0; step < HORIZON; ++step) {
+        std::vector<BeamTrajectory> next;
+        next.reserve(current.size()*BINS);
+        for (auto candidate : current) {
+            const int previous = step ? candidate.sequence[step-1] : START;
+            if (previous == BINS-1) {
+                candidate.sequence[step] = BINS-1;
+                next.push_back(candidate);
+                continue;
+            }
+            model.step(previous, gates.data(), candidate.hidden.data(), logits.data(), recurrent.data());
+            const float largest = *std::max_element(logits.begin(), logits.end());
+            float sum = 0;
+            for (float v : logits) sum += std::exp(v-largest);
+            const float normalizer = largest+std::log(sum);
+            for (int token = 0; token < BINS; ++token) {
+                auto child = candidate;
+                child.sequence[step] = (uint8_t)token;
+                child.logp += logits[token]-normalizer;
+                next.push_back(child);
+            }
+        }
+        const int keep = std::min<int>(beam, next.size());
+        std::partial_sort(next.begin(), next.begin()+keep, next.end(),
+                          [](const auto& a, const auto& b) { return a.logp > b.logp; });
+        next.resize(keep);
+        current = std::move(next);
+    }
+    current.resize(std::min<int>(topk, current.size()));
+    return current;
+}
 }

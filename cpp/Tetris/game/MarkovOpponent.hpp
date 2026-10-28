@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#ifdef NANA_NEURAL_MODEL_DIR
+#include "NeuralForecast.hpp"
+#endif
 
 namespace markov {
 constexpr int STATES = 8;
@@ -71,6 +74,10 @@ public:
     double play() {
         const markov::Params& p = markov::params();
 
+#ifdef NANA_NEURAL_MODEL_DIR
+        if (neural_terminal) return 0;
+#endif
+
         if (dead) {
             dead = false;
             fresh = true;
@@ -79,13 +86,28 @@ public:
         const int action = std::min<int>((int)received, markov::ACTIONS - 1);
         received = 0;
 
-        const auto& row = fresh ? p.initial : p.transition[action][jeopardy_bucket()][since][state];
-        fresh = false;
-        state = sample(row);
-        const int emission = sample(p.emission[state]);
+        int emission;
+        bool neural_emission = false;
+#ifdef NANA_NEURAL_MODEL_DIR
+        if (neural_opponent::forecast.active && neural_offset < 8) {
+            emission = neural_opponent::forecast.sequences[neural_slot][neural_offset++];
+            neural_emission = true;
+            // Beyond eight pieces resume the existing HMM from its prior.
+            fresh = true;
+        } else
+#endif
+        {
+            const auto& row = fresh ? p.initial : p.transition[action][jeopardy_bucket()][since][state];
+            fresh = false;
+            state = sample(row);
+            emission = sample(p.emission[state]);
+        }
         since = emission == 0 ? (uint8_t)std::min(since + 1, markov::SINCE - 1) : 0;
         if (emission == markov::DEATH) {
             dead = true;
+#ifdef NANA_NEURAL_MODEL_DIR
+            neural_terminal = neural_emission;
+#endif
             deaths++;
             last_attack = 0;
             return 0;
@@ -93,7 +115,7 @@ public:
 
         pieces++;
 
-        double attack = p.attack_value[emission];
+        double attack = neural_emission ? emission : p.attack_value[emission];
         last_attack = attack;
 
         if (attack > 0) {
@@ -130,6 +152,14 @@ public:
     inline void adopt(const RootOpponent& root);
 
     void resample_from_root() {
+#ifdef NANA_NEURAL_MODEL_DIR
+        neural_offset = 0;
+        neural_terminal = false;
+        if (neural_opponent::forecast.active) {
+            neural_slot = (uint8_t)sample(neural_opponent::forecast.cdf);
+            return;
+        }
+#endif
         if (markov::root_belief.active && !fresh) {
             state = (uint8_t)sample(markov::root_belief.cdf);
             since = (uint8_t)sample(markov::root_belief.since_cdf);
@@ -137,6 +167,11 @@ public:
     }
 
 private:
+#ifdef NANA_NEURAL_MODEL_DIR
+    uint8_t neural_slot = 0;
+    uint8_t neural_offset = 0;
+    bool neural_terminal = false;
+#endif
     uint8_t state = 0;
     uint8_t since = 0;
     bool fresh = true;

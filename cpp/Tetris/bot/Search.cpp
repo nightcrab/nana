@@ -1,7 +1,4 @@
 #include "Search.hpp"
-#ifdef NANA_SEARCH_FIXTURE
-#include "tests/SearchFixture.hpp"
-#endif
 #include "Config.hpp"
 #include <algorithm>
 #include <array>
@@ -1515,14 +1512,6 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
     uct.stats[threadIdx].nodes++;
     uct.stats[threadIdx].rollouts++;
 
-#ifdef NANA_SEARCH_FIXTURE
-    if (state.fixture_active) {
-        const auto& fixture = search_fixture::model->nodes.at(state.fixture_node);
-        const double v = state.game_over ? fixture.payoff : fixture.heuristic;
-        if (!state.game_over) maybeInsertNode(UCTNode(state), threadIdx);
-        return Return{0,0,float(v/config().eval_weight),1,0};
-    }
-#endif
 
     [[maybe_unused]] const Return dead{ 0, 0, 0, 1, 1 };
 

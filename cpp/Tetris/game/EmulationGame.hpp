@@ -28,11 +28,6 @@ class EmulationGame {
     static void set_garbage_delay(int delay);
 
     Game game;
-#ifdef NANA_SEARCH_FIXTURE
-    bool fixture_active = false;
-    int fixture_node = 0;
-    int fixture_action = 0;
-#endif
 
     int garbage_delay = 0;
     std::vector<int> buffered_garbage;

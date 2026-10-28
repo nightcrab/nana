@@ -5,7 +5,7 @@ Python helpers and their tests stay together so direct script imports work.
 
 | Directory | Tools |
 | --- | --- |
-| [benchmarks/](benchmarks/) | Speed and strength sweeps, reports, plots, statistical checks, inference benchmarks, and flamegraphs. |
+| [benchmarks/](benchmarks/) | Speed and strength sweeps, reports, plots, inference benchmarks, and flamegraphs. |
 | [policy/](policy/) | Policy iteration, paired A/B evaluation, and policy/tree-dump checks. |
 | [opponent/](opponent/) | Stadium collection, Cold Clear analysis, opponent training and export, and the Rust replay helper. |
 | [cloud/](cloud/) | EC2 instance control and remote benchmark execution. |

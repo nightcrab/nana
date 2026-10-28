@@ -37,12 +37,8 @@ constexpr float CC_DEAD = -1e9f;
 
 // The CC search's version of the MP-MCTS restart: a backup that settles below the root restarts through
 // a replay that redraws chance and each sampled action, instead of selecting again at the root's owner.
-// Off under lockstep, whose selections must follow Cold Clear's stream of root restarts.
-#ifndef NANA_CC_LOCKSTEP
-#define NANA_CC_LOCKSTEP 0
-#endif
 #ifndef NANA_CC_RESTART
-#define NANA_CC_RESTART (NANA_CC_SEARCH && !NANA_CC_LOCKSTEP)
+#define NANA_CC_RESTART NANA_CC_SEARCH
 #endif
 constexpr bool cc_restart = NANA_CC_RESTART;
 
