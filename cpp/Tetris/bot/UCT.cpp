@@ -4,6 +4,7 @@
 #include "Util/MPSC.hpp"
 #include "Util/Distribution.hpp"
 #include "Eval.hpp"
+#include "PolicyFeatures.hpp"
 #include "engine/Utility.hpp"
 #include <algorithm>
 #include <cassert>
@@ -250,6 +251,11 @@ UCTNode::UCTNode(const EmulationGame &state) {
 	prior.reserve(raw_actions.size());
 	convex_action.clear();
 	bool any_convex = false;
+	static const NanaConfig& c = config();
+	const bool softmax = c.policy == "softmax";
+	thread_local std::vector<double> logits;
+	logits.clear();
+	if (softmax) logits.reserve(raw_actions.size());
 
 	int idx = 0;
 
@@ -283,6 +289,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		double move_reward = 0;
 		bool is_convex = true;
 		float eval = Eval::evaluate(context, raw_action, &move_reward, &is_convex);
+		if (softmax) logits.push_back(PolicyFeatures::logit(state.game, raw_action, c.policy_weights, c.policy_max_well_depth));
 		if constexpr (cc_search) {
 			edge_stats[idx].R = eval;
 		}
@@ -305,27 +312,33 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		idx++;
 	}
 
-	sort_des(prior);
-
-	static const NanaConfig& c = config();
-	// convex actions take the top ranks, and the rest are weighted down unless the node has no convex action
-	const bool split = use_convex_eval && any_convex;
-	if (split) {
-		std::stable_partition(prior.begin(), prior.end(), [&](const Stochastic<int>& p) { return convex_action[p.value] != 0; });
+	if (softmax && !logits.empty()) {
+		const double max_logit = *std::max_element(logits.begin(), logits.end());
+		double sum = 0;
+		for (double& logit : logits) { logit = std::exp(logit - max_logit); sum += logit; }
+		for (size_t i = 0; i < logits.size(); ++i) edge_stats[i].prior = float(logits[i] / sum);
 	}
-	for (int rank = 1; rank <= prior.size(); rank++) {
-		prior[rank - 1].probability = c.priorWeight(rank);
-		if (split && !convex_action[prior[rank - 1].value]) {
-			prior[rank - 1].probability *= (float)c.nonconvex_prior;
+	else {
+		sort_des(prior);
+		// convex actions take the top ranks, and the rest are weighted down unless the node has no convex action
+		const bool split = use_convex_eval && any_convex;
+		if (split) {
+			std::stable_partition(prior.begin(), prior.end(), [&](const Stochastic<int>& p) { return convex_action[p.value] != 0; });
 		}
-	}
+		for (int rank = 1; rank <= prior.size(); rank++) {
+			prior[rank - 1].probability = c.priorWeight(rank);
+			if (split && !convex_action[prior[rank - 1].value]) {
+				prior[rank - 1].probability *= (float)c.nonconvex_prior;
+			}
+		}
 
-	float prior_sum = 0;
-	for (const Stochastic<int>& P : prior) {
-		prior_sum += P.probability;
-	}
-	for (const Stochastic<int>& P : prior) {
-		edge_stats[P.value].prior = P.probability / prior_sum;
+		float prior_sum = 0;
+		for (const Stochastic<int>& P : prior) {
+			prior_sum += P.probability;
+		}
+		for (const Stochastic<int>& P : prior) {
+			edge_stats[P.value].prior = P.probability / prior_sum;
+		}
 	}
 
 	this->edge_stats = std::move(edge_stats);

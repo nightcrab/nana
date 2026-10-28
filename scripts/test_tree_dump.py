@@ -59,6 +59,12 @@ def main():
         run("--games", 1, "--seed", 102, "--threads", 2,
             "--tree-dump-dir", root / "parallel")
         read(root / "parallel", 102)
+        limited = run("--games", 1, "--seed", 103, "--tree-dump-dir", root / "limited",
+                      "--tree-dump-max-bytes", 4096)
+        assert limited[0]["tree_dump_capped"]
+        dump = root / "limited" / "tree-103.jsonl"
+        assert dump.stat().st_size <= 4096
+        assert all(json.loads(line) for line in dump.read_text().splitlines())
     print("tree dump checks passed: schema, gameplay, reset, write failures, two threads")
 
 

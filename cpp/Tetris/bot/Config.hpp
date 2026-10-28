@@ -73,6 +73,11 @@ struct NanaConfig {
     double c_base = 7490.956117941063;
     int depth_step = 3;
     double prior_exponent = 0.5152502993309611;
+    std::string policy = "rank";
+    std::string policy_model;
+    // Loaded from policy_model, separately from value/reward evaluation weights.
+    std::array<double, 43> policy_weights{};
+    int policy_max_well_depth = 17;
     double n_cap = 2600.4416414699426;
     int depth_cap = 0;
     std::string eval = "nana";

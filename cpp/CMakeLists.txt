@@ -113,6 +113,7 @@ nana_add_executable(nana_policy_fit nana_core "policy_fit.cpp")
 option(NANA_EVALCHECK "Build evaluator regression checks" OFF)
 if(NANA_EVALCHECK)
     nana_add_executable(nana_evalcheck nana_core "tests/evalcheck.cpp")
+    nana_add_executable(nana_policycheck nana_core "tests/policycheck.cpp")
 endif()
 
 option(NANA_STATCHECK "Build exact-reference sampling and backup diagnostics" OFF)

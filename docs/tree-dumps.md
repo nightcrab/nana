@@ -5,6 +5,8 @@ disables between-move tree collection, and streams `DIR/tree-SEED.jsonl` after
 the last search stops. It then frees the tree before starting the next game.
 Existing dump files are never overwritten; directory and write failures exit
 with a nonzero status. Use separate seed ranges for independent workers.
+`--tree-dump-max-bytes N` limits each file while preserving whole JSON records;
+the game result reports `tree_dump_capped`. Zero (the default) is unlimited.
 
 For example, run eight processes with `--threads 1` and distinct `--seed` ranges:
 
@@ -58,13 +60,16 @@ Build `nana_policy_fit`, then run:
 nana_policy_fit data fitted-policy 3
 ```
 
-The optional last argument is the epoch count (default 3). The trainer streams
+The optional third argument is the epoch count (default 3). A fourth argument
+may specify an initial policy artifact to warm-start its scaled coefficients.
+The trainer streams
 JSONL, reconstructs every placement with the engine, and checks that its feature
 dot product reproduces the saved static evaluation within 0.00002. It fits 43
 existing board and move features to normalized edge visits using softmax cross
-entropy, weighted by node N. Jeopardy, T-slot and belief coefficients must be
-zero in the input; they are excluded from this first fit. In particular, the
-truncated jeopardy term is not linear in its coefficient.
+entropy, weighted by node N. These policy features exclude jeopardy, T-slot and
+belief terms. Value evaluations may include jeopardy and T-slot terms if
+`NANA_CONFIG` points to the exact datagen config for reconstruction checks.
+Belief weights must be zero because full joint beliefs were not saved.
 
 Games with seed modulo 10 equal to zero form the validation set. Training files
 are shuffled each epoch, with another shuffle over buffers of 2,048 nodes. Adam

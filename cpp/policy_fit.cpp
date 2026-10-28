@@ -1,5 +1,5 @@
 // Stream tree dumps, reconstruct placements, and fit a linear policy evaluator.
-#include "Eval.hpp"
+#include "PolicyFeatures.hpp"
 #include "Util/json.hpp"
 #include "engine/Utility.hpp"
 
@@ -20,24 +20,11 @@
 
 using Json = nlohmann::json;
 namespace fs = std::filesystem;
-constexpr size_t FEATURES = 43;
-using Features = std::array<double, FEATURES>;
-static const std::array<std::string, FEATURES> names = {
-    "top_half", "top_quarter", "low", "cavity_cells", "cavity_cells_sq",
-    "overhangs", "overhangs_sq", "covered_cells", "covered_cells_sq",
-    "bumpiness", "bumpiness_sq", "height", "row_transitions", "counting",
-    "perfect_clear", "wasted_t",
-    "well_columns.0", "well_columns.1", "well_columns.2", "well_columns.3", "well_columns.4",
-    "well_columns.5", "well_columns.6", "well_columns.7", "well_columns.8", "well_columns.9",
-    "clears.0", "clears.1", "clears.2", "clears.3", "clears.4",
-    "tspins.0", "tspins.1", "tspins.2", "tspins.3",
-    "back_to_back", "b2b_clear", "combo_garbage", "move_time", "well_depth",
-    "mini_tspins.0", "mini_tspins.1", "mini_tspins.2"
-};
-static constexpr Features scales = {
-    1,1,1,8,64,8,64,32,256,16,128,20,64,1,1,1,
-    1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1, 1,1,1,1, 1,1,8,40,8,1,1,1
-};
+using PolicyFeatures::FEATURES;
+using PolicyFeatures::Features;
+using PolicyFeatures::names;
+using PolicyFeatures::scales;
+using PolicyFeatures::features;
 
 struct Action {
     std::array<float, FEATURES> x{};
@@ -59,46 +46,6 @@ static void setCoefficient(Json& config, const std::string& name, double value) 
     else config[name.substr(0, dot)][std::stoi(name.substr(dot + 1))] = value;
 }
 
-static Features features(const Game& parent, const Piece& piece, int well_cap) {
-    Game after = parent;
-    const bool held = piece.type != parent.current_piece.type;
-    after.place_piece(piece);
-    const int lines = after.board.clearLines();
-    if (lines > 4) throw std::runtime_error("placement clears more than four lines");
-    const auto spin = std::holds_alternative<TetrioS1>(after.mode) && piece.type != PieceType::T
-        ? spinType::null : piece.spin;
-    const bool full = spin == spinType::normal;
-    const bool pc = after.board.is_empty();
-    const int attack = after.damage_sent(lines, spin, pc);
-    const auto& board = after.board;
-    const int height = Eval::height_features(board).second;
-    const auto [holes, overhangs] = Eval::cavities_overhangs(board);
-    const auto [covered, covered_sq] = Eval::n_covered_cells(board);
-    int bump = 0, bump_sq = 0;
-    for (size_t x = 1; x < Board::width; ++x) {
-        const int d = std::abs(std::countl_zero(board.board[x]) - std::countl_zero(board.board[x-1]));
-        bump += d;
-        bump_sq += d*d;
-    }
-    Features f{};
-    f[0] = height > 10; f[1] = height > 15; f[2] = height <= 4;
-    f[3] = holes; f[4] = holes*holes; f[5] = overhangs; f[6] = overhangs*overhangs;
-    f[7] = covered; f[8] = covered_sq; f[9] = bump; f[10] = bump_sq;
-    f[11] = height; f[12] = Eval::get_row_transitions(board); f[13] = Eval::ct4(board);
-    f[14] = pc; f[15] = piece.type == PieceType::T && !full;
-    const int well = Eval::well_position(board);
-    f[16 + well] = 1;
-    f[26 + lines] = 1;
-    if (full && lines < 4) f[31 + lines] = 1;
-    f[35] = after.b2b > 0;
-    f[36] = lines > 0 && (lines == 4 || spin != spinType::null) && parent.b2b > 0;
-    f[37] = lines > 0 ? attack : 0;
-    static constexpr int rotations[] = {0,1,2,1};
-    f[38] = std::abs(int(piece.position.x)-4) + rotations[int(piece.rotation)] + held + (lines > 0 ? 40 : 0);
-    f[39] = Eval::well_depth(board, well, well_cap);
-    if (spin == spinType::mini && lines < 3) f[40 + lines] = 1;
-    return f;
-}
 
 struct Reader {
     uint64_t checked_actions = 0, skipped_nodes = 0;
@@ -117,11 +64,13 @@ struct Reader {
         const Json config = header.at("config");
         if (teacher.is_null()) teacher = config;
         if (config != teacher) throw std::runtime_error("mixed teacher configurations");
-        if (config.at("eval") != "nana" || config.at("jeopardy") != 0)
-            throw std::runtime_error("this fit requires nana eval with zero jeopardy");
-        for (const auto& key : {"tslot", "belief_weights"})
-            for (const auto& weight : config.at(key))
-                if (weight != 0) throw std::runtime_error("this fit requires zero slot/belief weights");
+        if (config.at("eval") != "nana") throw std::runtime_error("this fit requires nana eval");
+        for (const auto& weight : config.at("belief_weights"))
+            if (weight != 0) throw std::runtime_error("belief reconstruction requires full joint beliefs, not dumped marginals");
+        bool runtime_check = config.at("jeopardy") != 0;
+        for (const auto& weight : config.at("tslot")) runtime_check |= weight != 0;
+        if (runtime_check && config != Json::parse(configJson(::config())))
+            throw std::runtime_error("set NANA_CONFIG to the datagen config to reconstruct nonlinear teacher evaluations");
         Features old{};
         for (size_t k = 0; k < FEATURES; ++k) old[k] = coefficient(config, names[k]);
         while (std::getline(in, line)) {
@@ -141,6 +90,8 @@ struct Reader {
             else if (header.at("rules") == "botris") parent.mode = Botris();
             else throw std::runtime_error("unknown rules");
             Example example;
+            Eval::Context context{parent, EvalMode::Nana};
+            for (const auto& p : node.at("bag_left")) context.bag_left.push_back(PieceType(p.get<int>()));
             example.weight = node.at("N").get<double>();
             example.actions.reserve(node.at("actions").size());
             for (const auto& a : node.at("actions")) {
@@ -158,6 +109,7 @@ struct Reader {
                 action.target = a.at("N").get<double>() / count;
                 action.prior = a.at("prior").get<double>();
                 action.old_eval = a.at("eval").get<double>();
+                if (runtime_check) reconstructed = Eval::evaluate(context, piece);
                 const double error = std::abs(reconstructed-action.old_eval);
                 max_reconstruction_error = std::max(max_reconstruction_error, error);
                 if (error > 2e-5) throw std::runtime_error("eval reconstruction mismatch: " + std::to_string(error));
@@ -246,8 +198,8 @@ struct Adam {
 
 int main(int argc, char** argv) {
     try {
-        if (argc < 3 || argc > 4) throw std::runtime_error("usage: nana_policy_fit DUMP_DIR OUTPUT_DIR [EPOCHS=3]");
-        const int epochs = argc == 4 ? std::stoi(argv[3]) : 3;
+        if (argc < 3 || argc > 5) throw std::runtime_error("usage: nana_policy_fit DUMP_DIR OUTPUT_DIR [EPOCHS=3] [INITIAL_MODEL]");
+        const int epochs = argc >= 4 ? std::stoi(argv[3]) : 3;
         if (epochs < 1) throw std::runtime_error("epochs must be positive");
         const fs::path output = argv[2];
         if (fs::exists(output)) throw std::runtime_error("output directory already exists");
@@ -265,11 +217,24 @@ int main(int argc, char** argv) {
         const auto start = std::chrono::steady_clock::now();
         Reader reader;
         Adam model;
+        int initial_well_cap = -1;
+        if (argc == 5) {
+            std::ifstream in(argv[4]);
+            if (!in) throw std::runtime_error("cannot open initial policy model");
+            const auto initial = Json::parse(in);
+            if (initial.at("version") != 1 || initial.at("feature_names") != Json(names) ||
+                initial.at("feature_scales") != Json(scales) || initial.at("scaled_weights").size() != FEATURES)
+                throw std::runtime_error("incompatible initial policy model");
+            model.w = initial.at("scaled_weights").get<Features>();
+            for (double w : model.w) if (!std::isfinite(w)) throw std::runtime_error("nonfinite initial weight");
+            initial_well_cap = initial.at("max_well_depth").get<int>();
+        }
         std::mt19937_64 rng(20261028);
         Json report{{"objective","node-N-weighted visit-distribution cross entropy"},
             {"train_games",train.size()},{"validation_games",validation.size()},
             {"validation_split","seed % 10 == 0"},{"feature_count",FEATURES},
             {"shuffle_buffer_nodes",2048},{"epochs",Json::array()}};
+        report["initial_model"] = argc == 5 ? Json(argv[4]) : Json(nullptr);
         Features best_weights{};
         double best_loss = std::numeric_limits<double>::infinity();
         auto save = [&](int epoch, const Metrics& metrics) {
@@ -303,7 +268,10 @@ int main(int argc, char** argv) {
             for (const auto& file : validation) reader.read(file,[&](Example ex) { metrics.add(ex,model.w); });
             return metrics;
         };
-        save(0,evaluate());
+        const auto initial_metrics = evaluate();
+        if (initial_well_cap >= 0 && initial_well_cap != reader.teacher.at("max_well_depth").get<int>())
+            throw std::runtime_error("initial policy and teacher must use the same max_well_depth");
+        save(0,initial_metrics);
         for (int epoch=1; epoch<=epochs; ++epoch) {
             std::shuffle(train.begin(),train.end(),rng);
             const double rate = .01/std::sqrt(double(epoch));

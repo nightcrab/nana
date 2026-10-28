@@ -2,6 +2,7 @@
 // usage: nana_emulate [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]
 //                  [--opponent-log FILE]
 //                  [--tree-dump-dir DIR]
+//                  [--tree-dump-max-bytes N]
 //                  [--sims N] [--search-seed 0|1] [--cpu K | --cpus K,L,...] [--print-config] [--garbage-scale X]
 
 #include "EmulateCommon.hpp"
@@ -40,6 +41,7 @@ struct Options {
     int max_pieces = 2000;
     std::string opponent_log;
     std::string tree_dump_dir;
+    uint64_t tree_dump_max_bytes = 0;
     uint64_t sims = 0;
     bool search_seed = false;
     int cpu = -1;
@@ -70,7 +72,7 @@ struct GameResult {
 };
 
 // Workers are stopped by playGame before this is called. Stream one node at a time.
-static void dumpTree(const Options& options, uint64_t seed, const GameResult& result) {
+static bool dumpTree(const Options& options, uint64_t seed, const GameResult& result) {
     using Json = nlohmann::json;
     constexpr int min_visits = 10;
     const auto path = std::filesystem::path(options.tree_dump_dir) / ("tree-" + std::to_string(seed) + ".jsonl");
@@ -78,14 +80,23 @@ static void dumpTree(const Options& options, uint64_t seed, const GameResult& re
     std::ofstream out(path, std::ios::out | std::ios::noreplace);
     if (!out) throw std::runtime_error("can't create tree dump: " + path.string());
     out.exceptions(std::ios::badbit | std::ios::failbit);
-    out << Json{{"kind", "header"}, {"version", 1}, {"seed", seed},
+    uint64_t written = 0;
+    auto write = [&](const Json& row) {
+        const std::string line = row.dump() + '\n';
+        if (options.tree_dump_max_bytes && line.size() > options.tree_dump_max_bytes - written) return false;
+        out << line;
+        written += line.size();
+        return true;
+    };
+    if (!write(Json{{"kind", "header"}, {"version", 1}, {"seed", seed},
         {"rules", EmulationGame::rules()}, {"pieces", result.pieces}, {"died", result.died},
         {"min_node_N", min_visits},
         {"threads", options.threads}, {"sims", options.sims}, {"ms", options.ms},
         {"search_seed", options.search_seed}, {"max_pieces", options.max_pieces},
         {"ramp", options.ramp}, {"garbage_scale", options.garbage_scale},
         {"config", Json::parse(configJson(config()))},
-        {"coordinates", "absolute; board is 10 uint32 columns, bit 0 is bottom"}}.dump() << '\n';
+        {"coordinates", "absolute; board is 10 uint32 columns, bit 0 is bottom"}}))
+        throw std::runtime_error("tree dump cap too small for header");
     for (const auto* side : {&Search::uct.nodes_left, &Search::uct.nodes_right}) {
         for (const auto& shard : *side) {
             for (const auto& [id, node] : shard.obj_) {
@@ -116,11 +127,12 @@ static void dumpTree(const Options& options, uint64_t seed, const GameResult& re
                     const auto belief = state.belief.root();
                     row["belief"] = {{"fresh", belief.fresh}, {"state", belief.state}, {"since", belief.since}};
                 }
-                out << row.dump() << '\n';
+                if (!write(row)) { out.close(); return true; }
             }
         }
     }
     out.close();
+    return false;
 }
 
 static GameResult playGame(EmulationGame& game, const Options& options, uint64_t game_seed, std::ostream* opponent_log) {
@@ -291,6 +303,10 @@ static bool parse(int argc, const char** argv, Options& options) {
         else if (arg == "--ramp") options.ramp = (int)value;
         else if (arg == "--max-pieces") options.max_pieces = (int)value;
         else if (arg == "--sims") options.sims = (uint64_t)value;
+        else if (arg == "--tree-dump-max-bytes") {
+            if (value < 0) return false;
+            options.tree_dump_max_bytes = (uint64_t)value;
+        }
         else if (arg == "--search-seed") options.search_seed = value != 0;
         else if (arg == "--cpu") options.cpu = (int)value;
         else if (arg == "--garbage-scale") {
@@ -314,7 +330,7 @@ int main(int argc, const char** argv) {
         std::cerr << "usage: " << argv[0]
             << " [--threads N] [--games K] [--ms T] [--seed S] [--ramp R] [--max-pieces P]"
             << " [--opponent-log FILE] [--sims N] [--search-seed 0|1] [--cpu K | --cpus K,L,...] [--print-config] [--garbage-scale X]"
-            << " [--tree-dump-dir DIR]"
+            << " [--tree-dump-dir DIR] [--tree-dump-max-bytes N]"
             << std::endl;
         return 1;
     }
@@ -356,8 +372,11 @@ int main(int argc, const char** argv) {
         EmulationGame::write_opponent_header(opponent_log);
     }
 
+    // Placeholder jobs must not consume a game's seeded RNG on first use.
+    (void)blank_state();
     int deaths = 0;
     long long total_pieces = 0;
+    long long total_attack = 0;
     uint64_t total_simulations = 0;
     double total_think = 0;
 
@@ -366,9 +385,10 @@ int main(int argc, const char** argv) {
         fast_seed_reset(options.search_seed ? (uint64_t)seedFor(game_seed, 2) | 1 : 0);
         EmulationGame game = newGame(game_seed, options.ramp, options.garbage_scale);
         GameResult result = playGame(game, options, game_seed, opponent_log ? &opponent_log : nullptr);
+        bool dump_capped = false;
         if (UCT::retain_for_dump) {
             try {
-                dumpTree(options, game_seed, result);
+                dump_capped = dumpTree(options, game_seed, result);
             } catch (const std::exception& e) {
                 std::cerr << "tree dump failed: " << e.what() << std::endl;
                 return 1;
@@ -378,6 +398,7 @@ int main(int argc, const char** argv) {
 
         deaths += result.died;
         total_pieces += result.pieces;
+        total_attack += game.attack;
         total_simulations += result.simulations;
         total_think += result.think_seconds;
 
@@ -390,7 +411,9 @@ int main(int argc, const char** argv) {
             << ",\"max_pieces\":" << options.max_pieces
             << ",\"pieces\":" << result.pieces
             << ",\"died\":" << (result.died ? "true" : "false")
+            << ",\"tree_dump_capped\":" << (dump_capped ? "true" : "false")
             << ",\"attack\":" << game.attack
+            << ",\"app\":" << (result.pieces ? (double)game.attack / result.pieces : 0.0)
             << ",\"true_attack\":" << game.true_attack
             << ",\"lines\":" << game.lines
             << ",\"opponent_attack\":" << game.markov.total_damage
@@ -413,6 +436,7 @@ int main(int argc, const char** argv) {
     }
 
     std::cerr << EmulationGame::rules() << " rules, games " << options.games << ", died " << deaths
+        << ", APP " << (total_pieces ? (double)total_attack / total_pieces : 0.0)
         << ", mean pieces " << (double)total_pieces / options.games
         << ", pieces per death " << (deaths ? (double)total_pieces / deaths : 0.0)
         << ", sims/move " << (total_pieces ? total_simulations / total_pieces : 0)

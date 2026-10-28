@@ -1,6 +1,7 @@
 """End-to-end reconstruction and fitting check, using two supplied executables."""
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -11,11 +12,15 @@ def main():
     emulator, trainer = map(lambda p: str(Path(p).resolve()), sys.argv[1:3])
     with tempfile.TemporaryDirectory(prefix="nana-policy-fit-") as directory:
         root = Path(directory)
+        # The first-fit feature basis excludes these terms, even when releases enable them.
+        fixture = root / "config.json"
+        fixture.write_text(json.dumps({"jeopardy": 0, "tslot": [0] * 4, "belief_weights": [0] * 8}))
         subprocess.run(
             [emulator, "--threads", "1", "--games", "20", "--seed", "0",
              "--sims", "64", "--search-seed", "1", "--max-pieces", "4",
              "--tree-dump-dir", str(root / "dumps")],
             check=True, stdout=subprocess.DEVNULL, timeout=60,
+            env=dict(os.environ, NANA_CONFIG=str(fixture)),
         )
         subprocess.run([trainer, str(root / "dumps"), str(root / "fit"), "3"],
                        check=True, stdout=subprocess.DEVNULL, timeout=60)

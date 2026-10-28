@@ -84,6 +84,11 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 `nana_emulate --tree-dump-dir DIR` writes each game's retained search nodes and
 visit targets, then frees the tree. See [tree dump format and collection](docs/tree-dumps.md).
 
+The optional [trained softmax policy](docs/softmax-policy.md) changes the search
+prior independently of value scoring and includes a paired A/B runner.
+The [policy iterator](docs/policy-iteration.md) combines bounded datagen, two-epoch
+fits and strength logging under a time budget, reusing a 90 GB raw-data buffer.
+
 CMake options (pass with `-D`):
 
 * `NANA_GUI=OFF` skips `nana_interactive` to run headless.
