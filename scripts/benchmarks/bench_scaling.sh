@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Thread-scaling benchmark for MP-MCTS (optionally against TDS-UCT) on a many-core Linux machine.
-# usage: scripts/bench_scaling.sh [max_threads] [reps] [ms_per_run]
+# usage: scripts/benchmarks/bench_scaling.sh [max_threads] [reps] [ms_per_run]
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 max_threads=${1:-$(nproc)}
 reps=${2:-3}
 ms=${3:-3000}

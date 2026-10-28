@@ -3,8 +3,6 @@
 </p>
 <br>
 
-Evaluator formulas, weights, migration, and regression checks are documented in [Unified evaluation](evaluation.md).
-
 ## MCTS
 
 ### Abstract State MCTS

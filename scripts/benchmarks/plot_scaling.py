@@ -1,6 +1,6 @@
 """Plot thread scaling from a bench_scaling.sh runs.csv.
 
-usage: python scripts/plot_scaling.py <runs.csv or results dir> [out.png] [--builds mp,tds] [--linear]
+usage: python scripts/benchmarks/plot_scaling.py <runs.csv or results dir> [out.png] [--builds mp,tds] [--linear]
   --builds  which builds to plot (default mp)
   --linear  linear axes from 0 instead of log2, so efficiency loss shows as the gap to the dashed line
 """

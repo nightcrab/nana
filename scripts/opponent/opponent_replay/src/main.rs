@@ -1,6 +1,6 @@
 //! Adapted from cold-clear/tbp/src/bin/cc_replay.rs (Cold Clear, MPL-2.0).
 //! Plays Cold Clear forward from recorded positions under many piece sequences, and prints what it
-//! sent on each piece, for nana's scripts/cc_predictability.py.
+//! sent on each piece, for nana's scripts/opponent/cc_predictability.py.
 //! usage: cc_replay --positions FILE [--horizon H] [--thinks N] [--queue-seeds Q] [--repeats R]
 //!                  [--seed B] [--jobs J]
 //! FILE: {"positions": [{board, queue, hold, bag, b2b, combo, meter, incoming, future?}, ...]}: board is 40 rows,
@@ -10,7 +10,7 @@
 //! when it has one. Rollouts on the same queue differ only by the search's own randomness.
 //! Fixed incoming attacks arrive unless --no-garbage 1 ignores both incoming and initial meter.
 //! One JSON line per rollout on stdout.
-//! Build with cargo build --release --manifest-path scripts/opponent_replay/Cargo.toml.
+//! Build with cargo build --release --manifest-path scripts/opponent/opponent_replay/Cargo.toml.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};

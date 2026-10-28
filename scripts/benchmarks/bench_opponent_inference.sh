@@ -2,7 +2,7 @@
 # Standalone, bounded inference benchmark. No repo checkout or training dependencies.
 set -euo pipefail
 ulimit -v 2097152
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 mkdir -p measured
 lscpu > measured/lscpu.txt
 lscpu -e > measured/topology.txt

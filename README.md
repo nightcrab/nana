@@ -35,7 +35,7 @@ The engine achieves throughput efficiency of 80% on the first 8 cores, stabilizi
   <img width="800" alt="Parallel efficiency against threads: 100% at 1 thread, about 79% at 8, 72% at 9 and about 60% at 32" src="./docs/scaling-eff-light.png">
 </picture>
 
-To reproduce, run `scripts/speed_scaling.sh` on the machine (or through `scripts/run_ec2_bench.sh` with `SCRIPT=speed_scaling.sh`), then plot it with `node scripts/plot_speed.mjs <results dir>`.
+To reproduce, run `scripts/benchmarks/speed_scaling.sh` on the machine (or through `scripts/cloud/run_ec2_bench.sh` with `SCRIPT=speed_scaling.sh`), then plot it with `node scripts/benchmarks/plot_speed.mjs <results dir>`.
 
 ### Playing Strength
 
@@ -57,10 +57,12 @@ On 32 cores, Nana plays about as well as a single core given 11x thinking time.
   <img width="800" alt="Speedup over one thread against threads, 1 to 32: simulations per move reach 21.5x at 32 threads, while strength speedup follows the ideal line to 4 threads and reaches 10.9x at 32" src="./docs/strength-speedup-light.png">
 </picture>
 
-To reproduce, run `scripts/strength_batches.sh` through `scripts/run_ec2_bench.sh` (e.g. `SCRIPT=strength_batches.sh scripts/run_ec2_bench.sh <host> <key> <ref> MULTS=1,2,4,8,16,32 PAR_THREADS=2,4,8,16,32`), then `python scripts/strength_report.py <batch dirs>` for the numbers and `python scripts/plot_strength.py <batch dirs>` for these plots.
+To reproduce, run `scripts/benchmarks/strength_batches.sh` through `scripts/cloud/run_ec2_bench.sh` (e.g. `SCRIPT=strength_batches.sh scripts/cloud/run_ec2_bench.sh <host> <key> <ref> MULTS=1,2,4,8,16,32 PAR_THREADS=2,4,8,16,32`), then `python scripts/benchmarks/strength_report.py <batch dirs>` for the numbers and `python scripts/benchmarks/plot_strength.py <batch dirs>` for these plots.
 
 
 ## Usage
+
+Experiment, training, and cloud helpers are listed in the [scripts guide](scripts/README.md).
 
 Nana is built from C++ source with CMake (3.22+) and a C++23 compiler (Clang, GCC or MSVC). By default the build uses `-march=native`, so build on the machine that will run it (see [Portable builds](#portable-builds) for binaries that run elsewhere). mimalloc is fetched automatically on configure, and the `ShakTrisLib` game library is a git submodule:
 
@@ -80,14 +82,6 @@ On Windows with Visual Studio, `CMakeSettings.json` provides an `x64-Clang-Relea
 | `nana_bench` | Fixed-position search benchmark with profiling counters (built with `NANA_BENCH`). |
 | `nana_speed` | Measures simulations per second. |
 | `nana_msgbench` | Microbenchmark for message passing. |
-
-`nana_emulate --tree-dump-dir DIR` writes each game's retained search nodes and
-visit targets, then frees the tree. See [tree dump format and collection](docs/tree-dumps.md).
-
-The optional [trained softmax policy](docs/softmax-policy.md) changes the search
-prior independently of value scoring and includes a paired A/B runner.
-The [policy iterator](docs/policy-iteration.md) combines bounded datagen, two-epoch
-fits and strength logging under a time budget, reusing a 90 GB raw-data buffer.
 
 CMake options (pass with `-D`):
 

@@ -1,11 +1,11 @@
 // Plot a speed_scaling.sh sweep as a self-contained HTML page (no dependencies).
-// usage: node scripts/plot_speed.mjs <results dir or runs.csv> [out.html]
+// usage: node scripts/benchmarks/plot_speed.mjs <results dir or runs.csv> [out.html]
 import fs from "node:fs";
 import path from "node:path";
 
 const arg = process.argv[2];
 if (!arg) {
-    console.error("usage: node scripts/plot_speed.mjs <results dir or runs.csv> [out.html]");
+    console.error("usage: node scripts/benchmarks/plot_speed.mjs <results dir or runs.csv> [out.html]");
     process.exit(1);
 }
 const csvPath = fs.statSync(arg).isDirectory() ? path.join(arg, "runs.csv") : arg;

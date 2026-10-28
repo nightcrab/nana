@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # CPU profile of nana_bench on Linux: flame graphs at 1 and N threads, and perf stat.
-# usage: scripts/flamegraph.sh [threads] [ms_per_run] [test]
+# usage: scripts/benchmarks/flamegraph.sh [threads] [ms_per_run] [test]
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 threads=${1:-$(nproc)}
 ms=${2:-5000}
 test=${3:-0}

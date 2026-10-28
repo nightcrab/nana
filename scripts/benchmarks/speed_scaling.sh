@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Simulations / second at every thread count from 1 to max_threads.
-# usage: scripts/speed_scaling.sh [max_threads] [reps] [ms_per_run]
+# usage: scripts/benchmarks/speed_scaling.sh [max_threads] [reps] [ms_per_run]
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 max_threads=${1:-$(nproc)}
 reps=${2:-5}
 ms=${3:-3000}

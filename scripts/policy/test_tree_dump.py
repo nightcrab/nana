@@ -1,4 +1,4 @@
-"""Integration checks: python scripts/test_tree_dump.py path/to/nana_emulate."""
+"""Integration checks: python scripts/policy/test_tree_dump.py path/to/nana_emulate."""
 
 import json
 import math

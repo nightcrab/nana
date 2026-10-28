@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Collect games with Universal-Shaktris-Stadium for fitting opponent models. nana plays P1; P2 is
 # nana too, or the TBP bot at $BOT2 (e.g. Cold Clear's cc-tbp built with tetrio_garbage).
-# usage: scripts/stadium_collect.sh [minutes] [pps] [threads per bot] [thinks per move]
+# usage: scripts/opponent/stadium_collect.sh [minutes] [pps] [threads per bot] [thinks per move]
 #        (defaults 120, 1, 1, 0; 0 thinks leaves each bot its own budget)
 set -euo pipefail
 

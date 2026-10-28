@@ -14,7 +14,7 @@
 /tuner_bin/
 /tuner_*.log
 /tuner_*.err
-/scripts/opponent_replay/target/
+/scripts/opponent/opponent_replay/target/
 __pycache__/
 /out.txt
 /ec2-*.log

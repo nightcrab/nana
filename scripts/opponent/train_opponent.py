@@ -1,6 +1,6 @@
 """One-command cached datagen, CPU CNN training, and untouched-game evaluation.
 
-See scripts/opponent-training.md. Run from any directory with Python and CPU PyTorch.
+Run from any directory with Python and CPU PyTorch.
 """
 
 import argparse
@@ -18,7 +18,7 @@ import torch
 from opponent_data import generate, digest_file
 from opponent_model import Predictor, BINS
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def split_games(games, seed):
@@ -290,7 +290,7 @@ def main():
         raise ValueError("--beam must be at least 3")
     Path(args.out).mkdir(parents=True, exist_ok=True)
     if args.replay_weight and args.cc is None:
-        manifest = ROOT/"scripts/opponent_replay/Cargo.toml"
+        manifest = ROOT/"scripts/opponent/opponent_replay/Cargo.toml"
         subprocess.run(["cargo", "build", "--release", "--manifest-path", str(manifest)], check=True)
         args.cc = str(manifest.parent/"target/release"/("opponent-replay.exe" if os.name == "nt" else "opponent-replay"))
     torch.set_num_threads(args.threads)

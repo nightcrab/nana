@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Playing-strength benchmark: a 1-thread think-time ladder against multi-thread runs.
-# usage: scripts/strength_ladder.sh [NAME=value ...]
+# usage: scripts/benchmarks/strength_ladder.sh [NAME=value ...]
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 for setting in "$@"; do
     if [[ $setting != [A-Z]*=* ]]; then
         echo "expected NAME=value, got $setting" >&2
@@ -18,7 +18,7 @@ mults_setting=${MULTS:-1 2 4 8 16}
 read -ra mults <<< "$(tr , " " <<< "$mults_setting")"
 read -ra variants <<< "$(tr , " " <<< "${VARIANTS:-}")"
 extra_flags=$(tr , " " <<< "${EXTRA_FLAGS:-}")
-variants_file=scripts/strength_variants.txt
+variants_file=scripts/benchmarks/strength_variants.txt
 variant_flags() {
     awk -v name="$1" '{ sub(/\r$/, "") } $1 == name { $1 = ""; sub(/^ +/, ""); print; found = 1 } END { exit !found }' "$variants_file"
 }
@@ -195,6 +195,6 @@ fi
 (( ${#tasks[@]} > 0 )) && run_tasks 1 "$out/parts" "${tasks[@]}"
 log "$(date +%H:%M:%S) done; load average at end: $(cut -d' ' -f1-3 /proc/loadavg 2> /dev/null)"
 
-python3 scripts/strength_merge.py "$out" "$base_ms"
-python3 scripts/strength_report.py "$out" | tee "$out/summary.txt" || echo "report failed; rerun strength_report.py on $out"
+python3 scripts/benchmarks/strength_merge.py "$out" "$base_ms"
+python3 scripts/benchmarks/strength_report.py "$out" | tee "$out/summary.txt" || echo "report failed; rerun strength_report.py on $out"
 echo "results in $out"

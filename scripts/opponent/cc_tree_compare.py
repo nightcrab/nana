@@ -8,7 +8,7 @@ names the cause: different candidate moves (movegen), different values (eval or 
 values ranked in another order (ties), different weights from equal values (precision), or a
 speculated piece (only with --speculate, where Cold Clear sees just the preview).
 
-usage: python scripts/cc_tree_compare.py [--seed S] [--count K] [--pieces P] [--sims N]
+usage: python scripts/opponent/cc_tree_compare.py [--seed S] [--count K] [--pieces P] [--sims N]
            [--lockstep-seed L] [--speculate] [--no-time] [--canonical] [--clear-meter] [--nana EXE] [--cc EXE] [--out DIR] [--show N]
 
 nana_cctree: cmake -DNANA_CCTREE=ON, target nana_cctree (NANA_CCTREE_LOAD_FACTOR, default 1).
@@ -24,7 +24,7 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 EXE = ".exe" if os.name == "nt" else ""
 DEFAULT_NANA = ROOT / "out" / "build" / "cctree" / "cpp" / f"nana_cctree{EXE}"
 DEFAULT_CC = ROOT.parent / "cold-clear" / "target" / "release" / f"tree_dump{EXE}"

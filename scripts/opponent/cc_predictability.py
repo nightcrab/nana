@@ -10,9 +10,9 @@ own plan for the position.
 
 Attack per piece is binned as MarkovOpponent's emissions are: min(attack, 7), plus a death bin.
 
-usage: python scripts/cc_predictability.py STADIUM.db [...] [--player 2] [--stride 5] [--max-positions 40]
+usage: python scripts/opponent/cc_predictability.py STADIUM.db [...] [--player 2] [--stride 5] [--max-positions 40]
            [--horizon 8] [--thinks 4000] [--queue-seeds 16] [--repeats 4] [--jobs 2] [--out FILE.jsonl]
-       python scripts/cc_predictability.py --load FILE.jsonl     report on saved rollouts
+       python scripts/opponent/cc_predictability.py --load FILE.jsonl     report on saved rollouts
 
 cc_replay: cargo build --release -p cc-tbp --bin cc_replay --features tetrio_garbage (in ../cold-clear)
 """
@@ -28,7 +28,7 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 EXE = ".exe" if os.name == "nt" else ""
 DEFAULT_CC = ROOT.parent / "cold-clear" / "target" / "release" / f"cc_replay{EXE}"
 PIECES = "IOTLJSZ"

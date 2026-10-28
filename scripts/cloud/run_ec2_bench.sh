@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run a benchmark script on an EC2 instance, copy the results back, then shut it down.
-# usage: scripts/run_ec2_bench.sh <host> <key.pem> [ref] [bench args...]
+# usage: scripts/cloud/run_ec2_bench.sh <host> <key.pem> [ref] [bench args...]
 set -uo pipefail
 
 if [ $# -lt 2 ]; then
@@ -18,6 +18,21 @@ max_minutes=${MAX_MINUTES:-180}
 poll=${POLL_SECONDS:-60}
 repo=$(git remote get-url origin)
 script=${SCRIPT:-bench_scaling.sh}
+# SCRIPT accepts a path relative to scripts/ or a benchmark/opponent helper basename.
+script=${script#scripts/}
+if [[ $script != */* ]]; then
+    for group in benchmarks opponent cloud; do
+        if [ -f "$(dirname "$0")/../$group/$script" ]; then
+            script="$group/$script"
+            break
+        fi
+    done
+fi
+script_source="$(dirname "$0")/../$script"
+if [ ! -f "$script_source" ]; then
+    echo "script not found: $script_source" >&2
+    exit 1
+fi
 worktree=${WORKTREE:-0}
 self_shutdown=${SELF_SHUTDOWN:-0}
 
@@ -49,7 +64,7 @@ if ! git branch -r --contains "$commit" 2>/dev/null | grep -q .; then
 fi
 
 echo "setting up $host (benchmarking $ref = $commit)"
-scp "${ssh_opts[@]}" "$(dirname "$0")/$script" "$user@$host:$script" || { echo "upload failed"; shutdown_instance; exit 1; }
+scp "${ssh_opts[@]}" "$script_source" "$user@$host:nana-bench-upload.sh" || { echo "upload failed"; shutdown_instance; exit 1; }
 extract=":"
 if [ "$worktree" = 1 ]; then
     tarball=ec2-results/worktree-upload.tgz  # gitignored, and a relative path keeps tar and scp happy on Windows
@@ -60,7 +75,7 @@ if [ "$worktree" = 1 ]; then
     echo "uploading uncommitted files: $(tr '\n' ' ' <<< "$upload")"
     scp "${ssh_opts[@]}" "$tarball" "$user@$host:worktree.tgz" || { echo "upload failed"; shutdown_instance; exit 1; }
     rm -f "$tarball"
-    extract="tar -xzf ../worktree.tgz && sed -i 's/\r\$//' scripts/*.sh"
+    extract="tar -xzf ../worktree.tgz && find scripts -name '*.sh' -exec sed -i 's/\r\$//' {} +"
 fi
 remote bash -s <<EOF || { echo "setup failed"; shutdown_instance; exit 1; }
 set -euo pipefail
@@ -77,7 +92,8 @@ cd nana
 git checkout -q "$commit"
 git submodule update -q --init --recursive
 $extract
-sed 's/\r\$//' ../$script > scripts/$script
+mkdir -p "\$(dirname "scripts/$script")"
+sed 's/\r\$//' ../nana-bench-upload.sh > "scripts/$script"
 rm -f ../bench.done
 nohup bash -c 'THREADS="${THREADS:-}" bash scripts/$script $bench_args; status=\$?; echo \$status > ../bench.done; [ "$self_shutdown" = 1 ] && sudo shutdown -h +\$(( status == 0 ? 10 : 30 )) "nana bench done"' > ../bench.log 2>&1 < /dev/null &
 EOF

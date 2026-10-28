@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start, stop or check the benchmark instance, or open a shell on it.
-# usage: scripts/ec2.sh start|stop|status|ssh
+# usage: scripts/cloud/ec2.sh start|stop|status|ssh
 set -euo pipefail
 
 INSTANCE=${NANA_EC2_INSTANCE:?set NANA_EC2_INSTANCE to the instance id}
