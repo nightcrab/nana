@@ -246,6 +246,17 @@ Every iteration, in `status.txt` and the log:
   2.5 x the larger of the tuned value and Cold Clear's weight for the term (at least 20), rounded up;
   all ten well columns share +-150. A result near a bound means the bound was wrong: widen it there;
 - `search.json`: how it searches. `c_init`, `c_base`, `n_cap`, `depth_step`, `prior_exponent`.
+- `opponent_conditioning.json`: all 67 opponent-conditioning weights: `opp_cond_u[0..18]`
+  (the opponent gate) and `opp_cond_v[0..47]` (the placement direction), in the enum order in
+  `cpp/Tetris/bot/OpponentConditioning.hpp`. Defaults are zero, matching the disabled term in
+  `NanaConfig`; `opp_cond_mean` stays at the base config's fixed values. Initial bounds are
+  symmetric: gate bounds scale inversely with feature magnitude, and placement bounds use
+  the corresponding eval-space magnitudes, allowing either sign of adjustment. These are
+  starting ranges, not measured limits. Use `--space tuner/spaces/opponent_conditioning.json`
+  with `--objective stadium`, `--bot`, and `--stadium`: the TBP bot sets the gate from the
+  visible opponent, while the emulator does not supply this state. Use `--eval nana` to
+  exercise spin features too (`convex` zeros them). Repeat `--space` to tune eval weights
+  alongside conditioning.
 - `work_stealing.json`: all eight work-stealing settings: `message_weight`, `rollout_weight`,
   `low_water`, `give_margin`, `backoff_iterations`, `steal_chiplet_penalty`, `steal_topk`, and
   `steal_temperature`. Integer bounds include the current config defaults; `steal_topk` spans

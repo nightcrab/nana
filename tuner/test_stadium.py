@@ -51,10 +51,17 @@ class StadiumTests(unittest.TestCase):
             self.assertEqual(original.read_text(), '{"height": 99}')
             self.assertEqual(list(Path(runner.match_dir).iterdir()), [])
 
-            with patch.object(runner, "_spawn", return_value=(1, "", "bot crashed")):
+            with patch.object(runner, "_spawn", return_value=(1, "board diagnostics", "bot crashed")):
                 with self.assertRaisesRegex(RunnerError, "bot crashed"):
                     runner.play([("bad", {"height": 2}, stage, 100, 1)])
             self.assertEqual(runner.free.qsize(), 2)
+            failures = list((root / "failed-matches").iterdir())
+            self.assertEqual(len(failures), 1)
+            failure = failures[0]
+            self.assertEqual((failure / "stdout.log").read_text(), "board diagnostics")
+            self.assertEqual((failure / "stderr.log").read_text(), "bot crashed")
+            self.assertEqual(json.loads((failure / "match.json").read_text())["candidate_side"], 1)
+            self.assertEqual(json.loads((failure / "candidate" / "nana.json").read_text())["height"], 2)
 
     def test_run_persists_fixed_baseline_and_gate_uses_match_scores(self):
         with tempfile.TemporaryDirectory() as directory:

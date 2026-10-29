@@ -1,6 +1,6 @@
 """Head-to-head fitness using Universal-Shaktris-Stadium's stadium_cli."""
 import json
-from contextlib import closing
+from contextlib import closing, contextmanager
 import os
 from pathlib import Path
 import shutil
@@ -51,14 +51,25 @@ class StadiumRunner(Runner):
             return str(launcher)
         return str(target)
 
+    @contextmanager
+    def _match_directory(self):
+        with tempfile.TemporaryDirectory(dir=self.match_dir) as temporary:
+            root = Path(temporary)
+            try:
+                yield root
+            except Exception as exc:
+                failure = Path(self.match_dir).parent / "failed-matches" / root.name
+                failure.parent.mkdir(exist_ok=True)
+                shutil.copytree(root, failure)
+                raise RunnerError(f"{exc}; match artifacts: {failure}") from exc
+
     def _run_chunk(self, config_path, stage, seed0, games):
         if self.baseline_config is None:
             raise RunnerError("stadium baseline has not been configured")
         cpus = self.free.get()
         started = time.monotonic()
         try:
-            with tempfile.TemporaryDirectory(dir=self.match_dir) as temporary:
-                root = Path(temporary)
+            with self._match_directory() as root:
                 with open(config_path) as stream:
                     candidate = self._bot_copy(root / "candidate", json.load(stream), cpus[:self.threads])
                 baseline = self._bot_copy(root / "baseline", stage.config(self.baseline_config), cpus[self.threads:])
@@ -72,8 +83,12 @@ class StadiumRunner(Runner):
                                 "pps": 1000000, "threads": self.threads, "thinks": stage.sims,
                                 "garbage_delay": 1 if stage.rules == "botris" else 0}
                     (root / "stadium_cli_settings.json").write_text(json.dumps(settings))
-                    code, _, stderr = self._spawn([self.stadium] + bots, dict(os.environ),
+                    (root / "match.json").write_text(json.dumps({"seed_counter": seed0 + i,
+                        "candidate_side": candidate_side, "cpus": cpus, "stage": stage.spec}))
+                    code, stdout, stderr = self._spawn([self.stadium] + bots, dict(os.environ),
                                                   cwd=str(root), cpus=cpus)
+                    (root / "stdout.log").write_text(stdout, encoding="utf-8")
+                    (root / "stderr.log").write_text(stderr, encoding="utf-8")
                     if code != 0 or not database.is_file():
                         raise RunnerError(f"stadium failed (exit {code}): {stderr[-2000:]}")
                     with closing(sqlite3.connect(database)) as db:

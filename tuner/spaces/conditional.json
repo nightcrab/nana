@@ -1,0 +1,404 @@
+[
+ {
+  "name": "opp_cond_u[0]",
+  "default": 0,
+  "low": -0.1,
+  "high": 0.1
+ },
+ {
+  "name": "opp_cond_u[1]",
+  "default": 0,
+  "low": -0.1,
+  "high": 0.1
+ },
+ {
+  "name": "opp_cond_u[2]",
+  "default": 0,
+  "low": -0.1,
+  "high": 0.1
+ },
+ {
+  "name": "opp_cond_u[3]",
+  "default": 0,
+  "low": -0.1,
+  "high": 0.1
+ },
+ {
+  "name": "opp_cond_u[4]",
+  "default": 0,
+  "low": -0.02,
+  "high": 0.02
+ },
+ {
+  "name": "opp_cond_u[5]",
+  "default": 0,
+  "low": -0.002,
+  "high": 0.002
+ },
+ {
+  "name": "opp_cond_u[6]",
+  "default": 0,
+  "low": -0.05,
+  "high": 0.05
+ },
+ {
+  "name": "opp_cond_u[7]",
+  "default": 0,
+  "low": -0.005,
+  "high": 0.005
+ },
+ {
+  "name": "opp_cond_u[8]",
+  "default": 0,
+  "low": -0.02,
+  "high": 0.02
+ },
+ {
+  "name": "opp_cond_u[9]",
+  "default": 0,
+  "low": -0.2,
+  "high": 0.2
+ },
+ {
+  "name": "opp_cond_u[10]",
+  "default": 0,
+  "low": -0.1,
+  "high": 0.1
+ },
+ {
+  "name": "opp_cond_u[11]",
+  "default": 0,
+  "low": -1,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_u[12]",
+  "default": 0,
+  "low": -1,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_u[13]",
+  "default": 0,
+  "low": -1,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_u[14]",
+  "default": 0,
+  "low": -1,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_u[15]",
+  "default": 0,
+  "low": -0.25,
+  "high": 0.25
+ },
+ {
+  "name": "opp_cond_u[16]",
+  "default": 0,
+  "low": -0.1,
+  "high": 0.1
+ },
+ {
+  "name": "opp_cond_u[17]",
+  "default": 0,
+  "low": -0.25,
+  "high": 0.25
+ },
+ {
+  "name": "opp_cond_u[18]",
+  "default": 0,
+  "low": -0.1,
+  "high": 0.1
+ },
+ {
+  "name": "opp_cond_v[0]",
+  "default": 0,
+  "low": -1000,
+  "high": 1000
+ },
+ {
+  "name": "opp_cond_v[1]",
+  "default": 0,
+  "low": -1000,
+  "high": 1000
+ },
+ {
+  "name": "opp_cond_v[2]",
+  "default": 0,
+  "low": -250,
+  "high": 250
+ },
+ {
+  "name": "opp_cond_v[3]",
+  "default": 0,
+  "low": -250,
+  "high": 250
+ },
+ {
+  "name": "opp_cond_v[4]",
+  "default": 0,
+  "low": -2000,
+  "high": 2000
+ },
+ {
+  "name": "opp_cond_v[5]",
+  "default": 0,
+  "low": -400,
+  "high": 400
+ },
+ {
+  "name": "opp_cond_v[6]",
+  "default": 0,
+  "low": -400,
+  "high": 400
+ },
+ {
+  "name": "opp_cond_v[7]",
+  "default": 0,
+  "low": -1500,
+  "high": 1500
+ },
+ {
+  "name": "opp_cond_v[8]",
+  "default": 0,
+  "low": -2000,
+  "high": 2000
+ },
+ {
+  "name": "opp_cond_v[9]",
+  "default": 0,
+  "low": -500,
+  "high": 500
+ },
+ {
+  "name": "opp_cond_v[10]",
+  "default": 0,
+  "low": -500,
+  "high": 500
+ },
+ {
+  "name": "opp_cond_v[11]",
+  "default": 0,
+  "low": -500,
+  "high": 500
+ },
+ {
+  "name": "opp_cond_v[12]",
+  "default": 0,
+  "low": -2500,
+  "high": 2500
+ },
+ {
+  "name": "opp_cond_v[13]",
+  "default": 0,
+  "low": -400,
+  "high": 400
+ },
+ {
+  "name": "opp_cond_v[14]",
+  "default": 0,
+  "low": -400,
+  "high": 400
+ },
+ {
+  "name": "opp_cond_v[15]",
+  "default": 0,
+  "low": -300,
+  "high": 300
+ },
+ {
+  "name": "opp_cond_v[16]",
+  "default": 0,
+  "low": -10,
+  "high": 10
+ },
+ {
+  "name": "opp_cond_v[17]",
+  "default": 0,
+  "low": -30,
+  "high": 30
+ },
+ {
+  "name": "opp_cond_v[18]",
+  "default": 0,
+  "low": -400,
+  "high": 400
+ },
+ {
+  "name": "opp_cond_v[19]",
+  "default": 0,
+  "low": -2000,
+  "high": 2000
+ },
+ {
+  "name": "opp_cond_v[20]",
+  "default": 0,
+  "low": -100,
+  "high": 100
+ },
+ {
+  "name": "opp_cond_v[21]",
+  "default": 0,
+  "low": -1000,
+  "high": 1000
+ },
+ {
+  "name": "opp_cond_v[22]",
+  "default": 0,
+  "low": -80,
+  "high": 80
+ },
+ {
+  "name": "opp_cond_v[23]",
+  "default": 0,
+  "low": -400,
+  "high": 400
+ },
+ {
+  "name": "opp_cond_v[24]",
+  "default": 0,
+  "low": -50,
+  "high": 50
+ },
+ {
+  "name": "opp_cond_v[25]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[26]",
+  "default": 0,
+  "low": -200,
+  "high": 200
+ },
+ {
+  "name": "opp_cond_v[27]",
+  "default": 0,
+  "low": -80,
+  "high": 80
+ },
+ {
+  "name": "opp_cond_v[28]",
+  "default": 0,
+  "low": -50,
+  "high": 50
+ },
+ {
+  "name": "opp_cond_v[29]",
+  "default": 0,
+  "low": -80,
+  "high": 80
+ },
+ {
+  "name": "opp_cond_v[30]",
+  "default": 0,
+  "low": -80,
+  "high": 80
+ },
+ {
+  "name": "opp_cond_v[31]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[32]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[33]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[34]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[35]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[36]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[37]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[38]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[39]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[40]",
+  "default": 0,
+  "low": -150,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_v[41]",
+  "default": 0,
+  "low": -100,
+  "high": 100
+ },
+ {
+  "name": "opp_cond_v[42]",
+  "default": 0,
+  "low": -80,
+  "high": 80
+ },
+ {
+  "name": "opp_cond_v[43]",
+  "default": 0,
+  "low": -300,
+  "high": 300
+ },
+ {
+  "name": "opp_cond_v[44]",
+  "default": 0,
+  "low": -800,
+  "high": 800
+ },
+ {
+  "name": "opp_cond_v[45]",
+  "default": 0,
+  "low": -800,
+  "high": 800
+ },
+ {
+  "name": "opp_cond_v[46]",
+  "default": 0,
+  "low": -800,
+  "high": 800
+ },
+ {
+  "name": "opp_cond_v[47]",
+  "default": 0,
+  "low": -800,
+  "high": 800
+ }
+]
