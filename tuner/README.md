@@ -94,6 +94,37 @@ improves (it survives longer), so iterations late in a run can take longer than 
 
 ## What a game is, and the fitness
 
+### Stadium win rate against the baseline
+
+Use `--objective stadium` for head-to-head games against the fixed starting configuration
+stored in `state.json` as `base_config`:
+
+```sh
+python -m tuner start versus1 --nana build/cpp/nana_emulate --bot build/cpp/nana_tbp --stadium stadium/src/stadium_cli --cpus 0,2,4,6 --threads 1 --sims 8192 --objective stadium
+```
+
+Build [Universal-Shaktris-Stadium](https://github.com/nightcrab/Universal-Shaktris-Stadium)
+with support for the `threads`, `thinks`, and `garbage_delay` settings, as used by
+`scripts/opponent/stadium_collect.sh`. `--nana` still supplies the canonical config;
+`--bot` must be a matching `nana_tbp` build. Each match gets isolated executable copies and
+`nana.json` files, leaving the originals untouched. Windows DLLs beside the bot are copied too.
+
+Fitness is 1 for a win, 0.5 for a draw, and 0 for a loss. Both bots receive the selected
+simulation budget, sides alternate, and each concurrent match reserves `2 * --threads`
+CPUs shared by the two bots. The CPU count must be divisible by that number. Matches run
+to completion, without the emulator's horizon or eased garbage. Botris selects one-turn
+garbage delay; TETR.IO selects zero delay.
+
+The upstream stadium has no seed interface: seed counters select sides and track work,
+but do not replay games or provide common random numbers. Holdouts are fresh independent
+matches, and exact replay and the small-sample canary check are skipped. The final gate
+keeps the existing approximate Gaussian SPRT, comparing candidate and release match scores
+against the same fixed baseline, using independent games. Its defaults remain a 2% relative
+improvement, alpha/beta 0.05, and at most 400 games per config. This is not a dedicated
+binomial win/loss SPRT; reaching the limit without a decision remains inconclusive.
+
+### Emulator objectives
+
 `nana_emulate --threads 1 --sims N --search-seed 1` plays a game that replays exactly for a given
 seed and config, so every config in an iteration plays the same seeds (common random numbers) and
 luck in the pieces mostly cancels in comparisons. Games use TETR.IO rules (`--rules botris` plays
@@ -125,7 +156,7 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 | option | default | |
 |---|---|---|
 | `--budget-hours H` / `--sims N` | (one is required) | the time budget, or a fixed sims count |
-| `--objective` | `strength` | maximise attack/piece, `game-score`, or `sims-per-second` (with the smaller defaults above) |
+| `--objective` | `strength` | maximise attack/piece, `game-score`, `stadium` win rate, or `sims-per-second` (with the smaller defaults above) |
 | `--optimizer` | `pso` | optimizer: `pso` or `cmaes` |
 | `--threads` | 1 | search threads per game; must divide the CPU count (1–64) |
 | `--iterations` | 15 | optimizer iterations |

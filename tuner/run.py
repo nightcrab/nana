@@ -11,6 +11,7 @@ from .gate import run_gate
 from .health import HealthError, Monitor, check_canary, check_determinism, check_plumbing
 from .optimizer import create_optimizer, optimizer_defaults, restore_optimizer
 from .runner import Runner, Stage
+from .stadium import StadiumRunner
 from .space import Space
 
 TUNING_SEEDS = 1_000_000
@@ -73,9 +74,13 @@ class Run:
         self.settings.setdefault("threads", 1)
         self.settings.setdefault("optimizer", "pso")
         self.space = Space(self.settings["space"])
-        self.runner = Runner(self.settings["nana"], self.settings["cpus"], self.dir,
-                             chunk=self.settings.get("chunk", 4), threads=self.settings["threads"])
+        runner_type = StadiumRunner if self.settings["objective"] == "stadium" else Runner
+        extra = {k: self.settings[k] for k in ("stadium", "bot")} if runner_type is StadiumRunner else {}
+        self.runner = runner_type(self.settings["nana"], self.settings["cpus"], self.dir,
+                                  chunk=self.settings.get("chunk", 4), threads=self.settings["threads"], **extra)
         self.state = _read_json(self.path("state.json")) if os.path.exists(self.path("state.json")) else None
+        if runner_type is StadiumRunner and self.state:
+            self.runner.baseline_config = self.state["base_config"]
         if self.state and self.state.get("version") != STATE_VERSION:
             raise SystemExit(f"{directory} was made by an older tuner (state version {self.state.get('version')}); "
                              "start a new run")
@@ -152,9 +157,15 @@ class Run:
         if not os.path.isfile(nana):
             raise SystemExit(f"no nana_emulate at {nana}")
         try:
-            Runner.validate_cpus(cpus, 1 if options.get("threads") is None else options["threads"])
+            runner_type = StadiumRunner if options.get("objective") == "stadium" else Runner
+            runner_type.validate_cpus(cpus, 1 if options.get("threads") is None else options["threads"])
         except ValueError as e:
             raise SystemExit(str(e)) from e
+        if options.get("objective") == "stadium":
+            for key in ("stadium", "bot"):
+                if not options.get(key) or not os.path.isfile(options[key]):
+                    raise SystemExit(f"stadium objective requires --{key} pointing to an existing executable")
+            options = dict(options, **{key: os.path.abspath(options[key]) for key in ("stadium", "bot")})
         os.makedirs(directory, exist_ok=True)
         specs = []
         for path in space_paths:
@@ -193,6 +204,8 @@ class Run:
                      "release": {"values": space.values(space.default_unit()), "source": "defaults", "gates": 0},
                      "plan": None, "baseline": None, "holdouts": [], "iteration_seconds": []}
         run.optimizer = optimizer
+        if settings["objective"] == "stadium":
+            run.runner.baseline_config = base
         run.write_release()
         run.save()
         run.log(f"created run {directory}: {settings['objective']}, {settings['rules']} rules, {len(space)} parameters, {optimizer.name} optimizer, "
@@ -206,7 +219,8 @@ class Run:
     def health_checks(self):
         self.activity("health checks")
         started = time.monotonic()
-        stage = Stage(dict(CHECK_STAGE, horizon=self.settings["horizon"], env=self.settings.get("env", "hmm"), rules=self.rules()))
+        stage = (self.make_stage(32) if self.settings["objective"] == "stadium" else
+                 Stage(dict(CHECK_STAGE, horizon=self.settings["horizon"], env=self.settings.get("env", "hmm"), rules=self.rules())))
         base = self.state["base_config"]
         best = self.optimizer.best()
         center = self.config(best.unit if best else self.optimizer.sample_points()[0])
@@ -214,6 +228,12 @@ class Run:
         self.log("health: plumbing (nana loads the configs we write)")
         check_plumbing(self.runner, [base, center, random_point])
         n = self.runner.workers
+        if self.settings["objective"] == "stadium":
+            self.log("health: seed replay and canary significance skipped (stadium uses unseeded match outcomes)")
+            self.runner.scores([("match", base, stage, HOLDOUT_SEEDS - 2000, 1)])
+            self.log("health checks ok (config plumbing, stadium match result)", show=True)
+            self.account(started)
+            return
         if self.runner.threads == 1:
             self.log("health: determinism (the same seeds replay the same games)")
             check_determinism(self.runner, stage, base, HOLDOUT_SEEDS - 1000, n)
@@ -369,7 +389,7 @@ class Run:
         self.account(started)
         self.log(f"holdout: best {value:.4f} vs baseline {base:.4f} ({value - base:+.4f})")
         self.state["holdouts"].append({"iteration": self.state["iterations"], "best": value, "baseline": base})
-        if value < base and best.mean > base:
+        if value < base and best.mean > base and self.settings["objective"] != "stadium":
             self.warnings.append("holdout: the best beats the baseline on tuning seeds but not on held-out ones")
 
     def gate(self, best):
@@ -422,7 +442,8 @@ class Run:
         done, total = self.state["iterations"], s["iterations"]
         lines = [f"run {self.dir}  ({self.rules()} rules, {self.state['hours']:.2f} h, {self.runner.games_played} games this session, "
                  f"{self.runner.failures} game failures)"]
-        labels = {"strength": "attack/piece", "sims-per-second": "sims/s", "game-score": "game score"}
+        labels = {"strength": "attack/piece", "sims-per-second": "sims/s", "game-score": "game score",
+                  "stadium": "win rate vs fixed baseline; draws count half"}
         lines.append(f"objective: {s['objective']} ({labels[s['objective']]})")
         lines.append(f"{self.runner.threads} threads per game, {self.runner.workers} concurrent games")
         if plan:

@@ -17,40 +17,40 @@ struct NanaConfig {
     int steal_topk = 4;
     int steal_temperature = 10;
 
-    // CMA-ES evaluator release: tuner/releases/cmaes-cc-20261028.json.
-    double top_half = -109.76029518579986;
-    double top_quarter = -1803.0356681528551;
-    double low = -36.567121160072304;
-    double cavity_cells = -147.54340774686182;
-    double cavity_cells_sq = -31.90295647410997;
-    double overhangs = -16.945937638146518;
-    double overhangs_sq = -12.729203193340602;
-    double covered_cells = -3.7780475764252373;
-    double covered_cells_sq = -12.272199579147944;
-    double bumpiness = -2.86597664065836;
-    double bumpiness_sq = -2.780480402590669;
-    double height = -69.78341839708662;
-    double row_transitions = -64.16002378209802;
-    double counting = 30.62446007327333;
-    double perfect_clear = 439.06511078056377;
-    double wasted_t = -317.86291966632245;
+    // CMA-ES evaluator release: tuner/releases/cmaes-nana-20261029.json.
+    double top_half = -108.6429596094535;
+    double top_quarter = -1405.2750543971713;
+    double low = -19.864870582676048;
+    double cavity_cells = -91.77055949344265;
+    double cavity_cells_sq = -8.53646266169038;
+    double overhangs = -60.190125069281635;
+    double overhangs_sq = -2.416386445900173;
+    double covered_cells = -15.627533669166468;
+    double covered_cells_sq = -2.0516440119057293;
+    double bumpiness = -9.388409129051226;
+    double bumpiness_sq = -1.170462073059369;
+    double height = -88.57014967684057;
+    double row_transitions = -24.06090474455514;
+    double counting = 55.83645713820602;
+    double perfect_clear = 1486.9568124836044;
+    double wasted_t = -318.97206618852323;
     // eval "convex" only: the whole score of a board with an overhang or cavity above the lowest column
     double nonconvex = -7000;
     // eval "convex" only: prior weight multiplier for actions to such boards, which rank after every convex action
     double nonconvex_prior = 0.01;
-    std::array<double, 10> well_columns = { -145.68808306207026, 142.67908774675402, 141.40520686624467, 38.072612414358446, -6.682664038102956, -101.41680495789893, -33.88880596406743, -45.24350683293686, -93.46093237745201, 107.8351691546892 };
-    std::array<double, 5> clears = { 0.0, -96.98045819408026, -158.93999268422, -205.371315236632, 783.4812191154064 };
-    std::array<double, 4> tspins = { 0.0, 330.7953216323606, 409.1553343271181, 439.85461140135305 };
+    std::array<double, 10> well_columns = { -146.5297662337835, 80.37646306229917, 140.8286535556462, 105.84665865633775, -75.1635200395119, -64.58807277929792, -23.78977077775329, -62.69691476644313, -75.4317857091197, 115.5236771075513 };
+    std::array<double, 5> clears = { 0.0, -214.68540714688402, -230.17313232892423, -234.2538780780269, 1195.7104740209197 };
+    std::array<double, 4> tspins = { 0.0, 147.8665624737085, 608.4187625948266, 224.7660451061555 };
 
-    double back_to_back = 161.82447609775323;
-    double b2b_clear = 197.28243633277714;
-    double combo_garbage = 249.26862006653437;  // actual attack sent, including combo/B2B/PC effects
-    double move_time = -6.217052963848415;
-    double jeopardy = -4.756796843837481;
-    double well_depth = 70.27551346961596;
+    double back_to_back = 256.8065601565335;
+    double b2b_clear = 327.37576164969494;
+    double combo_garbage = 276.5202130368163;  // actual attack sent, including combo/B2B/PC effects
+    double move_time = -8.644566216799483;
+    double jeopardy = -4.473741555603116;
+    double well_depth = 87.65755630388105;
     int max_well_depth = 17;
-    std::array<double, 3> mini_tspins = { 0.0, 391.548488969957, 229.20103565771637 };  // additive bonuses, as with tspins
-    std::array<double, 4> tslot = { 208.54561814201526, 675.5858749391022, 354.6431464881178, 29.080041093900455 };
+    std::array<double, 3> mini_tspins = { 0.0, 255.2559154641399, 314.56620282317624 };  // additive bonuses, as with tspins
+    std::array<double, 4> tslot = { 328.7276186969281, 728.4895036891403, 627.9114391228678, 214.77109207391828 };
 
     double c_init = 4.071678062623125;
     double c_base = 7490.956117941063;
@@ -66,8 +66,8 @@ struct NanaConfig {
     std::string neural_model;
     std::array<double, 8> belief_weights{};
 
-    double app_weight = 0.2559276128014631;
-    double eval_weight = 0.36984218083383025;
+    double app_weight = 0.4501576877732511;
+    double eval_weight = 1.846117229394713;
 
     static constexpr int PRIOR_TABLE = 1024;
     std::array<float, PRIOR_TABLE> prior_weight{};

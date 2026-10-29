@@ -19,7 +19,7 @@ class Stage:
             raise ValueError(f"stage {self.name}: env {spec['env']!r}: only the hmm opponent is left")
         self.rules = spec.get("rules", "tetrio")
         self.objective = spec.get("objective", "strength")
-        if self.objective not in ("strength", "sims-per-second", "game-score"):
+        if self.objective not in ("strength", "sims-per-second", "game-score", "stadium"):
             raise ValueError(f"unknown objective: {self.objective}")
         self.spec = dict(spec)
 
@@ -32,6 +32,11 @@ class Stage:
 
 
 def fitness(game, horizon, objective="strength"):
+    if objective == "stadium":
+        score = game.get("match_score")
+        if score not in (0.0, 0.5, 1.0):
+            raise RunnerError("stadium needs match_score of 0, 0.5 or 1")
+        return score
     if objective == "sims-per-second":
         sims = game.get("sims_per_move", 0)
         ms = game.get("ms_per_move", 0)
@@ -134,10 +139,19 @@ class Runner:
         finally:
             self.free.put(cpus)
 
-    def _spawn(self, cmd, env):
+    def _spawn(self, cmd, env, cwd=None, cpus=None):
         if self.stopping.is_set():
             raise KeyboardInterrupt
-        proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if cpus and os.name != "nt":
+            cmd = ["taskset", "-c", ",".join(map(str, cpus))] + cmd
+        proc = subprocess.Popen(cmd, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if cpus and os.name == "nt":
+            import ctypes
+            if not ctypes.windll.kernel32.SetProcessAffinityMask(ctypes.c_void_p(int(proc._handle)),
+                                                               ctypes.c_size_t(sum(1 << c for c in cpus))):
+                proc.kill()
+                proc.communicate()
+                raise RunnerError("cannot set stadium CPU affinity")
         with self.lock:
             self.procs.add(proc)
             stopping = self.stopping.is_set()
@@ -191,6 +205,10 @@ class Runner:
         except KeyboardInterrupt:
             self.stop()
             pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        except Exception:
+            self.stop()
+            pool.shutdown(wait=True, cancel_futures=True)
             raise
         pool.shutdown()
         return results
