@@ -58,6 +58,23 @@ void EmulationGame::set_move(Move move) {
     this->move = move;
 };
 
+int EmulationGame::surface_height() const {
+    const Board& board = game.board;
+    if (!board.is_low()) {
+        return 0;
+    }
+    for (int h = board.get_garbage_height(); h > 0; --h) {
+        bool capped = true;
+        for (auto column : board.board) {
+            capped &= ((column >> (h - 1)) & 3) != 0;
+        }
+        if (capped) {
+            return h;
+        }
+    }
+    return 0;
+}
+
 Move EmulationGame::specific_move(Move move) {
     move.piece.position.y += surface_height();
     return move;
