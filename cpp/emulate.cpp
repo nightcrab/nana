@@ -416,6 +416,7 @@ int main(int argc, const char** argv) {
             << ",\"app\":" << (result.pieces ? (double)game.attack / result.pieces : 0.0)
             << ",\"true_attack\":" << game.true_attack
             << ",\"lines\":" << game.lines
+            << ",\"game_score\":" << game.game_score
             << ",\"opponent_attack\":" << game.opponent.total_damage
             << ",\"opponent_deaths\":" << game.opponent.deaths
             << ",\"sims_per_move\":" << result.simulations / moves

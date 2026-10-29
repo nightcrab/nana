@@ -85,6 +85,7 @@ class EmulationGame {
 
     int pieces = 0;
     int lines = 0;
+    int game_score = 0;
     int attack = 0;
 
     // does not count cancelling

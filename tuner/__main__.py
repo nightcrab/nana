@@ -71,15 +71,17 @@ def main():
                         help="the whole run's time: the tuner picks the largest sims count that fits")
     budget.add_argument("--sims", type=int, help="tune at this sims count, whatever it costs")
     start.add_argument("--space", action="append", help="parameter space files (default tuner/spaces/eval.json)")
-    start.add_argument("--objective", choices=["strength", "sims-per-second"], default="strength",
+    start.add_argument("--objective", choices=["strength", "sims-per-second", "game-score"], default="strength",
                        help="fitness to maximise (default strength; sims-per-second defaults to search.json)")
     start.add_argument("--optimizer", choices=OPTIMIZERS, default="pso", help="optimizer (default pso)")
     start.add_argument("--iterations", type=int, help="optimizer iterations (default 15)")
     start.add_argument("--particles", type=int, help="swarm/population size (default 24; CMA-ES requires at least 2)")
-    start.add_argument("--games", dest="games_per_eval", type=int, help="games per evaluation (strength: 32; sims-per-second: 4)")
+    start.add_argument("--games", dest="games_per_eval", type=int,
+                       help="games per evaluation (strength/game-score: 32; sims-per-second: 4)")
     start.add_argument("--spread", type=float,
                        help="initial spread around defaults in unit-cube units (CMA-ES sigma; default 0.3)")
-    start.add_argument("--gate-games", type=int, help="the release gate's limit on paired games (strength: 400; sims-per-second: 32)")
+    start.add_argument("--gate-games", type=int,
+                       help="the release gate's limit on paired games (strength/game-score: 400; sims-per-second: 32)")
     start.add_argument("--holdout-every", type=int, help="iterations between holdouts (default 5)")
     start.add_argument("--chunk", type=int, help="games per nana_emulate process (default 4)")
     start.add_argument("--seed", type=int, help="the optimiser's seed (default 1)")

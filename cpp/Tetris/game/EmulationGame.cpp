@@ -167,6 +167,7 @@ void EmulationGame::play_moves(){
     int cleared_lines = game.board.clearLines();
 
     lines += cleared_lines;
+    game_score += std::array{0,0,1,2,4}.at(cleared_lines);
 
     bool pc = true;
     for (int i = 0; i < Board::width; i++) {

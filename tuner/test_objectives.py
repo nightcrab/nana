@@ -17,6 +17,26 @@ class ObjectiveTests(unittest.TestCase):
         game.update(attack=0, pieces=1)
         self.assertEqual(fitness(game, 100, "sims-per-second"), 500_000)
 
+    def test_game_score_fitness_uses_emulator_metric(self):
+        self.assertEqual(fitness({"game_score": 17}, 100, "game-score"), 17)
+        with self.assertRaises(RunnerError):
+            fitness({"lines": 17}, 100, "game-score")
+
+    def test_gate_accepts_game_score_improvement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runner = Runner("unused", [0], directory)
+            stage = Stage({"name": "score", "sims": 1024, "objective": "game-score"})
+
+            def play(requests):
+                return {key: [{"game_score": config["game_score"]} for _ in range(n)]
+                        for key, config, _, _, n in requests}
+
+            with patch.object(runner, "play", side_effect=play):
+                result = run_gate(runner, stage, {"game_score": 3}, {"game_score": 2},
+                                  100, max_games=8, log=lambda _: None)
+            self.assertEqual(result["verdict"], "accept")
+            self.assertEqual(result["candidate"], 3)
+
     def test_bad_timing_is_rejected(self):
         for ms in (0, -1, float("nan"), float("inf")):
             with self.subTest(ms=ms), self.assertRaises(RunnerError):
@@ -60,7 +80,9 @@ class ObjectiveTests(unittest.TestCase):
 
             with patch.object(Runner, "print_config", return_value={"speed": 1}), \
                     patch.object(Runner, "_spawn", new=spawn), patch.object(Run, "health_checks"):
-                for objective, expected in (("strength", (32, 32, 400)), ("sims-per-second", (4, 8, 32))):
+                for objective, expected in (("strength", (32, 32, 400)),
+                                            ("sims-per-second", (4, 8, 32)),
+                                            ("game-score", (32, 32, 400))):
                     defaults = Run.create(os.path.join(directory, objective), binary, [0], [space],
                                           {"objective": objective, "sims": 1024})
                     self.assertEqual((defaults.settings["games_per_eval"], defaults.settings["holdout"]["games"],

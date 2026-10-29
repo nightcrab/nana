@@ -19,7 +19,7 @@ class Stage:
             raise ValueError(f"stage {self.name}: env {spec['env']!r}: only the hmm opponent is left")
         self.rules = spec.get("rules", "tetrio")
         self.objective = spec.get("objective", "strength")
-        if self.objective not in ("strength", "sims-per-second"):
+        if self.objective not in ("strength", "sims-per-second", "game-score"):
             raise ValueError(f"unknown objective: {self.objective}")
         self.spec = dict(spec)
 
@@ -38,6 +38,11 @@ def fitness(game, horizon, objective="strength"):
         if not (math.isfinite(sims) and sims > 0 and math.isfinite(ms) and ms > 0):
             raise RunnerError("sims-per-second needs positive, finite sims_per_move and ms_per_move from nana_emulate")
         return 1000.0 * sims / ms
+    if objective == "game-score":
+        score = game.get("game_score")
+        if not isinstance(score, (int, float)) or not math.isfinite(score):
+            raise RunnerError("game-score needs a finite game_score from nana_emulate")
+        return score
     if objective != "strength":
         raise ValueError(f"unknown objective: {objective}")
     return game["attack"] / horizon

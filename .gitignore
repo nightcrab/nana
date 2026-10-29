@@ -20,3 +20,4 @@ __pycache__/
 /ec2-*.log
 /speed.html
 *.aps
+/venv/

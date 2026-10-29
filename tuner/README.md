@@ -54,8 +54,8 @@ sims/s: `1000 * sims_per_move / ms_per_move`, averaged across games. This measur
 including search start/stop overhead, without process startup. It does not reward dying early by
 counting shorter games as faster. Timing varies, so increase `--games` if signal warnings persist;
 use a substantial sims count to avoid measuring mostly overhead. Speed gains can sacrifice strength.
-Single-threaded seed determinism is checked using attack; the strength canary and death-rate warning are skipped in
-speed mode. Existing runs resume with their original objective (strength for older runs).
+Single-threaded seed determinism is checked using the selected objective. The canary and death-rate warning are
+skipped in speed mode. Existing runs resume with their original objective (strength for older runs).
 
 To tune work stealing with three threads per game (rebuild `nana_emulate` for CPU-group support):
 
@@ -104,6 +104,15 @@ opponent, with the search modelling the same HMM.
 Fitness is attack per piece over a fixed horizon (100 pieces): pieces lost by dying early score no
 attack, so survival is part of the score.
 
+To optimise the emulator's `game_score` field instead, use 
+`--objective game-score`. Its calculation in `EmulationGame` 
+with the scoring rules you want before relying on it as a final
+Tetris score:
+
+```
+python -m tuner start score1 --nana build/cpp/nana_emulate.exe --cpus 0,2,4,6 --sims 8192 --objective game-score
+```
+
 The opponent's garbage is eased at small budgets, so a weak search survives long enough for the
 fitness to say something: x0.25 at 32 sims, x0.6 at 512, x0.8 at 2048, x1.0 from 8192 up
 (interpolated in log2 of the sims).
@@ -116,7 +125,7 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 | option | default | |
 |---|---|---|
 | `--budget-hours H` / `--sims N` | (one is required) | the time budget, or a fixed sims count |
-| `--objective` | `strength` | maximise attack/piece or `sims-per-second` (with the smaller defaults above) |
+| `--objective` | `strength` | maximise attack/piece, `game-score`, or `sims-per-second` (with the smaller defaults above) |
 | `--optimizer` | `pso` | optimizer: `pso` or `cmaes` |
 | `--threads` | 1 | search threads per game; must divide the CPU count (1–64) |
 | `--iterations` | 15 | optimizer iterations |

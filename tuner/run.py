@@ -341,7 +341,7 @@ class Run:
         game_sd = statistics.mean([statistics.stdev(s) for s in scores.values() if len(s) > 1] or [0.0])
         self.warnings = self.monitor.iteration(feedback.candidate_scores, game_sd, n,
                                                feedback.best_latest, best.mean, games.get(feedback.best_id),
-                                               self.state["baseline"] if s["objective"] == "strength" else None)
+                                               self.state["baseline"] if s["objective"] != "sims-per-second" else None)
         self.warnings += self.optimizer.warnings(self.space.names())
 
         seconds = time.monotonic() - started
@@ -422,7 +422,8 @@ class Run:
         done, total = self.state["iterations"], s["iterations"]
         lines = [f"run {self.dir}  ({self.rules()} rules, {self.state['hours']:.2f} h, {self.runner.games_played} games this session, "
                  f"{self.runner.failures} game failures)"]
-        lines.append(f"objective: {s['objective']}" + (" (sims/s)" if s["objective"] == "sims-per-second" else " (attack/piece)"))
+        labels = {"strength": "attack/piece", "sims-per-second": "sims/s", "game-score": "game score"}
+        lines.append(f"objective: {s['objective']} ({labels[s['objective']]})")
         lines.append(f"{self.runner.threads} threads per game, {self.runner.workers} concurrent games")
         if plan:
             lines.append(f"{self.state['phase']}: {plan['sims']} sims, garbage x{plan['garbage_scale']}, iteration "
