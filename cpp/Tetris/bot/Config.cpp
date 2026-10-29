@@ -1,5 +1,4 @@
 #include "Config.hpp"
-#include "PolicyFeatures.hpp"
 
 #include "Util/json.hpp"
 #include "Util/ExecutablePath.hpp"
@@ -74,8 +73,6 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("c_base", c.c_base);
     visit("depth_step", c.depth_step);
     visit("prior_exponent", c.prior_exponent);
-    visit("policy", c.policy);
-    visit("policy_model", c.policy_model);
     visit("n_cap", c.n_cap);
     visit("depth_cap", c.depth_cap);
     visit("eval", c.eval);
@@ -155,27 +152,6 @@ void finish(NanaConfig& c) {
     }
     if (c.depth_cap < 0) {
         fail("depth_cap must be nonnegative");
-    }
-    if (c.policy != "rank" && c.policy != "softmax") fail("policy must be rank or softmax");
-    if (c.policy == "softmax") {
-        if (c.eval != "nana") fail("softmax policy requires eval nana");
-        if (c.policy_model.empty()) fail("softmax policy requires policy_model");
-        const std::filesystem::path path = resolvePath(c, c.policy_model);
-        try {
-            std::ifstream in(path);
-            if (!in) fail("can't read policy model " + path.string());
-            const auto model = nlohmann::json::parse(in);
-            if (model.at("version") != 1 || model.at("feature_names") != nlohmann::json(PolicyFeatures::names) ||
-                model.at("feature_scales") != nlohmann::json(PolicyFeatures::scales))
-                fail("unsupported policy model feature basis");
-            readValue(model.at("scaled_weights"), "scaled_weights", c.policy_weights);
-            readValue(model.at("max_well_depth"), "max_well_depth", c.policy_max_well_depth);
-            if (c.policy_max_well_depth < 0 || c.policy_max_well_depth > 32)
-                fail("policy max_well_depth must be in [0, 32]");
-        } catch (const std::exception& e) {
-            fail("policy model " + path.string() + ": " + e.what());
-        }
-        c.policy_model = std::filesystem::absolute(path).lexically_normal().string();
     }
     if (c.opponent != "none" && c.opponent != "iohmm" && c.opponent != "neural") {
         fail("opponent must be none, iohmm or neural");

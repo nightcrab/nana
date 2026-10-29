@@ -28,6 +28,27 @@ namespace Eval {
 		int meter = 0;                    // incoming garbage
 	};
 
+	struct BoardFeatures {
+		int bottom, height, cavities, overhangs, covered, covered_sq, bumpiness, bumpiness_sq;
+		int transitions, well, well_depth;
+		bool top_half, top_quarter, low, perfect_clear, quad_ready;
+	};
+	struct MoveFeatures {
+		int lines, attack, time;
+		spinType spin;
+		bool perfect_clear, waste_t, back_to_back, b2b_clear;
+	};
+	BoardFeatures boardFeatures(const Board& board);
+	// `after` already has the piece placed and lines cleared; damage_sent updates its combo/B2B state.
+	MoveFeatures moveFeatures(const Game& parent, const Piece& piece, Game& after, int lines);
+
+	struct ActionEvaluation {
+		float value, move_reward;
+		bool convex;
+	};
+	// One placement and feature pass for the leaf value and move reward caches.
+	ActionEvaluation evaluateAction(const Context& context, const Piece& piece);
+
 	// the eval of context.mode; convex, when given, receives whether the board left behind is surface convex
 	// (always true outside the convex eval)
 	double evaluate(const Context& context, const Piece& piece, double* move_part = nullptr, bool* convex = nullptr);

@@ -111,7 +111,6 @@ nana_add_executable(nana_msgbench nana_core "benchmarks/msgbench.cpp")
 nana_add_executable(nana_emulate nana_core "emulate.cpp")
 nana_add_executable(nana_emulate_tbp nana_core "emulate_tbp.cpp")
 nana_add_executable(nana_eval_dump nana_core "eval_dump.cpp")
-nana_add_executable(nana_policy_fit nana_core "policy_fit.cpp")
 
 option(NANA_EVALCHECK "Build evaluator regression checks" OFF)
 if(NANA_EVALCHECK)

@@ -148,6 +148,11 @@ and a speed limit of 0.2 (in `PSO_DEFAULTS`, `tuner/pso.py`).
 
 ## Optimizer interface
 
+Search priors rank moves by their cached leaf evaluation and assign normalized
+`rank ** -prior_exponent` weights. Tune the leaf weights with `spaces/eval.json`
+and the rank power with `spaces/search.json`. Use PUCT search (`-DNANA_CC_SEARCH=0`,
+the default) for these priors.
+
 `tuner/optimizer.py` defines the optimizer contract and creation/restore functions. `Run` owns
 parameter decoding, game execution, shared seed blocks, generic health checks, holdouts, and the
 release gate. It uses opaque candidate IDs and does not inspect optimizer internals.

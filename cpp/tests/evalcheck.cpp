@@ -57,6 +57,13 @@ static void boardChecks() {
         check(Eval::cavities_overhangs(b) == std::pair{holes, overhangs}, "hole/overhang scalar reference");
         check(Eval::n_covered_cells(b) == std::pair{covered, squares}, "covered-cell scalar reference");
         check(Eval::get_row_transitions(b) == transitions, "transition scalar reference");
+        const auto features = Eval::boardFeatures(b);
+        check(features.cavities == holes && features.overhangs == overhangs,
+              "shared cavity/overhang features match scalar reference");
+        check(features.covered == covered && features.covered_sq == squares && features.transitions == transitions,
+              "shared covered-cell/transition features match scalar reference");
+        check(features.height == *std::max_element(heights, heights + 10) &&
+              features.bottom == *std::min_element(heights, heights + 10), "shared height features");
         Board mirror;
         for (int x = 0; x < 10; ++x) mirror.board[x] = b.board[9 - x];
         check(Eval::cavities_overhangs(b) == Eval::cavities_overhangs(mirror), "overhang reflection symmetry");
@@ -139,6 +146,14 @@ static void moveChecks() {
     check(near(Eval::evaluate(context, o, &belief_move) - high_total, belief.value(0, false) / 10000),
           "opponent belief contributes position value");
     check(near(move, belief_move), "belief must not enter move reward");
+    double joint_move = 0;
+    bool joint_convex = false;
+    const double joint_value = Eval::evalNana(context, o, &joint_move, &joint_convex);
+    check(near(joint_value, Eval::evaluate(context, o)) && near(joint_move, belief_move),
+          "joint evaluation preserves leaf value and move reward");
+    const auto cached = Eval::evaluateAction(context, o);
+    check(cached.value == float(joint_value) && cached.move_reward == float(joint_move) && cached.convex == joint_convex,
+          "joint cache result preserves value/reward rounding");
     belief.value(15, true);
     check(near(belief.value(20, true), filter.value_after(20, true, 0, c.belief_weights)),
           "large attacks do not alias the attack-15 belief cache");

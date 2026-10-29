@@ -1,6 +1,5 @@
-// Dumps node priors and shared features for independent inference checks.
+// Dumps node priors and cached leaf scores for independent rank checks.
 #include "EmulateCommon.hpp"
-#include "PolicyFeatures.hpp"
 #include "UCT.hpp"
 #include "Util/json.hpp"
 #include <iostream>
@@ -19,12 +18,8 @@ int main() {
         }
         UCTNode node(game);
         nlohmann::json actions = nlohmann::json::array();
-        const int garbage_height = game.game.board.get_garbage_height();
         for (size_t i = 0; i < node.actionCount(); ++i) {
-            Piece p = node.move(i).piece;
-            p.position.y += garbage_height;
-            const auto raw = PolicyFeatures::features(game.game, p, config().policy_max_well_depth);
-            actions.push_back({{"features", raw}, {"prior", node.stats(i).prior},
+            actions.push_back({{"prior", node.stats(i).prior},
                 {"eval", node.eval(i)}, {"move_reward", node.cold[i].move_reward}});
         }
         std::cout << actions.dump() << '\n';
