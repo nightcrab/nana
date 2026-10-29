@@ -114,6 +114,120 @@
   "high": 0.1
  },
  {
+  "name": "opp_cond_mean[0]",
+  "default": 6.0,
+  "low": 0,
+  "high": 12
+ },
+ {
+  "name": "opp_cond_mean[1]",
+  "default": 10.0,
+  "low": 0,
+  "high": 20
+ },
+ {
+  "name": "opp_cond_mean[2]",
+  "default": 7.5,
+  "low": 0,
+  "high": 15
+ },
+ {
+  "name": "opp_cond_mean[3]",
+  "default": 5.0,
+  "low": 0,
+  "high": 10
+ },
+ {
+  "name": "opp_cond_mean[4]",
+  "default": 20.0,
+  "low": 0,
+  "high": 40
+ },
+ {
+  "name": "opp_cond_mean[5]",
+  "default": 150.0,
+  "low": 0,
+  "high": 300
+ },
+ {
+  "name": "opp_cond_mean[6]",
+  "default": 15.0,
+  "low": 0,
+  "high": 30
+ },
+ {
+  "name": "opp_cond_mean[7]",
+  "default": 75.0,
+  "low": 0,
+  "high": 150
+ },
+ {
+  "name": "opp_cond_mean[8]",
+  "default": 60.0,
+  "low": 30,
+  "high": 90
+ },
+ {
+  "name": "opp_cond_mean[9]",
+  "default": 4.5,
+  "low": 0,
+  "high": 9
+ },
+ {
+  "name": "opp_cond_mean[10]",
+  "default": 7.5,
+  "low": 0,
+  "high": 15
+ },
+ {
+  "name": "opp_cond_mean[11]",
+  "default": 0.5,
+  "low": 0,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_mean[12]",
+  "default": 0.5,
+  "low": 0,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_mean[13]",
+  "default": 0.5,
+  "low": 0,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_mean[14]",
+  "default": 0.5,
+  "low": 0,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_mean[15]",
+  "default": 0.5,
+  "low": 0,
+  "high": 1
+ },
+ {
+  "name": "opp_cond_mean[16]",
+  "default": 10.0,
+  "low": 0,
+  "high": 20
+ },
+ {
+  "name": "opp_cond_mean[17]",
+  "default": 5.0,
+  "low": 0,
+  "high": 10
+ },
+ {
+  "name": "opp_cond_mean[18]",
+  "default": 5.0,
+  "low": 0,
+  "high": 10
+ },
+ {
   "name": "opp_cond_v[0]",
   "default": 0,
   "low": -1000,

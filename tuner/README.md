@@ -294,13 +294,15 @@ Every iteration, in `status.txt` and the log:
   2.5 x the larger of the tuned value and Cold Clear's weight for the term (at least 20), rounded up;
   all ten well columns share +-150. A result near a bound means the bound was wrong: widen it there;
 - `search.json`: how it searches. `c_init`, `c_base`, `n_cap`, `depth_step`, `prior_exponent`.
-- `opponent_conditioning.json`: all 67 opponent-conditioning weights: `opp_cond_u[0..18]`
-  (the opponent gate) and `opp_cond_v[0..47]` (the placement direction), in the enum order in
-  `cpp/Tetris/bot/OpponentConditioning.hpp`. Defaults are zero, matching the disabled term in
-  `NanaConfig`; `opp_cond_mean` stays at the base config's fixed values. Initial bounds are
+- `conditional.json`: all 86 opponent-conditioning parameters: `opp_cond_u[0..18]` (the
+  opponent gate), `opp_cond_mean[0..18]` (the gate's centre) and `opp_cond_v[0..47]` (the
+  placement direction), in the enum order in `cpp/Tetris/bot/OpponentConditioning.hpp`.
+  `u` and `v` default to zero, matching the disabled term in `NanaConfig`. Each mean spans the
+  plausible range of its opponent feature on a live field and defaults to the midpoint, so the
+  swarm searches for the centre rather than starting the gate uncentred. `u` and `v` bounds are
   symmetric: gate bounds scale inversely with feature magnitude, and placement bounds use
   the corresponding eval-space magnitudes, allowing either sign of adjustment. These are
-  starting ranges, not measured limits. Use `--space tuner/spaces/opponent_conditioning.json`
+  starting ranges, not measured limits. Use `--space tuner/spaces/conditional.json`
   with `--objective stadium`, `--bot`, and `--stadium`: the TBP bot sets the gate from the
   visible opponent, while the emulator does not supply this state. Use `--eval nana` to
   exercise spin features too (`convex` zeros them). Repeat `--space` to tune eval weights
