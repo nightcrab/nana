@@ -236,8 +236,8 @@
  {
   "name": "opp_cond_v[1]",
   "default": 0,
-  "low": -1000,
-  "high": 1000
+  "low": -450,
+  "high": 450
  },
  {
   "name": "opp_cond_v[2]",
@@ -266,8 +266,8 @@
  {
   "name": "opp_cond_v[6]",
   "default": 0,
-  "low": -400,
-  "high": 400
+  "low": -300,
+  "high": 300
  },
  {
   "name": "opp_cond_v[7]",
@@ -278,8 +278,8 @@
  {
   "name": "opp_cond_v[8]",
   "default": 0,
-  "low": -2000,
-  "high": 2000
+  "low": -500,
+  "high": 500
  },
  {
   "name": "opp_cond_v[9]",
@@ -332,14 +332,14 @@
  {
   "name": "opp_cond_v[17]",
   "default": 0,
-  "low": -30,
-  "high": 30
+  "low": -9,
+  "high": 9
  },
  {
   "name": "opp_cond_v[18]",
   "default": 0,
-  "low": -400,
-  "high": 400
+  "low": -250,
+  "high": 250
  },
  {
   "name": "opp_cond_v[19]",
@@ -350,32 +350,32 @@
  {
   "name": "opp_cond_v[20]",
   "default": 0,
-  "low": -100,
-  "high": 100
+  "low": -40,
+  "high": 40
  },
  {
   "name": "opp_cond_v[21]",
   "default": 0,
-  "low": -1000,
-  "high": 1000
+  "low": -250,
+  "high": 250
  },
  {
   "name": "opp_cond_v[22]",
   "default": 0,
-  "low": -80,
-  "high": 80
+  "low": -20,
+  "high": 20
  },
  {
   "name": "opp_cond_v[23]",
   "default": 0,
-  "low": -400,
-  "high": 400
+  "low": -150,
+  "high": 150
  },
  {
   "name": "opp_cond_v[24]",
   "default": 0,
-  "low": -50,
-  "high": 50
+  "low": -5,
+  "high": 5
  },
  {
   "name": "opp_cond_v[25]",
@@ -386,32 +386,32 @@
  {
   "name": "opp_cond_v[26]",
   "default": 0,
-  "low": -200,
-  "high": 200
+  "low": -150,
+  "high": 150
  },
  {
   "name": "opp_cond_v[27]",
   "default": 0,
-  "low": -80,
-  "high": 80
+  "low": -35,
+  "high": 35
  },
  {
   "name": "opp_cond_v[28]",
   "default": 0,
-  "low": -50,
-  "high": 50
+  "low": -4.5,
+  "high": 4.5
  },
  {
   "name": "opp_cond_v[29]",
   "default": 0,
-  "low": -80,
-  "high": 80
+  "low": -20,
+  "high": 20
  },
  {
   "name": "opp_cond_v[30]",
   "default": 0,
-  "low": -80,
-  "high": 80
+  "low": -2.5,
+  "high": 2.5
  },
  {
   "name": "opp_cond_v[31]",
@@ -452,8 +452,8 @@
  {
   "name": "opp_cond_v[37]",
   "default": 0,
-  "low": -150,
-  "high": 150
+  "low": -50,
+  "high": 50
  },
  {
   "name": "opp_cond_v[38]",
@@ -482,8 +482,8 @@
  {
   "name": "opp_cond_v[42]",
   "default": 0,
-  "low": -80,
-  "high": 80
+  "low": -50,
+  "high": 50
  },
  {
   "name": "opp_cond_v[43]",
@@ -512,7 +512,7 @@
  {
   "name": "opp_cond_v[47]",
   "default": 0,
-  "low": -800,
-  "high": 800
+  "low": -450,
+  "high": 450
  }
 ]
