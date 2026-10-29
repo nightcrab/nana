@@ -111,7 +111,8 @@ with support for the `threads`, `thinks`, and `garbage_delay` settings, as used 
 
 Fitness is 1 for a win, 0.5 for a draw, and 0 for a loss. Both bots receive the selected
 simulation budget, sides alternate, and each concurrent match reserves `2 * --threads`
-CPUs shared by the two bots. The CPU count must be divisible by that number. Matches run
+CPUs for the two bots; on Linux each bot is pinned to its own CPU group. The CPU count
+must be divisible by that number. Matches run
 to completion, without the emulator's horizon or eased garbage. Botris selects one-turn
 garbage delay; TETR.IO selects zero delay.
 

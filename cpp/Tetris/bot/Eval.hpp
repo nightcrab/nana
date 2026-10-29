@@ -6,6 +6,7 @@
 #include "Move.hpp"
 #include "Belief.hpp"
 
+#include <cstdint>
 #include <vector>
 
 // Every eval scores placing a piece: 1 is neutral, 0 is death. move_part, when given, receives the share that
@@ -39,6 +40,14 @@ namespace Eval {
 		bool perfect_clear, waste_t, back_to_back, b2b_clear;
 	};
 	BoardFeatures boardFeatures(const Board& board);
+
+	// Opponent conditioning's gate g for the current search (0 = off). Only written while no search runs.
+	inline float opponent_gate = 0;
+	// Advances whenever g changes; a Q stored under an older epoch was backed up from evals of another g.
+	inline uint32_t q_epoch = 0;
+	// g from the opponent's visible state; 0 unless opp_cond_u and opp_cond_v both have a nonzero weight
+	float opponentGate(const Board& board, int meter, int b2b, int combo);
+	void setOpponentGate(float gate);
 	// `after` already has the piece placed and lines cleared; damage_sent updates its combo/B2B state.
 	MoveFeatures moveFeatures(const Game& parent, const Piece& piece, Game& after, int lines);
 

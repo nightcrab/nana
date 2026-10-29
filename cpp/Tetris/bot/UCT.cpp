@@ -99,7 +99,7 @@ Reward UCTNode::climb(size_t i, Reward reward, bool carried) {
 }
 
 #if !NANA_CC_SEARCH
-void ChildTable::put(uint32_t child, Reward V, float k) {
+void ChildTable::put(NodeKey child, Reward V, float k) {
 	if (first.n == 0 || first.hash == child) {
 		first = { child, first.n + k, V };
 		return;
@@ -116,6 +116,13 @@ void ChildTable::put(uint32_t child, Reward V, float k) {
 	}
 	rest_sum += scaled(V, k);
 	rest_n += k;
+}
+
+void ChildTable::clearValues() {
+	first = {};
+	more.reset();
+	rest_n = 0;
+	rest_sum = {};
 }
 
 Reward ChildTable::sum(float& n) const {
@@ -146,13 +153,24 @@ static bool counts(const ChildTable& t) {
 	return NANA_EXPECTIMAX_MIN_N <= 1 ? t.completed > 0 : t.completed >= NANA_EXPECTIMAX_MIN_N;
 }
 
-Reward UCTNode::report(size_t i, uint32_t child, Reward V, float k, bool fresh) {
+Reward UCTNode::report(size_t i, NodeKey child, Reward V, float k, bool fresh) {
 	ChildTable& t = cold[i].children;
+	const uint32_t now = Eval::q_epoch;
+	if (cold[i].epoch != now) {
+		// The children's values were backed up under another gate: the newest value replaces them as the arm's
+		// Q, and the visit mass stays so selection still moves off the arm if it got worse.
+		t.clearValues();
+		cold[i].epoch = now;
+	}
 	t.put(child, V, k);
 	t.completed = fresh ? t.completed * (float)decay() + k : t.completed + k;
 	Reward arm;
 	const float q = armValue(i, arm);
 	edge_stats[i].R = q * t.completed;
+	// a stale arm must not hold the node's value up
+	if (best >= 0 && cold[best].epoch != now) {
+		rescanBest();
+	}
 
 	if (counts(t)) {
 		if ((int)i == best) {
@@ -176,7 +194,7 @@ Reward UCTNode::report(size_t i, uint32_t child, Reward V, float k, bool fresh) 
 void UCTNode::rescanBest() {
 	best = -1;
 	for (size_t j = 0; j < actionCount(); j++) {
-		if (!counts(cold[j].children)) {
+		if (!counts(cold[j].children) || cold[j].epoch != Eval::q_epoch) {
 			continue;
 		}
 		Reward arm;
@@ -282,6 +300,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		c.move = PackedMove::pack(Move(raw_action, false));
 		c.eval = eval;
 		c.move_reward = evaluated.move_reward;
+		c.epoch = Eval::q_epoch;
 #ifndef NDEBUG
 		const Move unpacked = c.move.unpack();
 		assert(std::memcmp(&unpacked.piece.minos, &raw_action.minos, sizeof(raw_action.minos)) == 0);
@@ -490,7 +509,7 @@ size_t UCTNode::selectWithCompetitors(int depth, HistoryRow& row) const {
 	return best_action;
 }
 
-HistoryRow UCTNode::historyRow(uint32_t hash, size_t chosen_id, int depth) const {
+HistoryRow UCTNode::historyRow(NodeKey hash, size_t chosen_id, int depth) const {
 	const EdgeStats& chosen = stats(chosen_id);
 	HistoryRow row;
 	row.hash = hash;
@@ -621,29 +640,29 @@ size_t UCTNode::select_SOR(RNG &rng) {
 	return (size_t)sample(policy, rng);
 }
 
-bool UCT::nodeExists(uint32_t nodeID) {
+bool UCT::nodeExists(NodeKey nodeID) {
 	// node could be on left or right side
-	bool exists = nodes_left[nodeID % workers]->find(nodeID) != nodes_left[nodeID % workers]->end();
-	exists = exists || (nodes_right[nodeID % workers]->find(nodeID) != nodes_right[nodeID % workers]->end());
+	bool exists = nodes_left[getOwner(nodeID)]->find(nodeID) != nodes_left[getOwner(nodeID)]->end();
+	exists = exists || (nodes_right[getOwner(nodeID)]->find(nodeID) != nodes_right[getOwner(nodeID)]->end());
 	return exists;
 }
 
 
-UCTNode& UCT::getNode(uint32_t nodeID, int threadIdx) {
+UCTNode& UCT::getNode(NodeKey nodeID, int threadIdx) {
 	assert(getOwner(nodeID) == (uint32_t)threadIdx);
 
 	return getNode(nodeID);
 };
 
-UCTNode& UCT::getNode(uint32_t nodeID) {
-	auto& right = nodes_right[nodeID % workers].obj_;
+UCTNode& UCT::getNode(NodeKey nodeID) {
+	auto& right = nodes_right[getOwner(nodeID)].obj_;
 
 	auto it = right.find(nodeID);
 	if (it != right.end()) {
 		return it->second;
 	}
 
-	auto& left = nodes_left[nodeID % workers].obj_;
+	auto& left = nodes_left[getOwner(nodeID)].obj_;
 	auto left_it = left.find(nodeID);
 	insertNode(std::move(left_it->second));
 	left.erase(left_it);
@@ -653,16 +672,16 @@ UCTNode& UCT::getNode(uint32_t nodeID) {
 
 
 bool UCT::insertNode(UCTNode node) {
-	const uint32_t id = node.id;
+	const NodeKey id = node.id;
 
 	// insertions always done on right side
-	stats[id % workers].nodes++;
+	stats[getOwner(id)].nodes++;
 
-	return nodes_right[id % workers]->try_emplace(id, std::move(node)).second;
+	return nodes_right[getOwner(id)]->try_emplace(id, std::move(node)).second;
 };
 
-uint32_t UCT::getOwner(uint32_t hash) {
-	return hash % workers;
+uint32_t UCT::getOwner(NodeKey hash) {
+	return (uint32_t)(hash % (NodeKey)workers);
 }
 
 void UCT::collect() {

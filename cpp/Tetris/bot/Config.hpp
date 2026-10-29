@@ -1,5 +1,7 @@
 #pragma once
 
+#include "OpponentConditioning.hpp"
+
 #include <array>
 #include <string>
 
@@ -65,6 +67,11 @@ struct NanaConfig {
     // the neural opponent's exported model directory
     std::string neural_model;
     std::array<double, 8> belief_weights{};
+    // opponent conditioning (OpponentConditioning.hpp): gate weights u, the opponent features' centre, and the
+    // eval direction v
+    std::array<double, OpponentFeature::COUNT> opp_cond_u{};
+    std::array<double, OpponentFeature::COUNT> opp_cond_mean{};
+    std::array<double, PlacementFeature::COUNT> opp_cond_v{};
 
     double app_weight = 0.4501576877732511;
     double eval_weight = 1.846117229394713;

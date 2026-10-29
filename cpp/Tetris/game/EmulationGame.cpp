@@ -402,27 +402,27 @@ std::vector<Move> EmulationGame::legal_moves() {
 #define NANA_HASH_METER 1
 #endif
 
-uint32_t EmulationGame::hash() const {
+NodeKey EmulationGame::hash() const {
     Board board = game.board;
     int gheight = board.get_garbage_height();
     for (auto& row : board.board) {
         row = row >> gheight;
     }
-    uint32_t hash = fasthash32(&board, sizeof(Board), 0x9012'3456);
-    hash = fasthash32(&game.current_piece.type, sizeof(PieceType), hash);
-    hash = fasthash32(&game.b2b, sizeof(u16), hash);
-    hash = fasthash32(&game.combo, sizeof(u16), hash);
+    NodeKey hash = fasthash64(&board, sizeof(Board), 0x9012'3456);
+    hash = fasthash64(&game.current_piece.type, sizeof(PieceType), hash);
+    hash = fasthash64(&game.b2b, sizeof(u16), hash);
+    hash = fasthash64(&game.combo, sizeof(u16), hash);
     if (game.hold)
-        hash = fasthash32(&*game.hold, sizeof(*game.hold), hash);
+        hash = fasthash64(&*game.hold, sizeof(*game.hold), hash);
     else
-        hash = fasthash32(&game.queue.front(), sizeof(PieceType), hash);
+        hash = fasthash64(&game.queue.front(), sizeof(PieceType), hash);
     if constexpr (NANA_HASH_METER) {
         for (int garbage : garbage_meter) {
-            hash = fasthash32(&garbage, sizeof(garbage), hash);
+            hash = fasthash64(&garbage, sizeof(garbage), hash);
         }
     }
     for (int garbage : phantom_meter) {
-        hash = fasthash32(&garbage, sizeof(garbage), hash);
+        hash = fasthash64(&garbage, sizeof(garbage), hash);
     }
     return hash;
 }

@@ -60,7 +60,7 @@ namespace Search {
     void processJob(const int threadIdx, Msg&& msg);
 
     template <class Opp>
-    Reward rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_board);
+    Reward rollout(EmulationGame& state, int threadIdx, size_t depth, float parent_estimate);
 
     void printStatistics();
 

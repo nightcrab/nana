@@ -4,6 +4,7 @@ from contextlib import closing
 import os
 from pathlib import Path
 import shutil
+import shlex
 import sqlite3
 import tempfile
 import time
@@ -33,7 +34,7 @@ class StadiumRunner(Runner):
         self.match_dir = os.path.abspath(os.path.join(workdir, "matches"))
         os.makedirs(self.match_dir, exist_ok=True)
 
-    def _bot_copy(self, directory, config):
+    def _bot_copy(self, directory, config, cpus):
         directory.mkdir()
         target = directory / self.bot.name
         shutil.copy2(self.bot, target)
@@ -41,6 +42,13 @@ class StadiumRunner(Runner):
         for dll in self.bot.parent.glob("*.dll"):
             shutil.copy2(dll, directory / dll.name)
         (directory / "nana.json").write_text(json.dumps(dict(config, threads=self.threads)))
+        if os.name != "nt":
+            # Both bots otherwise pin their first search worker to the first
+            # CPU in the stadium's inherited mask, leaving half the cores idle.
+            launcher = directory / "bot.sh"
+            launcher.write_text(f"#!/bin/sh\nexec taskset -c {','.join(map(str, cpus))} {shlex.quote(str(target))}\n")
+            launcher.chmod(0o700)
+            return str(launcher)
         return str(target)
 
     def _run_chunk(self, config_path, stage, seed0, games):
@@ -52,8 +60,8 @@ class StadiumRunner(Runner):
             with tempfile.TemporaryDirectory(dir=self.match_dir) as temporary:
                 root = Path(temporary)
                 with open(config_path) as stream:
-                    candidate = self._bot_copy(root / "candidate", json.load(stream))
-                baseline = self._bot_copy(root / "baseline", stage.config(self.baseline_config))
+                    candidate = self._bot_copy(root / "candidate", json.load(stream), cpus[:self.threads])
+                baseline = self._bot_copy(root / "baseline", stage.config(self.baseline_config), cpus[self.threads:])
                 results = []
                 # Each launch changes sides; the upstream CLI has no seed interface.
                 for i in range(games):

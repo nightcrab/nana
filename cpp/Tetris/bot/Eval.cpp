@@ -326,6 +326,68 @@ Slots slotFeatures(const Game& after, const std::vector<PieceType>& bag_left) {
 
 namespace {
 
+bool nonzero(const auto& weights) {
+    return std::any_of(weights.begin(), weights.end(), [](double w) { return w != 0; });
+}
+
+bool conditioningActive() {
+    static const bool active = nonzero(config().opp_cond_u) && nonzero(config().opp_cond_v);
+    return active;
+}
+
+bool conditioningUsesSlots() {
+    const auto& v = config().opp_cond_v;
+    static const bool uses = std::any_of(v.begin() + PlacementFeature::TSLOT, v.end(), [](double w) { return w != 0; });
+    return uses;
+}
+
+struct Conditioned {
+    double move = 0, board = 0;
+};
+
+// v · f for one placement, split into the move's share and the board's share.
+Conditioned conditionedFeatures(const Eval::BoardFeatures& f, const Eval::MoveFeatures& m, const Slots& slots,
+                                bool no_spin, const NanaConfig& c) {
+    namespace P = PlacementFeature;
+    std::array<double, P::COUNT> x{};
+    const bool full = m.spin == spinType::normal, mini = m.spin == spinType::mini;
+    x[P::CLEARS + m.lines] = 1;
+    if (!no_spin && full && m.lines < 4) x[P::TSPINS + m.lines] = 1;
+    if (!no_spin && mini && m.lines < 3) x[P::MINI_TSPINS + m.lines] = 1;
+    x[P::PERFECT_CLEAR] = m.perfect_clear;
+    x[P::WASTED_T] = !no_spin && m.waste_t;
+    x[P::B2B_CLEAR] = m.b2b_clear;
+    x[P::ATTACK] = m.lines > 0 ? m.attack : 0;
+    x[P::TIME] = m.time;
+    x[P::JEOPARDY] = std::max(f.height - 10, 0) * m.time / 10.0;
+    x[P::TOP_HALF] = f.top_half;
+    x[P::TOP_QUARTER] = f.top_quarter;
+    x[P::LOW] = f.low;
+    x[P::CAVITIES] = f.cavities;
+    x[P::CAVITIES_SQ] = f.cavities * f.cavities;
+    if (!no_spin) {
+        x[P::OVERHANGS] = f.overhangs;
+        x[P::OVERHANGS_SQ] = f.overhangs * f.overhangs;
+    }
+    x[P::HEIGHT] = f.height;
+    x[P::QUAD_READY] = f.quad_ready;
+    x[P::COVERED] = f.covered;
+    x[P::COVERED_SQ] = f.covered_sq;
+    x[P::BUMPINESS] = f.bumpiness;
+    x[P::BUMPINESS_SQ] = f.bumpiness_sq;
+    x[P::WELL_COLUMNS + f.well] = 1;
+    x[P::WELL_DEPTH] = std::min(f.well_depth, c.max_well_depth);
+    x[P::TRANSITIONS] = f.transitions;
+    x[P::BACK_TO_BACK] = m.back_to_back;
+    if (!no_spin) {
+        for (int i = 0; i < slots.count; ++i) x[P::TSLOT + slots.clears[i]] += 1;
+    }
+    Conditioned out;
+    for (int i = 0; i < P::BOARD; ++i) out.move += c.opp_cond_v[i] * x[i];
+    for (int i = P::BOARD; i < P::COUNT; ++i) out.board += c.opp_cond_v[i] * x[i];
+    return out;
+}
+
 double scorePlacement(const Eval::BoardFeatures& features, const Eval::MoveFeatures& move_features,
                       const Slots& slots, double belief, bool no_spin, const NanaConfig& c, double* move_part) {
     const int lines=move_features.lines, attack=move_features.attack;
@@ -368,6 +430,12 @@ double scorePlacement(const Eval::BoardFeatures& features, const Eval::MoveFeatu
 
     position += belief;
 
+    if (const float gate = Eval::opponent_gate; gate != 0) {
+        const Conditioned conditioned = conditionedFeatures(features, move_features, slots, no_spin, c);
+        extra_move += gate * conditioned.move;
+        position += gate * conditioned.board;
+    }
+
     if (move_part) {
         *move_part = (move + extra_move) / 10000;
     }
@@ -409,14 +477,48 @@ double Eval::evalNana(const Context& context, const Piece& piece, double* move_p
     }
 
     const auto features = boardFeatures(after.board);
-    auto nonzero = [](const auto& weights) {
-        return std::any_of(weights.begin(), weights.end(), [](double w) { return w != 0; });
-    };
     Slots slots;
-    if (!no_spin && nonzero(c.tslot))
+    if (!no_spin && (nonzero(c.tslot) || (opponent_gate != 0 && conditioningUsesSlots())))
         slots = slotFeatures(after, context.bag_left);
     const double belief = context.belief ? context.belief->value(attack, lines > 0) : 0;
     return scorePlacement(features, move_features, slots, belief, no_spin, c, move_part);
+}
+
+float Eval::opponentGate(const Board& board, int meter, int b2b, int combo) {
+    if (!conditioningActive()) return 0;
+    namespace O = OpponentFeature;
+    const BoardFeatures f = boardFeatures(board);
+    std::array<double, O::COUNT> o{};
+    o[O::BOTTOM] = f.bottom;
+    o[O::HEIGHT] = f.height;
+    o[O::CAVITIES] = f.cavities;
+    o[O::OVERHANGS] = f.overhangs;
+    o[O::COVERED] = f.covered;
+    o[O::COVERED_SQ] = f.covered_sq;
+    o[O::BUMPINESS] = f.bumpiness;
+    o[O::BUMPINESS_SQ] = f.bumpiness_sq;
+    o[O::TRANSITIONS] = f.transitions;
+    o[O::WELL] = f.well;
+    o[O::WELL_DEPTH] = f.well_depth;
+    o[O::TOP_HALF] = f.top_half;
+    o[O::TOP_QUARTER] = f.top_quarter;
+    o[O::LOW] = f.low;
+    o[O::PERFECT_CLEAR] = f.perfect_clear;
+    o[O::QUAD_READY] = f.quad_ready;
+    o[O::METER] = meter;
+    o[O::B2B] = b2b;
+    o[O::COMBO] = combo;
+    const auto& c = config();
+    double g = 0;
+    for (int i = 0; i < O::COUNT; ++i) g += c.opp_cond_u[i] * (o[i] - c.opp_cond_mean[i]);
+    return (float)std::clamp(g, -1.0, 1.0);
+}
+
+void Eval::setOpponentGate(float gate) {
+    if (gate != opponent_gate) {
+        opponent_gate = gate;
+        ++q_epoch;
+    }
 }
 
 double Eval::evalNana(const Game& game, const Piece& piece, double* move_part) {

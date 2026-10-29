@@ -102,10 +102,10 @@ static_assert(!cc_search || !NANA_MPMCTS,
 
 
 static EmulationGame replay_root(false);
-static uint32_t replay_root_hash = 0;
+static NodeKey replay_root_hash = 0;
 
 template <class Opp>
-[[maybe_unused]] static size_t replayPath(const Job& job, uint32_t restart_hash, EmulationGame& state) {
+[[maybe_unused]] static size_t replayPath(const Job& job, NodeKey restart_hash, EmulationGame& state) {
     state = replay_root;
     state.start_from_root<Opp>();
     const size_t depth = job.path.size();
@@ -113,7 +113,7 @@ template <class Opp>
         state.set_move(state.specific_move(job.moves[i].unpack()));
         state.play_moves<Opp>();
         state.chance_move<Opp>();
-        const uint32_t expected = i + 1 < depth ? job.path[i + 1].hash : restart_hash;
+        const NodeKey expected = i + 1 < depth ? job.path[i + 1].hash : restart_hash;
         if (state.game_over || state.hash() != expected) {
             return i + 1;
         }
@@ -282,7 +282,7 @@ static std::vector<WorkerLocal> worker_local;
 // Per owner, ids of nodes that may hold parked visits, so the end-of-search
 // flush touches only those nodes, never the whole tree. Entries can repeat or
 // go stale; the flush dedups and filters them.
-static std::vector<std::vector<uint32_t>> parked_ids;
+static std::vector<std::vector<NodeKey>> parked_ids;
 
 static void noteParked(int threadIdx, const UCTNode& node) {
     if (node.N_buffer == 0) {
@@ -291,7 +291,7 @@ static void noteParked(int threadIdx, const UCTNode& node) {
 }
 
 // Lookup that doesn't promote an old-generation node, unlike UCT::getNode.
-static UCTNode* findNode(uint32_t id) {
+static UCTNode* findNode(NodeKey id) {
     for (auto* side : { &Search::uct.nodes_right, &Search::uct.nodes_left }) {
         auto& map = (*side)[id % Search::uct.workers].obj_;
         auto it = map.find(id);
@@ -308,9 +308,9 @@ struct alignas(64) DepthBaseline {
 
     float mean(size_t d) const { return count[d] > 0 ? (float)(sum[d] / count[d]) : 0.0f; }
 
-    float correct(size_t d, float raw, float parent_board) {
+    float correct(size_t d, float raw, float parent_estimate) {
         d = std::min(d, MAX_PATH_DEPTH);
-        sum[d] += raw - parent_board;
+        sum[d] += raw - parent_estimate;
         count[d] += 1;
         float drift = 0;
         for (size_t k = 1; k <= d; k++) {
@@ -514,7 +514,7 @@ static size_t mostVisited(const UCTNode& root, const std::vector<float>* extra_N
 
 static void flushParked() {
     using Search::uct;
-    const uint32_t root_hash = Search::root_state.hash();
+    const NodeKey root_hash = Search::root_state.hash();
     if (!uct.nodeExists(root_hash)) {
         return;
     }
@@ -524,11 +524,11 @@ static void flushParked() {
 
     // Ids, not pointers: getNode below moves old-generation nodes, which would
     // leave a pointer to a parked node dangling.
-    std::vector<uint32_t> parked;
-    for (std::vector<uint32_t>& ids : parked_ids) {
+    std::vector<NodeKey> parked;
+    for (std::vector<NodeKey>& ids : parked_ids) {
         std::sort(ids.begin(), ids.end());
         ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-        for (const uint32_t id : ids) {
+        for (const NodeKey id : ids) {
             const UCTNode* node = findNode(id);
             if (node && (node->N_buffer != 0 || !rewardEmpty(node->R_buffer))) {
                 parked.push_back(id);
@@ -537,7 +537,7 @@ static void flushParked() {
         ids.clear();
     }
 
-    for (const uint32_t id : parked) {
+    for (const NodeKey id : parked) {
         UCTNode* node = findNode(id);
         if (!node) {
             continue;
@@ -550,7 +550,7 @@ static void flushParked() {
 #endif
         UCTNode* child = node;
         for (size_t step = 0; step < MAX_PATH_DEPTH; step++) {
-            const uint32_t parent_hash = child->parent_hash;
+            const NodeKey parent_hash = child->parent_hash;
             const int action = child->parent_action;
             if (action < 0 || child->id == root_hash || !uct.nodeExists(parent_hash)) {
                 break;
@@ -923,7 +923,7 @@ template <class Opp>
         state.set_move(state.specific_move(job.moves[i].unpack()));
         state.play_moves<Opp>();
         state.chance_move<Opp>();
-        const uint32_t expected = i + 1 < depth ? job.path[i + 1].hash : job.child_hash;
+        const NodeKey expected = i + 1 < depth ? job.path[i + 1].hash : job.child_hash;
         if (state.game_over || state.hash() != expected) {
             keep = i + 1;
             break;
@@ -1030,7 +1030,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
         // the owner runs parked expansions only once its queue is empty, so another job parked for
         // the same state may have expanded it meanwhile: select into that node instead of expanding
         // it again (the depth cap's leaves are expanded on purpose, as SELECT does)
-        if (const uint32_t hash = job.state.hash();
+        if (const NodeKey hash = job.state.hash();
             uct.getOwner(hash) == (uint32_t)threadIdx && uct.nodeExists(hash) && job.path.size() < leafDepth()) {
             job.type = SELECT;
             send(threadIdx, threadIdx, std::move(msg));
@@ -1039,7 +1039,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         uct.stats[threadIdx].nodes++;
 
-        Reward reward = rollout<Opp>(job.state, threadIdx, job.path.size(), job.parent_board);
+        Reward reward = rollout<Opp>(job.state, threadIdx, job.path.size(), job.parent_estimate);
 
         uint32_t parentIdx = uct.getOwner(job.path.back().hash);
 
@@ -1060,19 +1060,19 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 
         int depth = state.pieces;
 
-        uint32_t hash = state.hash();
+        NodeKey hash = state.hash();
         job.child_hash = hash;
 
         if (state.game_over) {
 
-            Reward reward = rollout<Opp>(state, threadIdx, job.path.size(), job.parent_board);
+            Reward reward = rollout<Opp>(state, threadIdx, job.path.size(), job.parent_estimate);
 
             if (job.path.empty()) {
                 notifySimulationDone();
                 return;
             }
 
-            uint32_t parent_hash = job.path.back().hash;
+            NodeKey parent_hash = job.path.back().hash;
 
             uint32_t parentIdx = uct.getOwner(parent_hash);
 
@@ -1170,7 +1170,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
                 }
             }
             job.moves.push_back(node.cold[action].move);
-            job.parent_board = node.cold[action].eval - node.cold[action].move_reward;
+            job.parent_estimate = node.cold[action].eval - node.cold[action].move_reward;
             state.set_move(state.specific_move(node.move(action)));
 
             [[maybe_unused]] const int attack_before = state.true_attack;
@@ -1184,7 +1184,7 @@ void Search::processJob(const int threadIdx, Msg&& msg) {
 #endif
             state.chance_move<Opp>();
 
-            uint32_t new_hash = state.hash();
+            NodeKey new_hash = state.hash();
             job.child_hash = new_hash;
 
             // Get the owner of the updated state based on the hash
@@ -1503,7 +1503,7 @@ void Search::search(std::stop_token stop, const int threadIdx) {
 
 template <class Opp>
 Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] size_t depth,
-                       [[maybe_unused]] float parent_board) {
+                       [[maybe_unused]] float parent_estimate) {
     // Rollout using eval.
 #ifdef NANA_BENCH
     struct RolloutTimer {
@@ -1541,7 +1541,7 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
 
 #if NANA_BELIEF_LOG
     if (!stuck) {
-        logBelief(state, depth, max_eval - parent_board);
+        logBelief(state, depth, max_eval - parent_estimate);
     }
 #endif
 
@@ -1554,7 +1554,7 @@ Reward Search::rollout(EmulationGame& state, int threadIdx, [[maybe_unused]] siz
     return value;
 #else
     if (!stuck) {
-        max_eval = depth_baseline[threadIdx].correct(depth, max_eval, parent_board);
+        max_eval = depth_baseline[threadIdx].correct(depth, max_eval, parent_estimate);
     }
     const Reward value = stuck ? dead : Return{ 0, 0, max_eval, 1, 0 };
     node.leaf_V = value;

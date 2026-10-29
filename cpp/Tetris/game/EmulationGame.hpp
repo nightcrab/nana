@@ -9,6 +9,9 @@
 #include <queue>
 #include <type_traits>
 
+// Search tree key: a hash of the position. 64 bits keeps collisions between live nodes negligible.
+using NodeKey = uint64_t;
+
 #ifndef NANA_FUTURE_ORACLE
 #define NANA_FUTURE_ORACLE 0
 #endif
@@ -117,7 +120,7 @@ class EmulationGame {
     std::vector<Piece> placements() const;
     std::vector<Move> legal_moves();
 
-    uint32_t hash() const;
+    NodeKey hash() const;
 
     // The opponent's attack this piece after cancelling against its meter, and the garbage it receives from us.
     template <class Opp>

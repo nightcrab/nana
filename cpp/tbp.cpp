@@ -5,10 +5,12 @@
 
 #include "Search.hpp"
 #include "Config.hpp"
+#include "Eval.hpp"
 #include "BoardEncoder.hpp"
 #include "Belief.hpp"
 #include "Neural.hpp"
 #include "Util/json.hpp"
+#include "engine/Utility.hpp"
 
 auto type_to_json(PieceType type) -> nlohmann::json {
     switch (type) {
@@ -343,6 +345,13 @@ int main() {
                 Search::root_belief = &search_belief;
             }
             Search::root_opponent = &root_opponent;
+
+            const float gate = seen_opponent.have
+                ? Eval::opponentGate(seen_opponent.board, seen_opponent.meter, seen_opponent.b2b, seen_opponent.combo)
+                : 0.0f;
+            // the workers read the gate until their search ends
+            if (gate != Eval::opponent_gate && Search::searching) Search::endSearch();
+            Eval::setOpponentGate(gate);
         };
         bool have_suggestion = false;
         Move last_suggestion;
@@ -551,6 +560,47 @@ int main() {
                 }
                 Search::endSearch();
                 Move best_move = game.specific_move(Search::bestMove());
+                // DEBUG(illegal move): report a suggestion that isn't a legal placement on our own board
+                {
+                    auto same = [](const Piece& a, const Piece& b) {
+                        return a.type == b.type && a.rotation == b.rotation && a.position.x == b.position.x && a.position.y == b.position.y;
+                    };
+                    std::vector<Piece> legal = game.placements();
+                    std::erase_if(legal, [&](const Piece& p) { return Shaktris::Utility::collides(game.game.board, p); });
+                    const bool ok = !best_move.null_move && std::any_of(legal.begin(), legal.end(), [&](const Piece& p) { return same(p, best_move.piece); });
+                    if (!ok) {
+                        nlohmann::json d;
+                        UCTNode& root = Search::uct.getNode(Search::root_state.hash());
+                        int node_legal = 0;
+                        nlohmann::json node_moves = nlohmann::json::array();
+                        for (size_t i = 0; i < root.actionCount(); i++) {
+                            Move m = game.specific_move(root.move(i));
+                            const bool l = std::any_of(legal.begin(), legal.end(), [&](const Piece& p) { return same(p, m.piece); });
+                            node_legal += l;
+                            if (node_moves.size() < 8) node_moves.push_back({ (int)m.piece.type, (int)m.piece.rotation, m.piece.position.x, m.piece.position.y, root.stats(i).N, l });
+                        }
+                        d["null_move"] = best_move.null_move;
+                        d["move"] = { (int)best_move.piece.type, (int)best_move.piece.rotation, best_move.piece.position.x, best_move.piece.position.y };
+                        d["collides_own_board"] = Shaktris::Utility::collides(game.game.board, best_move.piece);
+                        d["game_hash"] = game.hash();
+                        d["root_hash"] = Search::root_state.hash();
+                        d["game_over"] = game.game_over;
+                        d["gheight"] = game.game.board.get_garbage_height();
+                        d["root_gheight"] = Search::root_state.game.board.get_garbage_height();
+                        d["legal_count"] = legal.size();
+                        d["node_actions"] = root.actionCount();
+                        d["node_actions_legal_here"] = node_legal;
+                        d["node_N"] = root.N;
+                        d["node_moves_head"] = node_moves;
+                        d["board"] = game.game.board.board;
+                        d["current"] = (int)game.game.current_piece.type;
+                        d["hold"] = game.game.hold ? (int)*game.game.hold : -1;
+                        nlohmann::json q = nlohmann::json::array();
+                        for (auto p : game.game.queue) q.push_back((int)p);
+                        d["queue"] = q;
+                        std::cerr << "ILLEGAL_SUGGESTION " << d.dump() << std::endl;
+                    }
+                }
                 last_suggestion = best_move;
                 have_suggestion = !best_move.null_move;
 

@@ -83,7 +83,7 @@ inline Return scaled(Return r, float k) {
 }
 
 struct ChildValue {
-    uint32_t hash = 0;
+    NodeKey hash = 0;
     float n = 0;
     Reward V{};
 };
@@ -96,7 +96,9 @@ struct ChildTable {
     Reward rest_sum{};
     float completed = 0;
 
-    void put(uint32_t child, Reward V, float k);
+    void put(NodeKey child, Reward V, float k);
+    // forgets the children's values, keeping `completed`
+    void clearValues();
     Reward sum(float& n) const;
 };
 
@@ -122,6 +124,8 @@ struct ColdAction {
     int time = 0;
     float eval = 0;
     float move_reward = 0;
+    // Eval::q_epoch when this arm's Q was last backed up
+    uint32_t epoch = 0;
 #if !NANA_CC_SEARCH
     float step_attack = 0;
     Return sums;
@@ -145,7 +149,7 @@ struct HistoryEdge {
 };
 
 struct HistoryRow {
-    uint32_t hash = 0;
+    NodeKey hash = 0;
     uint32_t chosen = 0;
     float node_N = 0;
     int depth = 0;
@@ -161,7 +165,7 @@ class UCTNode {
     UCTNode() {};
     UCTNode(const EmulationGame &state);
 
-    uint32_t id;
+    NodeKey id;
     int N;
 
     // Only retained for emulator tree dumps; the first state represented by this node.
@@ -170,7 +174,7 @@ class UCTNode {
     Reward R_buffer{};
     int N_buffer = 0;
 
-    uint32_t parent_hash = 0;
+    NodeKey parent_hash = 0;
     int parent_action = -1;
 
     std::vector<HistoryRow> history;
@@ -196,7 +200,7 @@ class UCTNode {
     Reward best_V{};
 
     Reward value() const { return best >= 0 ? best_V : leaf_V; }
-    Reward report(size_t i, uint32_t child, Reward V, float k, bool fresh);
+    Reward report(size_t i, NodeKey child, Reward V, float k, bool fresh);
     void rescanBest();
     float armValue(size_t i, Reward& V) const;
 #endif
@@ -204,7 +208,7 @@ class UCTNode {
     static float c_puct(float node_N, int depth);
     static float priority(float c, float node_N, float R, float N, float prior);
 
-    HistoryRow historyRow(uint32_t hash, size_t chosen, int depth) const;
+    HistoryRow historyRow(NodeKey hash, size_t chosen, int depth) const;
 
     size_t selectWithCompetitors(int depth, HistoryRow& row) const;
 
@@ -223,11 +227,11 @@ double ccUniform(RNG& rng);
 
 class HashActionPair {
    public:
-    HashActionPair(uint32_t hash, int actionID) {
+    HashActionPair(NodeKey hash, int actionID) {
         this->hash = hash;
         this->actionID = actionID;
     }
-    uint32_t hash;
+    NodeKey hash;
     int actionID;
 };
 
@@ -289,9 +293,9 @@ class Job {
 
     int extra_N = 0;
 
-    uint32_t child_hash = 0;
+    NodeKey child_hash = 0;
 
-    float parent_board = 0;
+    float parent_estimate = 0;
 
     uint16_t sender = UINT16_MAX;
     int sender_load = 0;
@@ -354,7 +358,7 @@ class UCT {
     static inline bool retain_for_dump = false;
 
     struct padded_map {
-        using T = std::unordered_map<int, UCTNode>;
+        using T = std::unordered_map<NodeKey, UCTNode>;
         char padding[64];
         T obj_;
 
@@ -394,15 +398,15 @@ class UCT {
     std::vector<RNG> rng;
     std::vector<WorkerStatistics> stats;
 
-    bool nodeExists(uint32_t nodeID);
+    bool nodeExists(NodeKey nodeID);
 
-    UCTNode& getNode(uint32_t nodeID, int threadIdx);
+    UCTNode& getNode(NodeKey nodeID, int threadIdx);
 
-    UCTNode& getNode(uint32_t nodeID);
+    UCTNode& getNode(NodeKey nodeID);
 
     bool insertNode(UCTNode node);
 
-    uint32_t getOwner(uint32_t hash);
+    uint32_t getOwner(NodeKey hash);
 
     void collect();
 

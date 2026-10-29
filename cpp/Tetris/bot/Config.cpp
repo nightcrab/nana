@@ -79,6 +79,9 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("opponent", c.opponent);
     visit("neural_model", c.neural_model);
     visit("belief_weights", c.belief_weights);
+    visit("opp_cond_u", c.opp_cond_u);
+    visit("opp_cond_mean", c.opp_cond_mean);
+    visit("opp_cond_v", c.opp_cond_v);
     visit("app_weight", c.app_weight);
     visit("eval_weight", c.eval_weight);
 }
