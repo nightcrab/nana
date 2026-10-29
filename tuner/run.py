@@ -11,7 +11,7 @@ from .gate import run_gate
 from .health import HealthError, Monitor, check_canary, check_determinism, check_plumbing
 from .optimizer import create_optimizer, optimizer_defaults, restore_optimizer
 from .runner import Runner, Stage
-from .stadium import StadiumRunner
+from .stadium import StadiumRunner, reference_interval
 from .space import Space
 
 TUNING_SEEDS = 1_000_000
@@ -81,6 +81,9 @@ class Run:
         self.state = _read_json(self.path("state.json")) if os.path.exists(self.path("state.json")) else None
         if runner_type is StadiumRunner and self.state:
             self.runner.baseline_config = self.state["base_config"]
+            self.state["baseline"] = {"mean": 0.5, "games": 0, "source": "fixed"}
+            for holdout in self.state["holdouts"]:
+                holdout["baseline"] = 0.5
         if self.state and self.state.get("version") != STATE_VERSION:
             raise SystemExit(f"{directory} was made by an older tuner (state version {self.state.get('version')}); "
                              "start a new run")
@@ -206,6 +209,7 @@ class Run:
         run.optimizer = optimizer
         if settings["objective"] == "stadium":
             run.runner.baseline_config = base
+            run.state["baseline"] = {"mean": 0.5, "games": 0, "source": "fixed"}
         run.write_release()
         run.save()
         run.log(f"created run {directory}: {settings['objective']}, {settings['rules']} rules, {len(space)} parameters, {optimizer.name} optimizer, "
@@ -274,7 +278,7 @@ class Run:
         tune = sum(count * g * per_game + tail for count in counts)
         every = s["holdout"]["every"]
         holdouts = n // every + (1 if n % every else 0)
-        checks = (holdouts + 1) * (s["holdout"]["games"] * per_game + tail)
+        checks = (holdouts + (0 if s["objective"] == "stadium" else 1)) * (s["holdout"]["games"] * per_game + tail)
         gate_batches = math.ceil(s["gate"]["max_games"] / (4 * cpus))
         gate = 2 * s["gate"]["max_games"] * per_game + gate_batches * tail
         hours = {"iteration": iteration, "tune": tune, "checks": checks, "gate": gate}
@@ -328,6 +332,8 @@ class Run:
         self.save()
 
     def baseline(self):
+        if self.settings["objective"] == "stadium":
+            return self.state["baseline"]
         if self.state["baseline"] is None:
             started = time.monotonic()
             games = self.settings["holdout"]["games"]
@@ -361,7 +367,7 @@ class Run:
         game_sd = statistics.mean([statistics.stdev(s) for s in scores.values() if len(s) > 1] or [0.0])
         self.warnings = self.monitor.iteration(feedback.candidate_scores, game_sd, n,
                                                feedback.best_latest, best.mean, games.get(feedback.best_id),
-                                               self.state["baseline"] if s["objective"] != "sims-per-second" else None)
+                                               self.state["baseline"] if s["objective"] not in ("sims-per-second", "stadium") else None)
         self.warnings += self.optimizer.warnings(self.space.names())
 
         seconds = time.monotonic() - started
@@ -437,6 +443,15 @@ class Run:
         return ", ".join(f"{key} {value:.3f}" if isinstance(value, (int, float)) else f"{key} {value}"
                          for key, value in self.optimizer.diagnostics().items())
 
+    def stadium_reference(self):
+        references = []
+        for label, games in (("games/evaluation", self.settings["games_per_eval"]),
+                             ("holdout games", self.settings["holdout"]["games"])):
+            low, high = reference_interval(games)
+            references.append(f"{games} {label}: [{low:.1%}, {high:.1%}]")
+        return ("baseline: 0.5000 (fixed); reference 95% Wilson CI at a 50% score, "
+                "independent win/loss games (draws reduce variance): " + "; ".join(references))
+
     def status(self, best):
         s, plan = self.settings, self.state["plan"]
         done, total = self.state["iterations"], s["iterations"]
@@ -445,6 +460,8 @@ class Run:
         labels = {"strength": "attack/piece", "sims-per-second": "sims/s", "game-score": "game score",
                   "stadium": "win rate vs fixed baseline; draws count half"}
         lines.append(f"objective: {s['objective']} ({labels[s['objective']]})")
+        if s["objective"] == "stadium":
+            lines.append(self.stadium_reference())
         lines.append(f"{self.runner.threads} threads per game, {self.runner.workers} concurrent games")
         if plan:
             lines.append(f"{self.state['phase']}: {plan['sims']} sims, garbage x{plan['garbage_scale']}, iteration "
@@ -468,6 +485,8 @@ class Run:
         if self.state["phase"] == "done":
             self.log("the run is done; release.json is the result", show=True)
             return
+        if self.settings["objective"] == "stadium":
+            self.log(self.stadium_reference(), show=True)
         self.health_checks()
         if self.state["phase"] == "calibrate":
             self.calibrate()

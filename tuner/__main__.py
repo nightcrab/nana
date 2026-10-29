@@ -17,6 +17,7 @@ from .health import HealthError
 from .optimizer import OPTIMIZERS
 from .run import Run
 from .runner import Runner
+from .spsa import SPSA_DEFAULTS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -82,6 +83,9 @@ def main():
                        help="games per evaluation (strength/game-score/stadium: 32; sims-per-second: 4)")
     start.add_argument("--spread", type=float,
                        help="initial spread around defaults in unit-cube units (CMA-ES sigma; default 0.3)")
+    for key, default in SPSA_DEFAULTS.items():
+        start.add_argument("--" + key.replace("_", "-"), type=float,
+                           help=f"SPSA {key.removeprefix('spsa_').replace('_', ' ')} (default {default})")
     start.add_argument("--gate-games", type=int,
                        help="release gate game limit per config (strength/game-score/stadium: 400; sims-per-second: 32)")
     start.add_argument("--holdout-every", type=int, help="iterations between holdouts (default 5)")
@@ -115,6 +119,7 @@ def main():
                                                 "search.json" if args.objective == "sims-per-second" else "eval.json")]
             options = {k: getattr(args, k) for k in ("budget_hours", "sims", "iterations", "particles", "games_per_eval",
                                                      "spread", "gate_games", "holdout_every", "chunk", "seed", "rules", "objective", "threads", "eval", "optimizer", "stadium", "bot")}
+            options.update({key: getattr(args, key) for key in SPSA_DEFAULTS})
             if not os.path.isfile(args.nana):
                 raise SystemExit(f"no nana_emulate at {args.nana}")
             clear_existing(directory, args.overwrite)

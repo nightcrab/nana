@@ -1,7 +1,7 @@
 # nana's autotuner
 
 Tunes nana's constants (eval weights, PUCT, the rollout score) by playing seeded games and running
-PSO (the default) or CMA-ES on the result. You give it a time budget; it measures how long games take
+PSO (the default), CMA-ES, or SPSA on the result. You give it a time budget; it measures how long games take
 on this machine and tunes at the largest search budget that fits.
 
 - **one budget knob**: `--budget-hours` picks the sims count, and the plan is printed before any
@@ -34,6 +34,45 @@ CMA-ES uses NumPy only, with no additional dependency. `--particles` is its popu
 (finite and positive). Both default to the same values as PSO. Resume restores the optimizer
 and its random state from the checkpoint.
 
+To use SPSA (simultaneous perturbation stochastic approximation):
+
+```
+python -m tuner start spsa1 --nana out/build/<build>/cpp/nana_emulate.exe --cpus 0,2,4,6 --budget-hours 8 --optimizer spsa --iterations 200 --spsa-learning-rate 0.05 --spsa-perturbation 0.1
+```
+
+SPSA changes all parameters along a random sign direction and estimates a gradient from two
+perturbed configs. Each iteration evaluates those two configs and the incumbent on the same
+fresh seeds: **3 x games** evaluations, independent of the parameter count. It usually needs
+more iterations than the population optimizers. `--particles` and `--spread` do not affect SPSA.
+The incumbent is the best evaluated config, promoted using fresh paired scores; the internal
+gradient update is evaluated through the next iteration's perturbations. Checkpoint/resume,
+calibration, holdouts, and the release gate work as with the other optimizers.
+
+For iteration `k` starting at 1, the learning rate is `a / (k + A)^alpha` and the perturbation
+is `c / k^gamma`. The following options are saved in `run.json` and reused on resume:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--spsa-learning-rate` | 0.05 | `a`, gradient learning-rate coefficient |
+| `--spsa-perturbation` | 0.1 | `c`, initial perturbation in normalized parameter units; at most 0.5 |
+| `--spsa-stability` | 10 | `A`, nonnegative learning-rate offset |
+| `--spsa-alpha` | 0.602 | learning-rate decay exponent, in (0, 1] |
+| `--spsa-gamma` | 0.101 | perturbation decay exponent, in (0, 1] |
+| `--spsa-max-step` | 0.1 | maximum update per parameter in normalized units; at most 1 |
+| `--spsa-start-jitter` | 0.05 | starting offset per parameter in normalized units, random sign; 0 to disable; at most 0.5 |
+
+SPSA starts from the defaults moved by the start jitter in every parameter. The two probes are
+mirror images, so where the gradient at the defaults is zero (for example, products of weights that
+all default to zero, as in `conditional.json`) both probes score the same and the center never
+moves; the offset avoids that. The incumbent starts at the unmodified defaults.
+
+All coefficients must be finite and positive except the stability offset and start jitter, which may be zero.
+Probes and updated parameters are clipped to [0, 1]; the gradient uses the actual probe
+separation at boundaries. Unlike PSO and CMA-ES, SPSA's learning rate depends on the objective's
+score scale. Reduce it for large scores (especially sims/s or game-score) if updates repeatedly
+hit the step cap. Increase `--games` when paired differences are noisy. For integer parameters,
+choose perturbations large enough to produce distinct rounded configs.
+
 Use one logical cpu per physical core (`--cpus`). By default each game uses one thread, pinned to
 its cpu. `--threads N` assigns N search threads and N CPUs to each game, taking consecutive groups
 from the supplied CPU list. The CPU count must be divisible by N, with no duplicate CPUs; for
@@ -49,7 +88,7 @@ python -m tuner start speed1 --nana out/build/<build>/cpp/nana_emulate.exe --cpu
 
 This defaults to `spaces/search.json`, 4 games per evaluation (instead of 32), 8 holdout games
 (instead of 32), and at most 32 release-gate pairs (instead of 400). `--space`, `--games`, and
-`--gate-games` still override their defaults. Both optimizers and the holdouts/release gate maximise
+`--gate-games` still override their defaults. All optimizers and the holdouts/release gate maximise
 sims/s: `1000 * sims_per_move / ms_per_move`, averaged across games. This measures search time,
 including search start/stop overhead, without process startup. It does not reward dying early by
 counting shorter games as faster. Timing varies, so increase `--games` if signal warnings persist;
@@ -109,8 +148,17 @@ with support for the `threads`, `thinks`, and `garbage_delay` settings, as used 
 `--bot` must be a matching `nana_tbp` build. Each match gets isolated executable copies and
 `nana.json` files, leaving the originals untouched. Windows DLLs beside the bot are copied too.
 
-Fitness is 1 for a win, 0.5 for a draw, and 0 for a loss. Both bots receive the selected
-simulation budget, sides alternate, and each concurrent match reserves `2 * --threads`
+Fitness is 1 for a win, 0.5 for a draw, and 0 for a loss. The baseline score is fixed
+at **0.5**; no noisy self-play sample is
+used as the reference. Startup logs and status show the reference 95% Wilson confidence
+interval at a 50% score for the configured evaluation and holdout game counts. For example,
+64 games gives about **38.1%–61.9%**, and 32 games gives **33.6%–66.4%**. These describe
+finite-sample uncertainty assuming independent win/loss outcomes; draws reduce variance.
+They are reference intervals, not confidence bounds for a selected best candidate.
+Resuming an older stadium checkpoint replaces its sampled baseline with 0.5.
+
+Both bots receive the selected simulation budget, sides alternate, and each concurrent
+match reserves `2 * --threads`
 CPUs for the two bots; on Linux each bot is pinned to its own CPU group. The CPU count
 must be divisible by that number. Matches run
 to completion, without the emulator's horizon or eased garbage. Botris selects one-turn
@@ -158,10 +206,10 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 |---|---|---|
 | `--budget-hours H` / `--sims N` | (one is required) | the time budget, or a fixed sims count |
 | `--objective` | `strength` | maximise attack/piece, `game-score`, `stadium` win rate, or `sims-per-second` (with the smaller defaults above) |
-| `--optimizer` | `pso` | optimizer: `pso` or `cmaes` |
+| `--optimizer` | `pso` | optimizer: `pso`, `cmaes`, or `spsa` |
 | `--threads` | 1 | search threads per game; must divide the CPU count (1–64) |
 | `--iterations` | 15 | optimizer iterations |
-| `--particles` | 24 | swarm/population size; PSO costs about 2 x particles x games per iteration, CMA-ES costs (particles + 1) x games |
+| `--particles` | 24 | swarm/population size; PSO costs about 2 x particles x games per iteration, CMA-ES costs (particles + 1) x games; SPSA ignores this and costs 3 x games |
 | `--games` | 32 | games per evaluation: more is less noise and slower iterations |
 | `--spread` | 0.3 | initial spread around defaults in unit-cube units; CMA-ES initial sigma |
 | `--gate-games` | 400 | the gate's limit on paired games |
@@ -218,7 +266,7 @@ the incumbent's fresh mean. A retained incumbent accumulates an average across e
 a replacement starts a new average. Only the population updates the search distribution.
 This provides paired comparisons for the final recommendation; covariance adaptation still uses
 noisy population rankings, so increase `--games` when signal is weak. The fixed iteration limit,
-holdouts, and release gate apply to both optimizers. CMA-ES reports sigma, covariance condition,
+holdouts, and release gate apply to all optimizers. CMA-ES reports sigma, covariance condition,
 and population diversity, with warnings for tiny steps, poor conditioning, and a best near bounds.
 
 Existing checkpoints with a bare `pso` field still resume. The next save writes the named,

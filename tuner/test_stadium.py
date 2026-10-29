@@ -9,10 +9,66 @@ from unittest.mock import patch
 from .gate import run_gate
 from .run import Run
 from .runner import Runner, RunnerError, Stage
-from .stadium import StadiumRunner
+from .stadium import StadiumRunner, reference_interval
 
 
 class StadiumTests(unittest.TestCase):
+    def test_reference_interval_is_bounded_and_shrinks_with_more_games(self):
+        for games, expected_low in ((32, 0.3363), (64, 0.3810), (100, 0.4038)):
+            low, high = reference_interval(games)
+            self.assertAlmostEqual(low, expected_low, places=4)
+            self.assertAlmostEqual(high, 1 - expected_low, places=4)
+        low, high = reference_interval(1)
+        self.assertTrue(0 < low < 0.5 < high < 1)
+        with self.assertRaises(ValueError):
+            reference_interval(0)
+
+    def test_fixed_baseline_skips_self_play_and_replaces_old_checkpoint_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "binary"
+            binary.touch()
+            space = root / "space.json"
+            space.write_text(json.dumps([{"name": "height", "default": 1, "low": 0, "high": 2}]))
+            options = {"objective": "stadium", "sims": 128, "stadium": str(binary),
+                       "bot": str(binary), "games_per_eval": 64}
+            with patch.object(Runner, "print_config", return_value={"height": 1}):
+                run = Run.create(str(root / "run"), str(binary), [0, 2], [str(space)], options)
+            with patch.object(run.runner, "scores") as scores:
+                self.assertEqual(run.baseline(), {"mean": 0.5, "games": 0, "source": "fixed"})
+                scores.assert_not_called()
+            with patch.object(run, "log") as log, \
+                    patch.object(run, "health_checks", side_effect=RuntimeError("stop after startup")):
+                with self.assertRaisesRegex(RuntimeError, "stop after startup"):
+                    run.run()
+                reference = log.call_args.args[0]
+                self.assertTrue(log.call_args.kwargs["show"])
+                self.assertIn("baseline: 0.5000 (fixed)", reference)
+                self.assertIn("64 games/evaluation: [38.1%, 61.9%]", reference)
+                self.assertIn("32 holdout games: [33.6%, 66.4%]", reference)
+
+            def scores(requests):
+                return ({key: [0.625] * n for key, _, _, _, n in requests},
+                        {key: [{"died": False}] * n for key, _, _, _, n in requests})
+
+            run.state["plan"] = {"sims": 128, "garbage_scale": 0.4,
+                                 "projected_hours": {"iteration": 0, "gate": 0}}
+            with patch.object(run.runner, "scores", side_effect=scores):
+                best = run.iterate()
+                run.holdout(best)
+            self.assertEqual(run.state["holdouts"][-1]["baseline"], 0.5)
+
+            run.state["baseline"] = {"mean": 0.625, "died": 0.375, "games": 32}
+            run.state["holdouts"] = [{"iteration": 5, "best": 0.625, "baseline": 0.625}]
+            run.save()
+            resumed = Run(run.dir)
+            self.assertEqual(resumed.baseline()["mean"], 0.5)
+            self.assertEqual(resumed.state["holdouts"][0]["baseline"], 0.5)
+            resumed.status(None)
+            status = Path(resumed.path("status.txt")).read_text()
+            self.assertIn("baseline: 0.5000 (fixed)", status)
+            self.assertIn("0.6250 vs baseline 0.5000 (+0.1250)", status)
+
     def test_matches_isolate_configs_alternate_sides_and_validate_results(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

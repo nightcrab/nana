@@ -64,13 +64,16 @@ class Optimizer(ABC):
         """Versioned JSON checkpoint; immutable settings live in run.json."""
 
 
-OPTIMIZERS = ("pso", "cmaes")
+OPTIMIZERS = ("pso", "cmaes", "spsa")
 
 
 def optimizer_defaults(name):
     from .cmaes import CMAES_DEFAULTS
     from .pso import PSO_DEFAULTS
+    from .spsa import SPSA_DEFAULTS
 
+    if name == "spsa":
+        return SPSA_DEFAULTS
     if name == "cmaes":
         return CMAES_DEFAULTS
     if name != "pso":
@@ -81,8 +84,11 @@ def optimizer_defaults(name):
 def create_optimizer(settings, center):
     from .cmaes import CMAESOptimizer
     from .pso import PSOOptimizer
+    from .spsa import SPSAOptimizer
 
     name = settings.get("optimizer", "pso")
+    if name == "spsa":
+        return SPSAOptimizer.create(settings, center)
     if name == "cmaes":
         return CMAESOptimizer.create(settings, center)
     if name != "pso":
@@ -93,6 +99,7 @@ def create_optimizer(settings, center):
 def restore_optimizer(settings, state):
     from .cmaes import CMAESOptimizer
     from .pso import PSOOptimizer
+    from .spsa import SPSAOptimizer
 
     # Version-2 runs stored the bare PSO state under `pso`.
     saved = state.get("optimizer")
@@ -107,4 +114,6 @@ def restore_optimizer(settings, state):
         raise ValueError(f"unsupported {name} optimizer state version: {saved['version']}")
     if name == "cmaes":
         return CMAESOptimizer.from_state(settings, saved["state"])
+    if name == "spsa":
+        return SPSAOptimizer.from_state(settings, saved["state"])
     return PSOOptimizer.from_state(settings, saved["state"])

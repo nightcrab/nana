@@ -1,5 +1,6 @@
 """Head-to-head fitness using Universal-Shaktris-Stadium's stadium_cli."""
 import json
+import math
 from contextlib import closing, contextmanager
 import os
 from pathlib import Path
@@ -8,8 +9,22 @@ import shlex
 import sqlite3
 import tempfile
 import time
+from statistics import NormalDist
 
 from .runner import Runner, RunnerError
+
+
+def reference_interval(games):
+    """95% Wilson interval for a 50% score, assuming independent win/loss games.
+
+    This describes finite-sample uncertainty, not uncertainty in the fixed baseline.
+    Draws scored as half a win reduce variance relative to this reference.
+    """
+    if games < 1:
+        raise ValueError("games must be positive")
+    z = NormalDist().inv_cdf(0.975)
+    half = z / (2 * math.sqrt(games + z * z))
+    return 0.5 - half, 0.5 + half
 
 
 class StadiumRunner(Runner):
