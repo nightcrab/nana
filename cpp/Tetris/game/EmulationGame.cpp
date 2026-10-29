@@ -59,7 +59,7 @@ void EmulationGame::set_move(Move move) {
 };
 
 Move EmulationGame::specific_move(Move move) {
-    move.piece.position.y += game.board.get_garbage_height();
+    move.piece.position.y += surface_height();
     return move;
 };
 
@@ -404,7 +404,7 @@ std::vector<Move> EmulationGame::legal_moves() {
 
 NodeKey EmulationGame::hash() const {
     Board board = game.board;
-    int gheight = board.get_garbage_height();
+    const int gheight = surface_height();
     for (auto& row : board.board) {
         row = row >> gheight;
     }

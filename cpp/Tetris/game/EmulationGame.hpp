@@ -108,6 +108,11 @@ class EmulationGame {
     void set_move(Move move);
     Move specific_move(Move move);
 
+    // Rows below this are left out of the node key and tree moves are stored relative to it. It is the garbage
+    // height while the stack is below spawn, and 0 otherwise: once the stack nears spawn, the fixed spawn row makes
+    // the legal placements depend on absolute height.
+    int surface_height() const { return game.board.is_low() ? game.board.get_garbage_height() : 0; }
+
     // Opp is opponent::IOHMM, opponent::Neural or opponent::None; the search picks one per run and the environment
     // always uses the default
     template <class Opp = opponent::IOHMM>

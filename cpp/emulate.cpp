@@ -103,7 +103,7 @@ static bool dumpTree(const Options& options, uint64_t seed, const GameResult& re
                 if (node.N < min_visits) continue;
                 const auto& state = *node.dump_state;
                 const auto& game = state.game;
-                const int garbage_height = game.board.get_garbage_height();
+                const int garbage_height = state.surface_height();
                 Json queue = Json::array(), bag = Json::array(), actions = Json::array();
                 for (auto p : game.queue) queue.push_back((int)p);
                 for (size_t i = state.rng.bagiterator; i < state.rng.bag.size(); ++i)

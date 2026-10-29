@@ -262,7 +262,7 @@ UCTNode::UCTNode(const EmulationGame &state) {
 
 	int idx = 0;
 
-	int gheight = state.game.board.get_garbage_height();
+	const int gheight = state.surface_height();
 
 	static const EvalMode eval_mode = evalMode();
 	const bool use_convex_eval = eval_mode == EvalMode::Convex;
