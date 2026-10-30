@@ -59,6 +59,8 @@ On 32 cores, Nana plays about as well as a single core given 11x thinking time.
 
 We played Nana against [Cold Clear](https://github.com/MinusKelvin/cold-clear) on the Universal Shaktris Stadium under TETR.IO season 1 rules, using Seppel3210's TETR.IO-tuned weights for Cold Clear.
 
+Over 6,400 games, Nana had 3,779 wins to 2,621 losses (59.0% winrate), with a 95% CI of 57.8-60.2%.
+
 Both programs were given 50ms time control and varying thread counts from 1 to 16. Nana was configured using defaults from commit `00005d0`: Expectimax-UCT with rank-1 opponent conditioning.
 
 <picture>
@@ -66,7 +68,7 @@ Both programs were given 50ms time control and varying thread counts from 1 to 1
   <img width="800" alt="Heatmap of Nana's score against Cold Clear, rows Nana threads 1 to 16, columns Cold Clear threads 1 to 16. Nana 1 thread: 59.8, 58.6, 51.6, 54.3, 54.3%. 2 threads: 63.3, 61.3, 64.5, 57.8, 59.0%. 4 threads: 61.7, 59.4, 64.8, 61.7, 56.6%. 8 threads: 59.8, 60.5, 55.1, 61.3, 58.6%. 16 threads: 57.8, 60.2, 55.1, 59.0, 60.2%" src="./docs/cc-matrix-light.png">
 </picture>
 
-Each cell's 95% interval is about ±6 points, so at this time control, more games would likely need to be run to determine a clear thread-scaling pattern for either program. Over 6,400 games, Nana won 59.0%, with a 95% confidence interval of 57.8% to 60.2%.
+Each cell's 95% interval is about ±6 points, so at this time control, more games would likely need to be run to determine a clear thread-scaling pattern for either program. 
 
 ## Usage
 
