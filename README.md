@@ -17,7 +17,7 @@ MCTS operates on the premise that we can generate an analysis of the game's loca
 
 Transposition Driven Scheduling is a load balancing technique that allows a program to efficiently scale to many threads while searching for solutions, and has historically been applied to puzzle games. It works by having the program globally agree to allocate ownership of certain gamestates to certain threads, based on the state's hash. This means that any thread can calculate who the owner is of a state that has never been seen before. 
 
-For a more detailed overview of how Nana is implemented, including MCTS variations, multithreading architecture, and opponent modelling, please see `docs/README.md`.
+For a more detailed overview of how Nana is implemented, including MCTS variations, multithreading architecture, and opponent conditioning, please see `docs/README.md`.
 
 ## Scaling Experiments
 

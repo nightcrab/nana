@@ -17,7 +17,7 @@ In particular, Nana chooses to abstract the positions of garbage holes past a ce
 
 To balance exploration and exploitation, Nana uses PUCT[[10]](#10); a variant of UCB that incorporates a policy prior. 
 
-We combine this with an Expectimax-based update rule[[9[[8]](#8)]](#9) which in loose terms defines a state's reward as that of its best action, where the action's reward is averaged over chance states, sampled according to their visit distribution in the tree during search.
+We combine this with an Expectimax-based update rule[[8]](#8) which in loose terms defines a state's reward as that of its best action, where the action's reward is averaged over chance states, sampled according to their visit distribution in the tree during search.
 
 Since state abstraction allows paths to converge, we store leaf reward as a sequence of rewards, and only scores nodes according to their futures and not their past. We just refer to this as 'suffix credit'.
 
@@ -37,11 +37,11 @@ One of the challenges specifically of searching Tetris that computing legal acti
 
 To address this, Nana workers try to predict when they are at risk of running out of work, and pre-emptively request to borrow work from individual workers using a tuned heuristic taking into account load statistics and memory topology.
 
-## Opponent Modelling
+## Two-player Evaluation
 
-To model garbage-trading dynamics and macro state, Nana uses an internal simulator that implements an Input-Output Hidden Markov Model (IOHMM). [[7]](#7) The IOHMM models the opponent as a probability distribution over macro states rather than a board that needs to be played out.
+Nana uses a bilinear evaluator in its opponent's board at the root and its own during search. The evaluator is coded as a weight matrix from the opponent's features to Nana's own, and this matrix is decomposed into a sum of rank-1 matrices which are all individually expressed as the product of two vectors.
 
-Nana's opponent model has been found to substantially improve playing strength as long as the model is sufficiently informative. This is usually the case playing under TBP2, where Nana uses the opponent's board to generate an IOHMM with confidence. An uninformative model simply introduces noise into the search, so opponent modelling is disabled under TBP1.
+The opponent conditioning matrix is trained over several autotuner rounds using a greedy rank-1 update method[[11]](#11). This allows each new matrix to correct for the residuals of the previous matrix. Intuitively, each sum term corresponds to a new linear strategy that depends on the opponent's boardstate.
 
 ## References
 
@@ -55,3 +55,5 @@ Nana's opponent model has been found to substantially improve playing strength a
 8. State Aggregation in Monte Carlo Tree Search, Hostetler et al. 2014 (https://ojs.aaai.org/index.php/AAAI/article/view/9066)
 9. Reinforcement Learning via AIXI Approximation, Veness et al. 2010 (https://arxiv.org/html/1007.2049v1)
 10. Multi-armed bandits with episode context, Rosin 2011 (https://chrisrosin.com/isaim2010final.pdf)
+11. On the Convergence of a Greedy Rank-One Update Algorithm
+for a Class of Linear Systems, Amine Ammar 2010 (https://hal.science/hal-01007145/document)
