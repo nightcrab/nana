@@ -215,6 +215,24 @@ int Eval::well_depth(const Board& board, int well, int cap) {
     return std::min({std::countr_one(beside >> bottom), 20 - bottom, cap});
 }
 
+// buried empty cells in the top half
+static int high_cavities(const Board& board) {
+    constexpr uint64_t top_half = ~uint64_t(0) << 10;
+    int cavities = 0;
+    for (uint32_t col : board.board) {
+        const int height = 32 - std::countl_zero(col);
+        cavities += std::popcount(~uint64_t(col) & ((uint64_t(1) << height) - 1) & top_half);
+    }
+    return cavities;
+}
+
+// rows the tallest spawn column (3-6) stands above 12
+static int spawn_height(const Board& board) {
+    int height = 0;
+    for (int x = 3; x <= 6; ++x) height = std::max(height, 32 - std::countl_zero(board.board[x]));
+    return std::max(height - 12, 0);
+}
+
 Eval::BoardFeatures Eval::boardFeatures(const Board& board) {
     BoardFeatures f{};
     std::tie(f.bottom, f.height) = height_features(board);
@@ -229,6 +247,8 @@ Eval::BoardFeatures Eval::boardFeatures(const Board& board) {
     f.low = is_low(board);
     f.perfect_clear = is_perfect_clear(board);
     f.quad_ready = quadReady(board, f.bottom, f.height);
+    f.high_cavities = high_cavities(board);
+    f.spawn_height = spawn_height(board);
     return f;
 }
 
@@ -274,6 +294,8 @@ static double evalBoard(const Eval::BoardFeatures& f, int lines, bool tspin, boo
     score += f.transitions * c.row_transitions;
     if (!Convex && tspin && lines < (int)std::size(c.tspins)) score += c.tspins[lines];
     if (!Convex && waste_t) score += c.wasted_t;
+    score += f.high_cavities * c.high_cavity_cells;
+    score += f.spawn_height * c.spawn_height;
     return (score + 10000) / 10000;
 }
 
@@ -322,6 +344,18 @@ Slots slotFeatures(const Game& after, const std::vector<PieceType>& bag_left) {
     return slots;
 }
 
+// pieces placed before a T can be: 0 when the current or held piece is a T, past the preview when none is seen
+int tDistance(const Game& after) {
+    if (after.hold == PieceType::T || after.current_piece.type == PieceType::T) return 0;
+    int distance = 1;
+    for (PieceType p : after.queue) {
+        if (p == PieceType::Empty) break;
+        if (p == PieceType::T) return distance;
+        ++distance;
+    }
+    return distance;
+}
+
 }
 
 namespace {
@@ -330,18 +364,18 @@ bool nonzero(const auto& weights) {
     return std::any_of(weights.begin(), weights.end(), [](double w) { return w != 0; });
 }
 
-// Some row has both a nonzero u and a nonzero v.
+// Some row has a nonzero u and a nonzero v or reward shift.
 bool conditioningActive() {
     static const bool active = [] {
         const auto& c = config();
         for (size_t k = 0; k < c.opp_cond_v.size(); ++k)
-            if (nonzero(c.opp_cond_u[k]) && nonzero(c.opp_cond_v[k])) return true;
+            if (nonzero(c.opp_cond_u[k]) && (nonzero(c.opp_cond_v[k]) || nonzero(c.opp_cond_reward[k]))) return true;
         return false;
     }();
     return active;
 }
 
-// Whether Eval::opponent_direction is nonzero, and whether it weights the T-slot features.
+// Whether Eval::opponent_direction weights any placement feature, and whether it weights the T-slot features.
 bool direction_active = false;
 bool direction_uses_slots = false;
 
@@ -351,7 +385,7 @@ struct Conditioned {
 
 // w · f for one placement, split into the move's share and the board's share.
 Conditioned conditionedFeatures(const Eval::BoardFeatures& f, const Eval::MoveFeatures& m, const Slots& slots,
-                                bool no_spin, const NanaConfig& c, const Eval::ConditioningDirection& w) {
+                                bool no_spin, const NanaConfig& c, const std::array<double, PlacementFeature::COUNT>& w) {
     namespace P = PlacementFeature;
     std::array<double, P::COUNT> x{};
     const bool full = m.spin == spinType::normal, mini = m.spin == spinType::mini;
@@ -392,7 +426,7 @@ Conditioned conditionedFeatures(const Eval::BoardFeatures& f, const Eval::MoveFe
     return out;
 }
 
-double scorePlacement(const Eval::BoardFeatures& features, const Eval::MoveFeatures& move_features,
+double scorePlacement(const Game& after, const Eval::BoardFeatures& features, const Eval::MoveFeatures& move_features,
                       const Slots& slots, double belief, bool no_spin, const NanaConfig& c, double* move_part) {
     const int lines=move_features.lines, attack=move_features.attack;
     const bool full=move_features.spin==spinType::normal, mini=move_features.spin==spinType::mini;
@@ -430,13 +464,21 @@ double scorePlacement(const Eval::BoardFeatures& features, const Eval::MoveFeatu
 
     double position = move_features.back_to_back ? c.back_to_back : 0;
 
-    if (!no_spin) position += slots.score(c.tslot);
+    if (!no_spin) {
+        double slot_score = slots.score(c.tslot);
+        if (c.tslot_t_distance != 0 && slots.count > 0)
+            slot_score *= std::max(0.0, 1 + c.tslot_t_distance * tDistance(after));
+        position += slot_score;
+    }
+
+    if (after.hold == PieceType::I) position += c.hold_i;
+    if (!no_spin && after.hold == PieceType::T) position += c.hold_t;
 
     position += belief;
 
     if (direction_active) {
         const Conditioned conditioned =
-            conditionedFeatures(features, move_features, slots, no_spin, c, Eval::opponent_direction);
+            conditionedFeatures(features, move_features, slots, no_spin, c, Eval::opponent_direction.placement);
         extra_move += conditioned.move;
         position += conditioned.board;
     }
@@ -486,7 +528,7 @@ double Eval::evalNana(const Context& context, const Piece& piece, double* move_p
     if (!no_spin && (nonzero(c.tslot) || direction_uses_slots))
         slots = slotFeatures(after, context.bag_left);
     const double belief = context.belief ? context.belief->value(attack, lines > 0) : 0;
-    return scorePlacement(features, move_features, slots, belief, no_spin, c, move_part);
+    return scorePlacement(after, features, move_features, slots, belief, no_spin, c, move_part);
 }
 
 std::vector<float> Eval::opponentGates(const Board& board, int meter, int b2b, int combo) {
@@ -525,19 +567,23 @@ std::vector<float> Eval::opponentGates(const Board& board, int meter, int b2b, i
 Eval::ConditioningDirection Eval::opponentDirection(const Board& board, int meter, int b2b, int combo) {
     ConditioningDirection w{};
     if (!conditioningActive()) return w;
-    const auto& v = config().opp_cond_v;
+    const auto& c = config();
     const std::vector<float> gates = opponentGates(board, meter, b2b, combo);
-    for (size_t k = 0; k < gates.size(); ++k)
-        for (int i = 0; i < PlacementFeature::COUNT; ++i) w[i] += (double)gates[k] * v[k][i];
+    for (size_t k = 0; k < gates.size(); ++k) {
+        for (int i = 0; i < PlacementFeature::COUNT; ++i) w.placement[i] += (double)gates[k] * c.opp_cond_v[k][i];
+        w.app += (double)gates[k] * c.opp_cond_reward[k][0];
+        w.eval += (double)gates[k] * c.opp_cond_reward[k][1];
+    }
     return w;
 }
 
 void Eval::setOpponentDirection(const ConditioningDirection& direction) {
     if (direction != opponent_direction) {
         opponent_direction = direction;
-        direction_active = nonzero(direction);
-        direction_uses_slots = std::any_of(direction.begin() + PlacementFeature::TSLOT, direction.end(),
-                                           [](double w) { return w != 0; });
+        const auto& w = direction.placement;
+        direction_active = nonzero(w);
+        direction_uses_slots = std::any_of(w.begin() + PlacementFeature::TSLOT, w.end(),
+                                           [](double x) { return x != 0; });
         ++q_epoch;
     }
 }

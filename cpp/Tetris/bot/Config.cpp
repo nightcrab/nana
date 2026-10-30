@@ -69,6 +69,11 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("max_well_depth", c.max_well_depth);
     visit("mini_tspins", c.mini_tspins);
     visit("tslot", c.tslot);
+    visit("tslot_t_distance", c.tslot_t_distance);
+    visit("high_cavity_cells", c.high_cavity_cells);
+    visit("spawn_height", c.spawn_height);
+    visit("hold_i", c.hold_i);
+    visit("hold_t", c.hold_t);
     visit("c_init", c.c_init);
     visit("c_base", c.c_base);
     visit("depth_step", c.depth_step);
@@ -82,6 +87,7 @@ void visitFields(NanaConfig& c, Visit&& visit) {
     visit("opp_cond_u", c.opp_cond_u);
     visit("opp_cond_mean", c.opp_cond_mean);
     visit("opp_cond_v", c.opp_cond_v);
+    visit("opp_cond_reward", c.opp_cond_reward);
     visit("app_weight", c.app_weight);
     visit("eval_weight", c.eval_weight);
 }
@@ -182,6 +188,10 @@ void finish(NanaConfig& c) {
     if (c.opp_cond_u.size() != c.opp_cond_v.size() || c.opp_cond_mean.size() != c.opp_cond_v.size()) {
         fail("opp_cond_u, opp_cond_mean and opp_cond_v must have the same number of rows");
     }
+    if (c.opp_cond_reward.size() > c.opp_cond_v.size()) {
+        fail("opp_cond_reward can't have more rows than opp_cond_v");
+    }
+    c.opp_cond_reward.resize(c.opp_cond_v.size());
     for (int r = 1; r <= NanaConfig::PRIOR_TABLE; r++) {
         c.prior_weight[r - 1] = (float)std::pow((double)r, -c.prior_exponent);
     }

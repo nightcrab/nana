@@ -514,5 +514,17 @@
   "default": 0,
   "low": -450,
   "high": 450
+ },
+ {
+  "name": "opp_cond_reward[-1][0]",
+  "default": 0,
+  "low": -0.4,
+  "high": 0.4
+ },
+ {
+  "name": "opp_cond_reward[-1][1]",
+  "default": 0,
+  "low": -1.5,
+  "high": 1.5
  }
 ]

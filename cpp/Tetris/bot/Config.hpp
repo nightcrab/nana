@@ -54,6 +54,15 @@ struct NanaConfig {
     int max_well_depth = 17;
     std::array<double, 3> mini_tspins = { 0.0, 255.2559154641399, 314.56620282317624 };  // additive bonuses, as with tspins
     std::array<double, 4> tslot = { 328.7276186969281, 728.4895036891403, 627.9114391228678, 214.77109207391828 };
+    // the T-slot score is multiplied by max(0, 1 + tslot_t_distance * d), d = pieces placed before a T can be
+    double tslot_t_distance = 0;
+    // per cavity cell in the top half (row 10 and up), on top of cavity_cells
+    double high_cavity_cells = 0;
+    // per row the tallest of columns 3-6 stands above 12
+    double spawn_height = 0;
+    // an I or T in hold
+    double hold_i = 0;
+    double hold_t = 0;
 
     double c_init = 4.071678062623125;
     double c_base = 7490.956117941063;
@@ -69,7 +78,7 @@ struct NanaConfig {
     std::string neural_model;
     std::array<double, 8> belief_weights{};
     // opponent conditioning (OpponentConditioning.hpp): one row per rank-1 term of gate weights u, the opponent
-    // features' centre, and the eval direction v. CMA-ES release: tuner/releases/cmaes-conditioning-20261030.json.
+    // features' centre, the eval direction v and the reward weight shift. CMA-ES release: tuner/releases/cmaes-conditioning-20261030.json.
     std::vector<std::array<double, OpponentFeature::COUNT>> opp_cond_u = {{
         0.03542803559339122, 0.04577614885916531, 0.028558418802087843, -0.050848202358357235,
         -0.0017657944389820462, -0.00043110851925596194, 0.015215895054372014, 0.001265879314512719,
@@ -104,6 +113,8 @@ struct NanaConfig {
         -27.41336546707427, -62.03559427852019, 17.76592219673482, -108.6363168667132,
         177.3981870312531, -52.3311648290711, -231.73569496286962, 151.3361819532863
     }, {}};
+    // each term's shift of [app_weight, eval_weight]; rows missing from the end are zero
+    std::vector<std::array<double, 2>> opp_cond_reward;
 
     double app_weight = 0.4501576877732511;
     double eval_weight = 1.846117229394713;

@@ -299,12 +299,17 @@ Every iteration, in `status.txt` and the log:
   tetris, t-spins) in [0, M], and well columns and 1-3 line clears in [-M, M]. M was set once as
   2.5 x the larger of the tuned value and Cold Clear's weight for the term (at least 20), rounded up;
   all ten well columns share +-150. A result near a bound means the bound was wrong: widen it there;
+- `eval_extra.json`: eval terms outside `eval.json`, all 0 by default: `tslot_t_distance` (the
+  T-slot score shrinks by this fraction per piece before the next T), `high_cavity_cells` (cavity
+  cells in the top half), `spawn_height` (rows columns 3-6 stand above 12), `hold_i` and `hold_t`.
+  Repeat `--space` to tune them alongside `eval.json`. The bounds are starting ranges, not measured limits;
 - `search.json`: how it searches. `c_init`, `c_base`, `n_cap`, `depth_step`, `prior_exponent`.
-- `conditional.json`: the 86 parameters of the last opponent-conditioning term:
-  `opp_cond_u[-1][0..18]` (the opponent gate), `opp_cond_mean[-1][0..18]` (the gate's centre)
-  and `opp_cond_v[-1][0..47]` (the placement direction), in the enum order in
-  `cpp/Tetris/bot/OpponentConditioning.hpp`. Each `opp_cond_*` key is a list of rows, one per
-  rank-1 term, and `[-1]` is the last row. To add a term, append a zero row to all three keys in
+- `conditional.json`: the 88 parameters of the last opponent-conditioning term:
+  `opp_cond_u[-1][0..18]` (the opponent gate), `opp_cond_mean[-1][0..18]` (the gate's centre),
+  `opp_cond_v[-1][0..47]` (the placement direction), in the enum order in
+  `cpp/Tetris/bot/OpponentConditioning.hpp`, and `opp_cond_reward[-1][0..1]` (the shift of
+  `app_weight` and `eval_weight`). Each `opp_cond_*` key is a list of rows, one per
+  rank-1 term, and `[-1]` is the last row. To add a term, append a zero row to all four keys in
   the base config and tune with this space; the earlier rows stay as they are. Explicit row
   indices (`[0][5]`, `[1][5]`, ...) tune several terms together.
   The C++ defaults use the accepted CMA-ES conditioning release from 2026-10-30.

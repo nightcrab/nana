@@ -39,7 +39,7 @@ To address this, Nana workers try to predict when they are at risk of running ou
 
 ## Two-player Evaluation
 
-Nana uses a bilinear evaluator in its opponent's board at the root and its own during search. The evaluator is coded as a weight matrix from the opponent's features to Nana's own, and this matrix is decomposed into a sum of rank-1 matrices which are all individually expressed as the product of two vectors.
+Nana uses a bilinear evaluator in its opponent's board at the root and its own during search. The evaluator is coded as a weight matrix from the opponent's features to Nana's own, and this matrix is decomposed into a sum of rank-1 matrices which are all individually expressed as the product of two vectors. Each term's gate also shifts the search's balance between attack rate and evaluation in its backed-up values.
 
 The opponent conditioning matrix is trained over several autotuner rounds using a greedy rank-1 update method[[11]](#11). This allows each new matrix to correct for the residuals of the previous matrix. Intuitively, each sum term corresponds to a new linear strategy that depends on the opponent's boardstate.
 

@@ -35,7 +35,7 @@ class IndexedParamTests(unittest.TestCase):
         with open(path) as f:
             space = Space(json.load(f))
         base = {"opp_cond_u": [[1.0] * 19, [0.0] * 19], "opp_cond_mean": [[1.0] * 19, [0.0] * 19],
-                "opp_cond_v": [[1.0] * 48, [0.0] * 48]}
+                "opp_cond_v": [[1.0] * 48, [0.0] * 48], "opp_cond_reward": [[1.0, 1.0], [0.0, 0.0]]}
         out = space.config({p.name: p.high for p in space.params}, base)
         for key in base:
             self.assertEqual(out[key][0], base[key][0])

@@ -64,6 +64,13 @@ static void boardChecks() {
               "shared covered-cell/transition features match scalar reference");
         check(features.height == *std::max_element(heights, heights + 10) &&
               features.bottom == *std::min_element(heights, heights + 10), "shared height features");
+        int high_holes = 0;
+        for (int x = 0; x < 10; ++x) {
+            for (int y = 10; y < heights[x]; ++y) high_holes += !((b.board[x] >> y) & 1);
+        }
+        check(features.high_cavities == high_holes, "top-half cavity scalar reference");
+        check(features.spawn_height == std::max(*std::max_element(heights + 3, heights + 7) - 12, 0),
+              "spawn-column height scalar reference");
         Board mirror;
         for (int x = 0; x < 10; ++x) mirror.board[x] = b.board[9 - x];
         check(Eval::cavities_overhangs(b) == Eval::cavities_overhangs(mirror), "overhang reflection symmetry");
@@ -164,7 +171,7 @@ static void conditioningChecks() {
     namespace O = OpponentFeature;
     const auto& c = config();
     check(c.opp_cond_v.size() == 2 && c.opp_cond_u[0][O::HEIGHT] == 0.1 && c.opp_cond_v[0][P::ATTACK] == 200 &&
-              c.opp_cond_u[1][O::COMBO] == 0.2,
+              c.opp_cond_u[1][O::COMBO] == 0.2 && c.opp_cond_reward.size() == 2 && c.opp_cond_reward[0][0] == 0.2,
           "run with NANA_CONFIG=cpp/tests/evalcheck.json to exercise opponent conditioning");
     Board opponent;
     opponent.board[0] = (1u << 10) - 1;
@@ -180,8 +187,10 @@ static void conditioningChecks() {
     const Eval::ConditioningDirection w = Eval::opponentDirection(opponent, 4, 0, 3);
     bool sum = true;
     for (int i = 0; i < P::COUNT; ++i)
-        sum &= near(w[i], (double)gates[0] * c.opp_cond_v[0][i] + (double)gates[1] * c.opp_cond_v[1][i]);
+        sum &= near(w.placement[i], (double)gates[0] * c.opp_cond_v[0][i] + (double)gates[1] * c.opp_cond_v[1][i]);
     check(sum, "the direction is the gated sum of the rows' v");
+    check(c.opp_cond_reward[1][0] == 0 && c.opp_cond_reward[1][1] == 0, "missing reward rows are zero");
+    check(near(w.app, gates[0] * 0.2) && near(w.eval, gates[0] * -0.5), "the reward shift is the gated sum of the rows' r");
 
     Game g;
     g.mode = TetrioS1();
@@ -202,12 +211,18 @@ static void conditioningChecks() {
     Eval::setOpponentDirection(w);
     check(Eval::q_epoch == epoch + 1, "the epoch advances only when the direction changes");
     const double on = Eval::evalNana(g, quad, &on_move);
-    const double expected_move = w[P::CLEARS + 4] + w[P::ATTACK] * attack;
-    const double expected_board = w[P::HEIGHT] * height + w[P::BACK_TO_BACK];
+    const double expected_move = w.placement[P::CLEARS + 4] + w.placement[P::ATTACK] * attack;
+    const double expected_board = w.placement[P::HEIGHT] * height + w.placement[P::BACK_TO_BACK];
     check(near((on_move - off_move) * 10000, expected_move), "conditioned move features enter move reward");
     check(near((on - on_move - (off - off_move)) * 10000, expected_board), "conditioned board features are position value");
     Eval::setOpponentDirection({});
     check(Eval::q_epoch == epoch + 2 && near(Eval::evalNana(g, quad), off), "a zero direction restores the eval");
+    Eval::ConditioningDirection reward_only;
+    reward_only.app = 0.1;
+    Eval::setOpponentDirection(reward_only);
+    check(Eval::q_epoch == epoch + 3, "a reward shift alone advances the epoch");
+    check(near(Eval::evalNana(g, quad), off), "a reward shift leaves the eval alone");
+    Eval::setOpponentDirection({});
 }
 
 int main() {

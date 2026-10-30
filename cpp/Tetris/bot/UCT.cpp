@@ -68,7 +68,8 @@ Return stepUp(Return v, float step) {
 float rewardScalar(const Return& r) {
 	static const NanaConfig& c = config();
 	const float rate = r.L > 0 ? r.A / r.L : 0.0f;
-	return (float)c.app_weight * rate * (r.n - r.n_dead) + (float)c.eval_weight * r.E;
+	const Eval::ConditioningDirection& w = Eval::opponent_direction;
+	return (float)(c.app_weight + w.app) * rate * (r.n - r.n_dead) + (float)(c.eval_weight + w.eval) * r.E;
 }
 
 Reward UCTNode::climb(size_t i, Reward reward, bool carried) {

@@ -1,0 +1,32 @@
+[
+ {
+  "name": "tslot_t_distance",
+  "default": 0,
+  "low": -0.3,
+  "high": 0
+ },
+ {
+  "name": "high_cavity_cells",
+  "default": 0,
+  "low": -500.0,
+  "high": 0.0
+ },
+ {
+  "name": "spawn_height",
+  "default": 0,
+  "low": -500.0,
+  "high": 0.0
+ },
+ {
+  "name": "hold_i",
+  "default": 0,
+  "low": 0.0,
+  "high": 300.0
+ },
+ {
+  "name": "hold_t",
+  "default": 0,
+  "low": 0.0,
+  "high": 300.0
+ }
+]
