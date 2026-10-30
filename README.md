@@ -57,7 +57,7 @@ On 32 cores, Nana plays about as well as a single core given 11x thinking time.
 
 ### Winrate Experiments
 
-We played Nana against [Cold Clear](https://github.com/MinusKelvin/cold-clear) on the Universal Shaktris Stadium under TETR.IO season 1 rules, using Seppel3210's TETR.IO-tuned weights for Cold Clear.
+We played Nana v0.2.0 against [Cold Clear](https://github.com/MinusKelvin/cold-clear) on the Universal Shaktris Stadium under TETR.IO season 1 rules, using Seppel3210's TETR.IO-tuned weights for Cold Clear.
 
 Over 6,400 games, Nana had 3,779 wins to 2,621 losses (59.0% winrate), with a 95% CI of 57.8-60.2%.
 
