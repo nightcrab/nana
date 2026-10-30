@@ -61,7 +61,7 @@ We played Nana against [Cold Clear](https://github.com/MinusKelvin/cold-clear) o
 
 Over 6,400 games, Nana had 3,779 wins to 2,621 losses (59.0% winrate), with a 95% CI of 57.8-60.2%.
 
-Both programs were given 50ms time control and varying thread counts from 1 to 16. Nana was configured using defaults from commit `00005d0`: Expectimax-UCT with rank-1 opponent conditioning.
+Both programs were given 50ms time control and varying thread counts from 1 to 16, and played using their default tuning and configuration.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/cc-matrix-dark.png">
