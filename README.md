@@ -35,8 +35,6 @@ The engine achieves throughput efficiency of 80% on the first 8 cores, stabilizi
   <img width="800" alt="Parallel efficiency against threads: 100% at 1 thread, about 79% at 8, 72% at 9 and about 60% at 32" src="./docs/scaling-eff-light.png">
 </picture>
 
-To reproduce, run `scripts/benchmarks/speed_scaling.sh` on the machine (or through `scripts/cloud/run_ec2_bench.sh` with `SCRIPT=speed_scaling.sh`), then plot it with `node scripts/benchmarks/plot_speed.mjs <results dir>`.
-
 ### Playing Strength
 
 We also measured end-to-end strength scaling by comparing more threads vs. more thinking time.  
@@ -57,8 +55,6 @@ On 32 cores, Nana plays about as well as a single core given 11x thinking time.
   <img width="800" alt="Speedup over one thread against threads, 1 to 32: simulations per move reach 21.5x at 32 threads, while strength speedup follows the ideal line to 4 threads and reaches 10.9x at 32" src="./docs/strength-speedup-light.png">
 </picture>
 
-To reproduce, run `scripts/benchmarks/strength_batches.sh` through `scripts/cloud/run_ec2_bench.sh` (e.g. `SCRIPT=strength_batches.sh scripts/cloud/run_ec2_bench.sh <host> <key> <ref> MULTS=1,2,4,8,16,32 PAR_THREADS=2,4,8,16,32`), then `python scripts/benchmarks/strength_report.py <batch dirs>` for the numbers and `python scripts/benchmarks/plot_strength.py <batch dirs>` for these plots.
-
 ### Winrate Experiments
 
 We played Nana against [Cold Clear](https://github.com/MinusKelvin/cold-clear) on the Universal Shaktris Stadium under TETR.IO season 1 rules, using Seppel3210's TETR.IO-tuned weights for Cold Clear.
@@ -70,7 +66,7 @@ Both programs were given 50ms time control and varying thread counts from 1 to 1
   <img width="800" alt="Heatmap of Nana's score against Cold Clear, rows Nana threads 1 to 16, columns Cold Clear threads 1 to 16. Nana 1 thread: 59.8, 58.6, 51.6, 54.3, 54.3%. 2 threads: 63.3, 61.3, 64.5, 57.8, 59.0%. 4 threads: 61.7, 59.4, 64.8, 61.7, 56.6%. 8 threads: 59.8, 60.5, 55.1, 61.3, 58.6%. 16 threads: 57.8, 60.2, 55.1, 59.0, 60.2%" src="./docs/cc-matrix-light.png">
 </picture>
 
-Each cell's 95% interval is about ±6 points, so at these time controls, more games would have to be run to determine a clear thread-scaling pattern for either program. Over 6,400 games, Nana won 59.0%, with a 95% confidence interval of 57.8% to 60.2%.
+Each cell's 95% interval is about ±6 points, so at this time control, more games would likely need to be run to determine a clear thread-scaling pattern for either program. Over 6,400 games, Nana won 59.0%, with a 95% confidence interval of 57.8% to 60.2%.
 
 ## Usage
 
@@ -123,9 +119,9 @@ Some of these, such as `threads` can be overridden by a TBP2 frontend such as [U
 
 ## Tuning
 
-Nana comes with a PSO-based autotuner. It tunes search hyperparameters and evaluation weights simultaneously.
+Nana comes with a autotuner supporting PSO, CMA-ES, and SPSA. It tunes a subset of hyperparameters such as evaluation weights or search parameters based on a provided .json file.
 
-The tuner needs a pre-compiled Release build of ``nana_emulate`` and Python with numpy. It runs from the repository root:
+The tuner needs a pre-compiled Release build of ``nana_emulate`` and Python with numpy. To tune against winrate outcomes (such as for opponent conditioning), it also needs ``Universal-Shaktris-Stadium``.
 
 ```
 # check the setup first: a minute or two end to end
