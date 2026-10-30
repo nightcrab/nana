@@ -49,6 +49,15 @@ class StadiumRunner(Runner):
         self.match_dir = os.path.abspath(os.path.join(workdir, "matches"))
         os.makedirs(self.match_dir, exist_ok=True)
 
+    @contextmanager
+    def against(self, opponent):
+        previous = self.baseline_config
+        self.baseline_config = opponent
+        try:
+            yield
+        finally:
+            self.baseline_config = previous
+
     def _bot_copy(self, directory, config, cpus):
         directory.mkdir()
         target = directory / self.bot.name

@@ -280,7 +280,7 @@ class Run:
         holdouts = n // every + (1 if n % every else 0)
         checks = (holdouts + (0 if s["objective"] == "stadium" else 1)) * (s["holdout"]["games"] * per_game + tail)
         gate_batches = math.ceil(s["gate"]["max_games"] / (4 * cpus))
-        gate = 2 * s["gate"]["max_games"] * per_game + gate_batches * tail
+        gate = (1 if s["objective"] == "stadium" else 2) * s["gate"]["max_games"] * per_game + gate_batches * tail
         hours = {"iteration": iteration, "tune": tune, "checks": checks, "gate": gate}
         hours = {k: v / 3600 for k, v in hours.items()}
         hours["total"] = hours["tune"] + hours["checks"] + hours["gate"]

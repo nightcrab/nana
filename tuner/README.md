@@ -124,8 +124,9 @@ python -m tuner start smoke --nana ... --cpus ... --sims 64 --iterations 3 --par
    The measurements and the plan go to `plan.json`.
 3. **Tuning**: `--iterations` optimizer iterations at that sims count. A holdout (the best against the
    defaults on fixed seeds) every `--holdout-every` iterations and after the last.
-4. **The gate**: the best against the release (the defaults) on fresh paired seeds, until an SPRT
-   decides or `--gate-games` pairs are played. Only an accepted candidate becomes `release.json`.
+4. **The gate**: emulator objectives compare the best and release on fresh paired seeds;
+   stadium plays the best directly against the release. The SPRT stops on a decision or
+   `--gate-games` pairs (emulator) / matches (stadium). Only an accepted candidate becomes `release.json`.
 
 The plan counts the gate at its limit, so most runs finish early. Games get longer as the bot
 improves (it survives longer), so iterations late in a run can take longer than calibration said;
@@ -166,11 +167,16 @@ garbage delay; TETR.IO selects zero delay.
 
 The upstream stadium has no seed interface: seed counters select sides and track work,
 but do not replay games or provide common random numbers. Holdouts are fresh independent
-matches, and exact replay and the small-sample canary check are skipped. The final gate
-keeps the existing approximate Gaussian SPRT, comparing candidate and release match scores
-against the same fixed baseline, using independent games. Its defaults remain a 2% relative
-improvement, alpha/beta 0.05, and at most 400 games per config. This is not a dedicated
-binomial win/loss SPRT; reaching the limit without a decision remains inconclusive.
+matches, and exact replay and the small-sample canary check are skipped. The final stadium
+gate plays the candidate directly against the release, with no release self-play games.
+It uses a one-sample Bernoulli score SPRT with a fixed null score of 0.5; wins, draws,
+and losses contribute a win, half a win/half a loss, and a loss to the log-likelihood.
+The default 2% relative improvement gives an alternative score of 0.51. Alpha/beta remain
+0.05, and `--gate-games` caps the total head-to-head games (default 400). Draws use a
+fractional score likelihood rather than a fitted trinomial draw model. Gate records include
+the method, hypotheses, and win/draw/loss counts; the `release` score field is the fixed
+0.5 reference. The tuning opponent is restored after the gate. Reaching the game limit
+without a decision remains inconclusive. Emulator objectives retain their paired Gaussian gate.
 
 ### Emulator objectives
 
@@ -212,7 +218,7 @@ default. nana rejects unknown keys, and `nana_emulate --print-config` shows what
 | `--particles` | 24 | swarm/population size; PSO costs about 2 x particles x games per iteration, CMA-ES costs (particles + 1) x games; SPSA ignores this and costs 3 x games |
 | `--games` | 32 | games per evaluation: more is less noise and slower iterations |
 | `--spread` | 0.3 | initial spread around defaults in unit-cube units; CMA-ES initial sigma |
-| `--gate-games` | 400 | the gate's limit on paired games |
+| `--gate-games` | 400 | gate limit: paired seeds for emulator objectives, total matches for stadium |
 | `--holdout-every` | 5 | iterations between holdouts |
 | `--rules` | `tetrio` | the ruleset games are played with: `tetrio` or `botris` |
 | `--eval` | executable default (`cc`) | evaluator: `cc`, `nana`, or `convex`; saved in the run's base config |

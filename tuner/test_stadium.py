@@ -137,15 +137,19 @@ class StadiumTests(unittest.TestCase):
             self.assertEqual(stage.objective, "stadium")
 
             def play(requests):
+                self.assertEqual(len(requests), 1)
+                self.assertEqual(requests[0][0], "cand")
+                self.assertEqual(resumed.runner.baseline_config, {"score": 0.5})
                 return {key: [{"match_score": config["score"]} for _ in range(n)]
                         for key, config, _, _, n in requests}
 
             with patch.object(resumed.runner, "play", side_effect=play):
                 result = run_gate(resumed.runner, stage, {"score": 1}, {"score": 0.5}, 100,
-                                  max_games=8, log=lambda _: None)
+                                  max_games=256, log=lambda _: None)
             self.assertEqual(result["verdict"], "accept")
             self.assertEqual(result["candidate"], 1)
             self.assertEqual(result["release"], 0.5)
+            self.assertEqual(resumed.runner.baseline_config, {"height": 1})
 
     def test_requires_cpus_for_both_bots(self):
         for cpus, threads in (([0], 1), ([0, 1, 2, 3, 4, 5], 2)):
