@@ -120,6 +120,18 @@ void readValue(const nlohmann::json& j, const char* key, std::array<T, N>& out) 
     }
 }
 
+// A list of rows; a flat array of N numbers is read as a single row.
+template <class T, size_t N>
+void readValue(const nlohmann::json& j, const char* key, std::vector<std::array<T, N>>& out) {
+    if (!j.is_array()) fail(std::string(key) + " must be an array of rows of " + std::to_string(N) + " numbers");
+    out.clear();
+    if (!j.empty() && !j[0].is_array()) {
+        readValue(j, key, out.emplace_back());
+        return;
+    }
+    for (const auto& row : j) readValue(row, key, out.emplace_back());
+}
+
 // Relative paths are relative to the config file, or to the executable for the defaults.
 std::filesystem::path resolvePath(const NanaConfig& c, const std::string& value) {
     std::filesystem::path path = value;
@@ -166,6 +178,9 @@ void finish(NanaConfig& c) {
         for (double w : c.belief_weights) {
             if (w != 0) fail("belief_weights need the iohmm opponent; set opponent iohmm or zero them");
         }
+    }
+    if (c.opp_cond_u.size() != c.opp_cond_v.size() || c.opp_cond_mean.size() != c.opp_cond_v.size()) {
+        fail("opp_cond_u, opp_cond_mean and opp_cond_v must have the same number of rows");
     }
     for (int r = 1; r <= NanaConfig::PRIOR_TABLE; r++) {
         c.prior_weight[r - 1] = (float)std::pow((double)r, -c.prior_exponent);

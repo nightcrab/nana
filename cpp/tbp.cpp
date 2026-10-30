@@ -346,12 +346,12 @@ int main() {
             }
             Search::root_opponent = &root_opponent;
 
-            const float gate = seen_opponent.have
-                ? Eval::opponentGate(seen_opponent.board, seen_opponent.meter, seen_opponent.b2b, seen_opponent.combo)
-                : 0.0f;
-            // the workers read the gate until their search ends
-            if (gate != Eval::opponent_gate && Search::searching) Search::endSearch();
-            Eval::setOpponentGate(gate);
+            const Eval::ConditioningDirection direction = seen_opponent.have
+                ? Eval::opponentDirection(seen_opponent.board, seen_opponent.meter, seen_opponent.b2b, seen_opponent.combo)
+                : Eval::ConditioningDirection{};
+            // the workers read the direction until their search ends
+            if (direction != Eval::opponent_direction && Search::searching) Search::endSearch();
+            Eval::setOpponentDirection(direction);
         };
         bool have_suggestion = false;
         Move last_suggestion;

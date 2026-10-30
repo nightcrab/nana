@@ -41,13 +41,17 @@ namespace Eval {
 	};
 	BoardFeatures boardFeatures(const Board& board);
 
-	// Opponent conditioning's gate g for the current search (0 = off). Only written while no search runs.
-	inline float opponent_gate = 0;
-	// Advances whenever g changes; a Q stored under an older epoch was backed up from evals of another g.
+	// Opponent conditioning's direction w = Σ_k g_k v_k for the current search, indexed by PlacementFeature
+	// (all zero = off). Only written while no search runs.
+	using ConditioningDirection = std::array<double, PlacementFeature::COUNT>;
+	inline ConditioningDirection opponent_direction{};
+	// Advances whenever w changes; a Q stored under an older epoch was backed up from evals of another w.
 	inline uint32_t q_epoch = 0;
-	// g from the opponent's visible state; 0 unless opp_cond_u and opp_cond_v both have a nonzero weight
-	float opponentGate(const Board& board, int meter, int b2b, int combo);
-	void setOpponentGate(float gate);
+	// Each term's gate g_k from the opponent's visible state, one per opp_cond row
+	std::vector<float> opponentGates(const Board& board, int meter, int b2b, int combo);
+	// w from the opponent's visible state; zero unless some row has both a nonzero u and a nonzero v
+	ConditioningDirection opponentDirection(const Board& board, int meter, int b2b, int combo);
+	void setOpponentDirection(const ConditioningDirection& direction);
 	// `after` already has the piece placed and lines cleared; damage_sent updates its combo/B2B state.
 	MoveFeatures moveFeatures(const Game& parent, const Piece& piece, Game& after, int lines);
 

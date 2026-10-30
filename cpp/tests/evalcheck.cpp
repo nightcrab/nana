@@ -161,15 +161,27 @@ static void moveChecks() {
 
 static void conditioningChecks() {
     namespace P = PlacementFeature;
+    namespace O = OpponentFeature;
     const auto& c = config();
-    check(c.opp_cond_u[OpponentFeature::HEIGHT] == 0.1 && c.opp_cond_v[P::ATTACK] == 200,
+    check(c.opp_cond_v.size() == 2 && c.opp_cond_u[0][O::HEIGHT] == 0.1 && c.opp_cond_v[0][P::ATTACK] == 200 &&
+              c.opp_cond_u[1][O::COMBO] == 0.2,
           "run with NANA_CONFIG=cpp/tests/evalcheck.json to exercise opponent conditioning");
     Board opponent;
     opponent.board[0] = (1u << 10) - 1;
-    check(near(Eval::opponentGate(opponent, 4, 0, 0), (float)(0.1 * (10 - 4) + 0.05 * 4)), "gate is u · (o - mean)");
-    check(near(Eval::opponentGate(Board{}, 0, 0, 0), (float)(0.1 * -4)), "gate is centred on the mean");
+    auto gates = Eval::opponentGates(opponent, 4, 0, 3);
+    check(gates.size() == 2, "one gate per row");
+    check(near(gates[0], (float)(0.1 * (10 - 4) + 0.05 * 4)), "gate is u · (o - mean)");
+    check(near(gates[1], (float)(0.2 * (3 - 1))), "each row has its own u and mean");
+    check(near(Eval::opponentGates(Board{}, 0, 0, 0)[0], (float)(0.1 * -4)), "gate is centred on the mean");
     opponent.board[0] = (1u << 30) - 1;
-    check(Eval::opponentGate(opponent, 0, 0, 0) == 1.0f, "gate is clamped to 1");
+    check(Eval::opponentGates(opponent, 0, 0, 0)[0] == 1.0f, "gate is clamped to 1");
+
+    opponent.board[0] = (1u << 10) - 1;
+    const Eval::ConditioningDirection w = Eval::opponentDirection(opponent, 4, 0, 3);
+    bool sum = true;
+    for (int i = 0; i < P::COUNT; ++i)
+        sum &= near(w[i], (double)gates[0] * c.opp_cond_v[0][i] + (double)gates[1] * c.opp_cond_v[1][i]);
+    check(sum, "the direction is the gated sum of the rows' v");
 
     Game g;
     g.mode = TetrioS1();
@@ -186,17 +198,16 @@ static void conditioningChecks() {
     double off_move = 0, on_move = 0;
     const double off = Eval::evalNana(g, quad, &off_move);
     const uint32_t epoch = Eval::q_epoch;
-    Eval::setOpponentGate(0.75f);
-    Eval::setOpponentGate(0.75f);
-    check(Eval::q_epoch == epoch + 1, "the epoch advances only when the gate changes");
+    Eval::setOpponentDirection(w);
+    Eval::setOpponentDirection(w);
+    check(Eval::q_epoch == epoch + 1, "the epoch advances only when the direction changes");
     const double on = Eval::evalNana(g, quad, &on_move);
-    const double gate = Eval::opponent_gate;
-    const double expected_move = gate * (c.opp_cond_v[P::CLEARS + 4] + c.opp_cond_v[P::ATTACK] * attack);
-    const double expected_board = gate * (c.opp_cond_v[P::HEIGHT] * height + c.opp_cond_v[P::BACK_TO_BACK]);
+    const double expected_move = w[P::CLEARS + 4] + w[P::ATTACK] * attack;
+    const double expected_board = w[P::HEIGHT] * height + w[P::BACK_TO_BACK];
     check(near((on_move - off_move) * 10000, expected_move), "conditioned move features enter move reward");
     check(near((on - on_move - (off - off_move)) * 10000, expected_board), "conditioned board features are position value");
-    Eval::setOpponentGate(0);
-    check(Eval::q_epoch == epoch + 2 && near(Eval::evalNana(g, quad), off), "gate 0 restores the eval");
+    Eval::setOpponentDirection({});
+    check(Eval::q_epoch == epoch + 2 && near(Eval::evalNana(g, quad), off), "a zero direction restores the eval");
 }
 
 int main() {

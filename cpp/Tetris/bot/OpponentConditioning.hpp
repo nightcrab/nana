@@ -1,8 +1,10 @@
 #pragma once
 
-// Opponent conditioning: at the root, g = clamp(u · (o − mean), -1, 1) from the opponent's visible state o, fixed
-// for the search; every placement's eval moves by g × (v · f). Config opp_cond_u and opp_cond_mean are indexed by
-// OpponentFeature, opp_cond_v by PlacementFeature. All weights zero (the default) turns the term off.
+// Opponent conditioning: a sum of rank-1 terms, one per row k of the config's opp_cond_u, opp_cond_mean and
+// opp_cond_v. At the root, g_k = clamp(u_k · (o − mean_k), -1, 1) from the opponent's visible state o, and the
+// direction w = Σ_k g_k v_k is fixed for the search; every placement's eval moves by w · f. Rows of opp_cond_u and
+// opp_cond_mean are indexed by OpponentFeature, rows of opp_cond_v by PlacementFeature. Zeroing a row's u or v
+// turns that term off.
 
 // The opponent's board features, as Eval::boardFeatures computes them, then its TBP2 meter, B2B and combo.
 namespace OpponentFeature {

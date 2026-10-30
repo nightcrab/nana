@@ -300,12 +300,16 @@ Every iteration, in `status.txt` and the log:
   2.5 x the larger of the tuned value and Cold Clear's weight for the term (at least 20), rounded up;
   all ten well columns share +-150. A result near a bound means the bound was wrong: widen it there;
 - `search.json`: how it searches. `c_init`, `c_base`, `n_cap`, `depth_step`, `prior_exponent`.
-- `conditional.json`: all 86 opponent-conditioning parameters: `opp_cond_u[0..18]` (the
-  opponent gate), `opp_cond_mean[0..18]` (the gate's centre) and `opp_cond_v[0..47]` (the
-  placement direction), in the enum order in `cpp/Tetris/bot/OpponentConditioning.hpp`.
-  `u` and `v` default to zero, matching the disabled term in `NanaConfig`. Each mean spans the
-  plausible range of its opponent feature on a live field and defaults to the midpoint, so the
-  swarm searches for the centre rather than starting the gate uncentred. `u` and `v` bounds are
+- `conditional.json`: the 86 parameters of the last opponent-conditioning term:
+  `opp_cond_u[-1][0..18]` (the opponent gate), `opp_cond_mean[-1][0..18]` (the gate's centre)
+  and `opp_cond_v[-1][0..47]` (the placement direction), in the enum order in
+  `cpp/Tetris/bot/OpponentConditioning.hpp`. Each `opp_cond_*` key is a list of rows, one per
+  rank-1 term, and `[-1]` is the last row. To add a term, append a zero row to all three keys in
+  the base config and tune with this space; the earlier rows stay as they are. Explicit row
+  indices (`[0][5]`, `[1][5]`, ...) tune several terms together.
+  The C++ defaults use the accepted CMA-ES conditioning release from 2026-10-30.
+  This space retains its explicit starting values and search bounds, which can differ from the
+  compiled defaults. Each mean spans the plausible range of its opponent feature on a live field. `u` and `v` bounds are
   symmetric: gate bounds scale inversely with feature magnitude, and placement bounds use
   the corresponding eval-space magnitudes, allowing either sign of adjustment. These are
   starting ranges, not measured limits. Use `--space tuner/spaces/conditional.json`

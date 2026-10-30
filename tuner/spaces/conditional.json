@@ -1,516 +1,516 @@
 [
  {
-  "name": "opp_cond_u[0]",
+  "name": "opp_cond_u[-1][0]",
   "default": 0,
   "low": -0.1,
   "high": 0.1
  },
  {
-  "name": "opp_cond_u[1]",
+  "name": "opp_cond_u[-1][1]",
   "default": 0,
   "low": -0.1,
   "high": 0.1
  },
  {
-  "name": "opp_cond_u[2]",
+  "name": "opp_cond_u[-1][2]",
   "default": 0,
   "low": -0.1,
   "high": 0.1
  },
  {
-  "name": "opp_cond_u[3]",
+  "name": "opp_cond_u[-1][3]",
   "default": 0,
   "low": -0.1,
   "high": 0.1
  },
  {
-  "name": "opp_cond_u[4]",
+  "name": "opp_cond_u[-1][4]",
   "default": 0,
   "low": -0.02,
   "high": 0.02
  },
  {
-  "name": "opp_cond_u[5]",
+  "name": "opp_cond_u[-1][5]",
   "default": 0,
   "low": -0.002,
   "high": 0.002
  },
  {
-  "name": "opp_cond_u[6]",
+  "name": "opp_cond_u[-1][6]",
   "default": 0,
   "low": -0.05,
   "high": 0.05
  },
  {
-  "name": "opp_cond_u[7]",
+  "name": "opp_cond_u[-1][7]",
   "default": 0,
   "low": -0.005,
   "high": 0.005
  },
  {
-  "name": "opp_cond_u[8]",
+  "name": "opp_cond_u[-1][8]",
   "default": 0,
   "low": -0.02,
   "high": 0.02
  },
  {
-  "name": "opp_cond_u[9]",
+  "name": "opp_cond_u[-1][9]",
   "default": 0,
   "low": -0.2,
   "high": 0.2
  },
  {
-  "name": "opp_cond_u[10]",
+  "name": "opp_cond_u[-1][10]",
   "default": 0,
   "low": -0.1,
   "high": 0.1
  },
  {
-  "name": "opp_cond_u[11]",
+  "name": "opp_cond_u[-1][11]",
   "default": 0,
   "low": -1,
   "high": 1
  },
  {
-  "name": "opp_cond_u[12]",
+  "name": "opp_cond_u[-1][12]",
   "default": 0,
   "low": -1,
   "high": 1
  },
  {
-  "name": "opp_cond_u[13]",
+  "name": "opp_cond_u[-1][13]",
   "default": 0,
   "low": -1,
   "high": 1
  },
  {
-  "name": "opp_cond_u[14]",
+  "name": "opp_cond_u[-1][14]",
   "default": 0,
   "low": -1,
   "high": 1
  },
  {
-  "name": "opp_cond_u[15]",
+  "name": "opp_cond_u[-1][15]",
   "default": 0,
   "low": -0.25,
   "high": 0.25
  },
  {
-  "name": "opp_cond_u[16]",
+  "name": "opp_cond_u[-1][16]",
   "default": 0,
   "low": -0.1,
   "high": 0.1
  },
  {
-  "name": "opp_cond_u[17]",
+  "name": "opp_cond_u[-1][17]",
   "default": 0,
   "low": -0.25,
   "high": 0.25
  },
  {
-  "name": "opp_cond_u[18]",
+  "name": "opp_cond_u[-1][18]",
   "default": 0,
   "low": -0.1,
   "high": 0.1
  },
  {
-  "name": "opp_cond_mean[0]",
+  "name": "opp_cond_mean[-1][0]",
   "default": 6.0,
   "low": 0,
   "high": 12
  },
  {
-  "name": "opp_cond_mean[1]",
+  "name": "opp_cond_mean[-1][1]",
   "default": 10.0,
   "low": 0,
   "high": 20
  },
  {
-  "name": "opp_cond_mean[2]",
+  "name": "opp_cond_mean[-1][2]",
   "default": 7.5,
   "low": 0,
   "high": 15
  },
  {
-  "name": "opp_cond_mean[3]",
+  "name": "opp_cond_mean[-1][3]",
   "default": 5.0,
   "low": 0,
   "high": 10
  },
  {
-  "name": "opp_cond_mean[4]",
+  "name": "opp_cond_mean[-1][4]",
   "default": 20.0,
   "low": 0,
   "high": 40
  },
  {
-  "name": "opp_cond_mean[5]",
+  "name": "opp_cond_mean[-1][5]",
   "default": 150.0,
   "low": 0,
   "high": 300
  },
  {
-  "name": "opp_cond_mean[6]",
+  "name": "opp_cond_mean[-1][6]",
   "default": 15.0,
   "low": 0,
   "high": 30
  },
  {
-  "name": "opp_cond_mean[7]",
+  "name": "opp_cond_mean[-1][7]",
   "default": 75.0,
   "low": 0,
   "high": 150
  },
  {
-  "name": "opp_cond_mean[8]",
+  "name": "opp_cond_mean[-1][8]",
   "default": 60.0,
   "low": 30,
   "high": 90
  },
  {
-  "name": "opp_cond_mean[9]",
+  "name": "opp_cond_mean[-1][9]",
   "default": 4.5,
   "low": 0,
   "high": 9
  },
  {
-  "name": "opp_cond_mean[10]",
+  "name": "opp_cond_mean[-1][10]",
   "default": 7.5,
   "low": 0,
   "high": 15
  },
  {
-  "name": "opp_cond_mean[11]",
+  "name": "opp_cond_mean[-1][11]",
   "default": 0.5,
   "low": 0,
   "high": 1
  },
  {
-  "name": "opp_cond_mean[12]",
+  "name": "opp_cond_mean[-1][12]",
   "default": 0.5,
   "low": 0,
   "high": 1
  },
  {
-  "name": "opp_cond_mean[13]",
+  "name": "opp_cond_mean[-1][13]",
   "default": 0.5,
   "low": 0,
   "high": 1
  },
  {
-  "name": "opp_cond_mean[14]",
+  "name": "opp_cond_mean[-1][14]",
   "default": 0.5,
   "low": 0,
   "high": 1
  },
  {
-  "name": "opp_cond_mean[15]",
+  "name": "opp_cond_mean[-1][15]",
   "default": 0.5,
   "low": 0,
   "high": 1
  },
  {
-  "name": "opp_cond_mean[16]",
+  "name": "opp_cond_mean[-1][16]",
   "default": 10.0,
   "low": 0,
   "high": 20
  },
  {
-  "name": "opp_cond_mean[17]",
+  "name": "opp_cond_mean[-1][17]",
   "default": 5.0,
   "low": 0,
   "high": 10
  },
  {
-  "name": "opp_cond_mean[18]",
+  "name": "opp_cond_mean[-1][18]",
   "default": 5.0,
   "low": 0,
   "high": 10
  },
  {
-  "name": "opp_cond_v[0]",
+  "name": "opp_cond_v[-1][0]",
   "default": 0,
   "low": -1000,
   "high": 1000
  },
  {
-  "name": "opp_cond_v[1]",
+  "name": "opp_cond_v[-1][1]",
   "default": 0,
   "low": -450,
   "high": 450
  },
  {
-  "name": "opp_cond_v[2]",
+  "name": "opp_cond_v[-1][2]",
   "default": 0,
   "low": -250,
   "high": 250
  },
  {
-  "name": "opp_cond_v[3]",
+  "name": "opp_cond_v[-1][3]",
   "default": 0,
   "low": -250,
   "high": 250
  },
  {
-  "name": "opp_cond_v[4]",
+  "name": "opp_cond_v[-1][4]",
   "default": 0,
   "low": -2000,
   "high": 2000
  },
  {
-  "name": "opp_cond_v[5]",
+  "name": "opp_cond_v[-1][5]",
   "default": 0,
   "low": -400,
   "high": 400
  },
  {
-  "name": "opp_cond_v[6]",
+  "name": "opp_cond_v[-1][6]",
   "default": 0,
   "low": -300,
   "high": 300
  },
  {
-  "name": "opp_cond_v[7]",
+  "name": "opp_cond_v[-1][7]",
   "default": 0,
   "low": -1500,
   "high": 1500
  },
  {
-  "name": "opp_cond_v[8]",
+  "name": "opp_cond_v[-1][8]",
   "default": 0,
   "low": -500,
   "high": 500
  },
  {
-  "name": "opp_cond_v[9]",
+  "name": "opp_cond_v[-1][9]",
   "default": 0,
   "low": -500,
   "high": 500
  },
  {
-  "name": "opp_cond_v[10]",
+  "name": "opp_cond_v[-1][10]",
   "default": 0,
   "low": -500,
   "high": 500
  },
  {
-  "name": "opp_cond_v[11]",
+  "name": "opp_cond_v[-1][11]",
   "default": 0,
   "low": -500,
   "high": 500
  },
  {
-  "name": "opp_cond_v[12]",
+  "name": "opp_cond_v[-1][12]",
   "default": 0,
   "low": -2500,
   "high": 2500
  },
  {
-  "name": "opp_cond_v[13]",
+  "name": "opp_cond_v[-1][13]",
   "default": 0,
   "low": -400,
   "high": 400
  },
  {
-  "name": "opp_cond_v[14]",
+  "name": "opp_cond_v[-1][14]",
   "default": 0,
   "low": -400,
   "high": 400
  },
  {
-  "name": "opp_cond_v[15]",
+  "name": "opp_cond_v[-1][15]",
   "default": 0,
   "low": -300,
   "high": 300
  },
  {
-  "name": "opp_cond_v[16]",
+  "name": "opp_cond_v[-1][16]",
   "default": 0,
   "low": -10,
   "high": 10
  },
  {
-  "name": "opp_cond_v[17]",
+  "name": "opp_cond_v[-1][17]",
   "default": 0,
   "low": -9,
   "high": 9
  },
  {
-  "name": "opp_cond_v[18]",
+  "name": "opp_cond_v[-1][18]",
   "default": 0,
   "low": -250,
   "high": 250
  },
  {
-  "name": "opp_cond_v[19]",
+  "name": "opp_cond_v[-1][19]",
   "default": 0,
   "low": -2000,
   "high": 2000
  },
  {
-  "name": "opp_cond_v[20]",
+  "name": "opp_cond_v[-1][20]",
   "default": 0,
   "low": -40,
   "high": 40
  },
  {
-  "name": "opp_cond_v[21]",
+  "name": "opp_cond_v[-1][21]",
   "default": 0,
   "low": -250,
   "high": 250
  },
  {
-  "name": "opp_cond_v[22]",
+  "name": "opp_cond_v[-1][22]",
   "default": 0,
   "low": -20,
   "high": 20
  },
  {
-  "name": "opp_cond_v[23]",
+  "name": "opp_cond_v[-1][23]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[24]",
+  "name": "opp_cond_v[-1][24]",
   "default": 0,
   "low": -5,
   "high": 5
  },
  {
-  "name": "opp_cond_v[25]",
+  "name": "opp_cond_v[-1][25]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[26]",
+  "name": "opp_cond_v[-1][26]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[27]",
+  "name": "opp_cond_v[-1][27]",
   "default": 0,
   "low": -35,
   "high": 35
  },
  {
-  "name": "opp_cond_v[28]",
+  "name": "opp_cond_v[-1][28]",
   "default": 0,
   "low": -4.5,
   "high": 4.5
  },
  {
-  "name": "opp_cond_v[29]",
+  "name": "opp_cond_v[-1][29]",
   "default": 0,
   "low": -20,
   "high": 20
  },
  {
-  "name": "opp_cond_v[30]",
+  "name": "opp_cond_v[-1][30]",
   "default": 0,
   "low": -2.5,
   "high": 2.5
  },
  {
-  "name": "opp_cond_v[31]",
+  "name": "opp_cond_v[-1][31]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[32]",
+  "name": "opp_cond_v[-1][32]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[33]",
+  "name": "opp_cond_v[-1][33]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[34]",
+  "name": "opp_cond_v[-1][34]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[35]",
+  "name": "opp_cond_v[-1][35]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[36]",
+  "name": "opp_cond_v[-1][36]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[37]",
+  "name": "opp_cond_v[-1][37]",
   "default": 0,
   "low": -50,
   "high": 50
  },
  {
-  "name": "opp_cond_v[38]",
+  "name": "opp_cond_v[-1][38]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[39]",
+  "name": "opp_cond_v[-1][39]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[40]",
+  "name": "opp_cond_v[-1][40]",
   "default": 0,
   "low": -150,
   "high": 150
  },
  {
-  "name": "opp_cond_v[41]",
+  "name": "opp_cond_v[-1][41]",
   "default": 0,
   "low": -100,
   "high": 100
  },
  {
-  "name": "opp_cond_v[42]",
+  "name": "opp_cond_v[-1][42]",
   "default": 0,
   "low": -50,
   "high": 50
  },
  {
-  "name": "opp_cond_v[43]",
+  "name": "opp_cond_v[-1][43]",
   "default": 0,
   "low": -300,
   "high": 300
  },
  {
-  "name": "opp_cond_v[44]",
+  "name": "opp_cond_v[-1][44]",
   "default": 0,
   "low": -800,
   "high": 800
  },
  {
-  "name": "opp_cond_v[45]",
+  "name": "opp_cond_v[-1][45]",
   "default": 0,
   "low": -800,
   "high": 800
  },
  {
-  "name": "opp_cond_v[46]",
+  "name": "opp_cond_v[-1][46]",
   "default": 0,
   "low": -800,
   "high": 800
  },
  {
-  "name": "opp_cond_v[47]",
+  "name": "opp_cond_v[-1][47]",
   "default": 0,
   "low": -450,
   "high": 450

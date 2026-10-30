@@ -2,7 +2,8 @@ import json
 import math
 import re
 
-_INDEXED = re.compile(r"^(\w+)\[(\d+)\]$")
+# name[i] or name[i][j]...; a negative index counts from the end, so name[-1][j] is the last row
+_INDEXED = re.compile(r"^(\w+)((?:\[-?\d+\])+)$")
 
 
 class Param:
@@ -20,7 +21,8 @@ class Param:
         if self.log and self.low <= 0:
             raise ValueError(f"{self.name}: log scale needs positive bounds")
         m = _INDEXED.match(self.name)
-        self.key, self.index = (m.group(1), int(m.group(2))) if m else (self.name, None)
+        self.key, self.index = ((m.group(1), tuple(int(i) for i in re.findall(r"-?\d+", m.group(2))))
+                                if m else (self.name, None))
 
     def to_unit(self, value):
         if self.log:
@@ -81,7 +83,15 @@ class Space:
             else:
                 if p.key not in out:
                     raise ValueError(f"{p.name}: the base config has no array {p.key}")
-                out[p.key][p.index] = values[p.name]
+                target = out[p.key]
+                for depth, i in enumerate(p.index):
+                    if not isinstance(target, list) or not -len(target) <= i < len(target):
+                        raise ValueError(f"{p.name}: the base config's {p.key} has no element {list(p.index[:depth + 1])}")
+                    if depth + 1 < len(p.index):
+                        target = target[i]
+                if isinstance(target[i], list):
+                    raise ValueError(f"{p.name}: {p.key}{list(p.index)} is an array, not a number")
+                target[i] = values[p.name]
         return out
 
     def extend(self, other):

@@ -330,24 +330,28 @@ bool nonzero(const auto& weights) {
     return std::any_of(weights.begin(), weights.end(), [](double w) { return w != 0; });
 }
 
+// Some row has both a nonzero u and a nonzero v.
 bool conditioningActive() {
-    static const bool active = nonzero(config().opp_cond_u) && nonzero(config().opp_cond_v);
+    static const bool active = [] {
+        const auto& c = config();
+        for (size_t k = 0; k < c.opp_cond_v.size(); ++k)
+            if (nonzero(c.opp_cond_u[k]) && nonzero(c.opp_cond_v[k])) return true;
+        return false;
+    }();
     return active;
 }
 
-bool conditioningUsesSlots() {
-    const auto& v = config().opp_cond_v;
-    static const bool uses = std::any_of(v.begin() + PlacementFeature::TSLOT, v.end(), [](double w) { return w != 0; });
-    return uses;
-}
+// Whether Eval::opponent_direction is nonzero, and whether it weights the T-slot features.
+bool direction_active = false;
+bool direction_uses_slots = false;
 
 struct Conditioned {
     double move = 0, board = 0;
 };
 
-// v · f for one placement, split into the move's share and the board's share.
+// w · f for one placement, split into the move's share and the board's share.
 Conditioned conditionedFeatures(const Eval::BoardFeatures& f, const Eval::MoveFeatures& m, const Slots& slots,
-                                bool no_spin, const NanaConfig& c) {
+                                bool no_spin, const NanaConfig& c, const Eval::ConditioningDirection& w) {
     namespace P = PlacementFeature;
     std::array<double, P::COUNT> x{};
     const bool full = m.spin == spinType::normal, mini = m.spin == spinType::mini;
@@ -383,8 +387,8 @@ Conditioned conditionedFeatures(const Eval::BoardFeatures& f, const Eval::MoveFe
         for (int i = 0; i < slots.count; ++i) x[P::TSLOT + slots.clears[i]] += 1;
     }
     Conditioned out;
-    for (int i = 0; i < P::BOARD; ++i) out.move += c.opp_cond_v[i] * x[i];
-    for (int i = P::BOARD; i < P::COUNT; ++i) out.board += c.opp_cond_v[i] * x[i];
+    for (int i = 0; i < P::BOARD; ++i) out.move += w[i] * x[i];
+    for (int i = P::BOARD; i < P::COUNT; ++i) out.board += w[i] * x[i];
     return out;
 }
 
@@ -430,10 +434,11 @@ double scorePlacement(const Eval::BoardFeatures& features, const Eval::MoveFeatu
 
     position += belief;
 
-    if (const float gate = Eval::opponent_gate; gate != 0) {
-        const Conditioned conditioned = conditionedFeatures(features, move_features, slots, no_spin, c);
-        extra_move += gate * conditioned.move;
-        position += gate * conditioned.board;
+    if (direction_active) {
+        const Conditioned conditioned =
+            conditionedFeatures(features, move_features, slots, no_spin, c, Eval::opponent_direction);
+        extra_move += conditioned.move;
+        position += conditioned.board;
     }
 
     if (move_part) {
@@ -478,14 +483,13 @@ double Eval::evalNana(const Context& context, const Piece& piece, double* move_p
 
     const auto features = boardFeatures(after.board);
     Slots slots;
-    if (!no_spin && (nonzero(c.tslot) || (opponent_gate != 0 && conditioningUsesSlots())))
+    if (!no_spin && (nonzero(c.tslot) || direction_uses_slots))
         slots = slotFeatures(after, context.bag_left);
     const double belief = context.belief ? context.belief->value(attack, lines > 0) : 0;
     return scorePlacement(features, move_features, slots, belief, no_spin, c, move_part);
 }
 
-float Eval::opponentGate(const Board& board, int meter, int b2b, int combo) {
-    if (!conditioningActive()) return 0;
+std::vector<float> Eval::opponentGates(const Board& board, int meter, int b2b, int combo) {
     namespace O = OpponentFeature;
     const BoardFeatures f = boardFeatures(board);
     std::array<double, O::COUNT> o{};
@@ -509,14 +513,31 @@ float Eval::opponentGate(const Board& board, int meter, int b2b, int combo) {
     o[O::B2B] = b2b;
     o[O::COMBO] = combo;
     const auto& c = config();
-    double g = 0;
-    for (int i = 0; i < O::COUNT; ++i) g += c.opp_cond_u[i] * (o[i] - c.opp_cond_mean[i]);
-    return (float)std::clamp(g, -1.0, 1.0);
+    std::vector<float> gates(c.opp_cond_v.size());
+    for (size_t k = 0; k < gates.size(); ++k) {
+        double g = 0;
+        for (int i = 0; i < O::COUNT; ++i) g += c.opp_cond_u[k][i] * (o[i] - c.opp_cond_mean[k][i]);
+        gates[k] = (float)std::clamp(g, -1.0, 1.0);
+    }
+    return gates;
 }
 
-void Eval::setOpponentGate(float gate) {
-    if (gate != opponent_gate) {
-        opponent_gate = gate;
+Eval::ConditioningDirection Eval::opponentDirection(const Board& board, int meter, int b2b, int combo) {
+    ConditioningDirection w{};
+    if (!conditioningActive()) return w;
+    const auto& v = config().opp_cond_v;
+    const std::vector<float> gates = opponentGates(board, meter, b2b, combo);
+    for (size_t k = 0; k < gates.size(); ++k)
+        for (int i = 0; i < PlacementFeature::COUNT; ++i) w[i] += (double)gates[k] * v[k][i];
+    return w;
+}
+
+void Eval::setOpponentDirection(const ConditioningDirection& direction) {
+    if (direction != opponent_direction) {
+        opponent_direction = direction;
+        direction_active = nonzero(direction);
+        direction_uses_slots = std::any_of(direction.begin() + PlacementFeature::TSLOT, direction.end(),
+                                           [](double w) { return w != 0; });
         ++q_epoch;
     }
 }
