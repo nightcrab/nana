@@ -98,7 +98,6 @@ struct ChildTable {
 
     void put(NodeKey child, Reward V, float k);
     // forgets the children's values, keeping `completed`
-    void clearValues();
     Reward sum(float& n) const;
 };
 
@@ -124,8 +123,6 @@ struct ColdAction {
     int time = 0;
     float eval = 0;
     float move_reward = 0;
-    // Eval::q_epoch when this arm's Q was last backed up
-    uint32_t epoch = 0;
 #if !NANA_CC_SEARCH
     float step_attack = 0;
     Return sums;

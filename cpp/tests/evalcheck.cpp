@@ -206,21 +206,17 @@ static void conditioningChecks() {
 
     double off_move = 0, on_move = 0;
     const double off = Eval::evalNana(g, quad, &off_move);
-    const uint32_t epoch = Eval::q_epoch;
     Eval::setOpponentDirection(w);
-    Eval::setOpponentDirection(w);
-    check(Eval::q_epoch == epoch + 1, "the epoch advances only when the direction changes");
     const double on = Eval::evalNana(g, quad, &on_move);
     const double expected_move = w.placement[P::CLEARS + 4] + w.placement[P::ATTACK] * attack;
     const double expected_board = w.placement[P::HEIGHT] * height + w.placement[P::BACK_TO_BACK];
     check(near((on_move - off_move) * 10000, expected_move), "conditioned move features enter move reward");
     check(near((on - on_move - (off - off_move)) * 10000, expected_board), "conditioned board features are position value");
     Eval::setOpponentDirection({});
-    check(Eval::q_epoch == epoch + 2 && near(Eval::evalNana(g, quad), off), "a zero direction restores the eval");
+    check(near(Eval::evalNana(g, quad), off), "a zero direction restores the eval");
     Eval::ConditioningDirection reward_only;
     reward_only.app = 0.1;
     Eval::setOpponentDirection(reward_only);
-    check(Eval::q_epoch == epoch + 3, "a reward shift alone advances the epoch");
     check(near(Eval::evalNana(g, quad), off), "a reward shift leaves the eval alone");
     Eval::setOpponentDirection({});
 }

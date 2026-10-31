@@ -312,7 +312,7 @@ Every iteration, in `status.txt` and the log:
   rank-1 term, and `[-1]` is the last row. To add a term, append a zero row to all four keys in
   the base config and tune with this space; the earlier rows stay as they are. Explicit row
   indices (`[0][5]`, `[1][5]`, ...) tune several terms together.
-  The C++ defaults use the accepted CMA-ES conditioning release from 2026-10-30.
+  The C++ defaults use the accepted SPSA release `tuner/releases/spsa-nana-20261031.json`.
   This space retains its explicit starting values and search bounds, which can differ from the
   compiled defaults. Each mean spans the plausible range of its opponent feature on a live field. `u` and `v` bounds are
   symmetric: gate bounds scale inversely with feature magnitude, and placement bounds use

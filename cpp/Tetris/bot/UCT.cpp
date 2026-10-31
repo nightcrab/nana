@@ -119,13 +119,6 @@ void ChildTable::put(NodeKey child, Reward V, float k) {
 	rest_n += k;
 }
 
-void ChildTable::clearValues() {
-	first = {};
-	more.reset();
-	rest_n = 0;
-	rest_sum = {};
-}
-
 Reward ChildTable::sum(float& n) const {
 	n = first.n + rest_n;
 	Reward s = scaled(first.V, first.n) + rest_sum;
@@ -156,22 +149,11 @@ static bool counts(const ChildTable& t) {
 
 Reward UCTNode::report(size_t i, NodeKey child, Reward V, float k, bool fresh) {
 	ChildTable& t = cold[i].children;
-	const uint32_t now = Eval::q_epoch;
-	if (cold[i].epoch != now) {
-		// The children's values were backed up under another gate: the newest value replaces them as the arm's
-		// Q, and the visit mass stays so selection still moves off the arm if it got worse.
-		t.clearValues();
-		cold[i].epoch = now;
-	}
 	t.put(child, V, k);
 	t.completed = fresh ? t.completed * (float)decay() + k : t.completed + k;
 	Reward arm;
 	const float q = armValue(i, arm);
 	edge_stats[i].R = q * t.completed;
-	// a stale arm must not hold the node's value up
-	if (best >= 0 && cold[best].epoch != now) {
-		rescanBest();
-	}
 
 	if (counts(t)) {
 		if ((int)i == best) {
@@ -195,7 +177,7 @@ Reward UCTNode::report(size_t i, NodeKey child, Reward V, float k, bool fresh) {
 void UCTNode::rescanBest() {
 	best = -1;
 	for (size_t j = 0; j < actionCount(); j++) {
-		if (!counts(cold[j].children) || cold[j].epoch != Eval::q_epoch) {
+		if (!counts(cold[j].children)) {
 			continue;
 		}
 		Reward arm;
@@ -301,7 +283,6 @@ UCTNode::UCTNode(const EmulationGame &state) {
 		c.move = PackedMove::pack(Move(raw_action, false));
 		c.eval = eval;
 		c.move_reward = evaluated.move_reward;
-		c.epoch = Eval::q_epoch;
 #ifndef NDEBUG
 		const Move unpacked = c.move.unpack();
 		assert(std::memcmp(&unpacked.piece.minos, &raw_action.minos, sizeof(raw_action.minos)) == 0);

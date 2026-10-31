@@ -50,9 +50,8 @@ namespace Eval {
 		double app = 0, eval = 0;
 		bool operator==(const ConditioningDirection&) const = default;
 	};
+	// The tree carries over between moves, so values backed up under earlier directions stay mixed in.
 	inline ConditioningDirection opponent_direction{};
-	// Advances whenever the direction changes; a Q stored under an older epoch was backed up under another one.
-	inline uint32_t q_epoch = 0;
 	// Each term's gate g_k from the opponent's visible state, one per opp_cond row
 	std::vector<float> opponentGates(const Board& board, int meter, int b2b, int combo);
 	// the direction from the opponent's visible state; zero unless some row has a nonzero u and a nonzero v or

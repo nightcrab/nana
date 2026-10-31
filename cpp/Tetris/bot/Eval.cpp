@@ -584,7 +584,6 @@ void Eval::setOpponentDirection(const ConditioningDirection& direction) {
         direction_active = nonzero(w);
         direction_uses_slots = std::any_of(w.begin() + PlacementFeature::TSLOT, w.end(),
                                            [](double x) { return x != 0; });
-        ++q_epoch;
     }
 }
 
